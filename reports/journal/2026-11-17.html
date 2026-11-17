@@ -15,14 +15,25 @@
 <link rel="icon" type="image/png" href="../../assets/favicon.png">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<link rel="stylesheet" href="../../assets/report.css?v=51098a99">
+<link rel="stylesheet" href="../../assets/report.css?v=85fabc63">
+<script src="../../assets/theme.js?v=85fabc63"></script>
 </head>
 <body>
-<a class="skip" href="#main">본문으로 건너뛰기</a>
+<a class="skip skip-link" href="#main">본문으로 건너뛰기 (Skip to content)</a>
 <header class="topbar">
   <div class="wrap">
     <a class="brandmark" href="../../index.html"><img src="../../assets/logo.png" alt="" width="28" height="28">Omni AI Trading</a>
-    <nav aria-label="리포트 목록"><a href="../../index.html">전체 리포트</a></nav>
+    <nav aria-label="리포트 메뉴">
+      <a href="../../index.html">전체 리포트</a>
+    </nav>
+    <div class="tools">
+      <button type="button" class="theme-toggle" aria-label="화면 테마 시스템, 눌러서 바꾸기">
+        <svg data-icon="system" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+        <svg data-icon="light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg data-icon="dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+        <span class="theme-name">시스템</span>
+      </button>
+    </div>
   </div>
 </header>
 
@@ -69,7 +80,7 @@
     
   </div>
   
-  <h3 class="label" style="margin-top:var(--x5)">다음에 지켜볼 것</h3>
+  <h3 class="label watch-title">다음에 지켜볼 것</h3>
   <ul class="watch"><li>08:00~09:00 전날 미국 증시: 엔비디아 실적 대기 속 필라델피아 반도체가 반등했는지, VIX가 22선 위에 머무는지.</li><li>엔비디아 실적 발표(이번 주, 날짜·시각은 자료로 미확인): 발표 전후 반도체 대형주와 인버스 변동성.</li><li>장중 외국인 삼성전자·SK하이닉스 매도가 이어지는지, 코스피가 5,000선을 되찾는지.</li><li>인버스 국면 손절 방향 수정의 첫 적용: 하락장 인버스 보유에서 손절이 2%로 유지되는지 이벤트 기록으로 확인.</li><li>한은 기준금리 인상 가능성 보도(이달 금통위, 날짜는 자료로 미확인)와 미 국채 10년 5.1%대 유지 여부.</li></ul>
   
 </section>
@@ -162,7 +173,7 @@
 <td>—</td>
 </tr>
 </tbody>
-</table></div>
+</table></div><figure class="figure"><p class="figure-title">실현손익 한눈에 보기</p><div class="bars" role="img" aria-label="실현손익 한눈에 보기" style="--zero:50.0%"><div class="bar-row"><span class="bar-label" title="모의 (Jev)">모의 (Jev)</span><span class="bar-track"><i class="bar down" style="left:0.00%;width:50.00%"></i></span><span class="bar-val down">-54,328원</span></div><div class="bar-row"><span class="bar-label" title="가상 (vibe-trading)">가상 (vibe-trading)</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:10.05%"></i></span><span class="bar-val up">+10,920원</span></div><div class="bar-row"><span class="bar-label" title="실계좌 1">실계좌 1</span><span class="bar-track"><i class="bar down" style="left:48.70%;width:1.30%"></i></span><span class="bar-val down">-1,413원</span></div><div class="bar-row"><span class="bar-label" title="실계좌 2">실계좌 2</span><span class="bar-track"><i class="bar flat" style="left:50.00%;width:0.60%"></i></span><span class="bar-val flat">+0원</span></div></div></figure>
 <p><em>체결가 기준 · 수수료·세금 미반영</em></p>
 <p>모의 손실은 사실상 12:11 인버스 6,702주 손절 한 건(−90,802원)이 만들었고, 오후 재진입 +36,474원이 일부를 메웠다. 손익비 0.4는 손실 −1.01%가 원래 손절 2%가 아니라 잘못 걸린 1%에서 끊긴 결과다. vibe 가상은 같은 인버스를 100만 원 단위로 작게 들고 절반 익절을 두 번 해 +10,920원으로 갈렸고, 실계좌 1은 모의를 비례로 따라 −1,413원이다. 실계좌 2는 vibe 미러가 관찰(dry-run)이라 체결이 없다. 표의 승률은 매도 체결 기준이며 2절의 왕복 승패와 다를 수 있다.</p>
 <h2 id="s3">2. 매매 관점 — 무엇을 왜 사고 팔았나</h2>
@@ -243,7 +254,7 @@
 <td>— / —</td>
 </tr>
 </tbody>
-</table></div>
+</table></div><figure class="figure"><p class="figure-title">손익 한눈에 보기</p><div class="bars" role="img" aria-label="손익 한눈에 보기" style="--zero:50.0%"><div class="bar-row"><span class="bar-label" title="모의 (Jev)">모의 (Jev)</span><span class="bar-track"><i class="bar down" style="left:0.00%;width:50.00%"></i></span><span class="bar-val down">-90,802원</span></div><div class="bar-row"><span class="bar-label" title="모의 (Jev)">모의 (Jev)</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:20.08%"></i></span><span class="bar-val up">+36,474원</span></div><div class="bar-row"><span class="bar-label" title="가상 (vibe-trading)">가상 (vibe-trading)</span><span class="bar-track"><i class="bar down" style="left:43.86%;width:6.14%"></i></span><span class="bar-val down">-11,145원</span></div><div class="bar-row"><span class="bar-label" title="가상 (vibe-trading)">가상 (vibe-trading)</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:2.69%"></i></span><span class="bar-val up">+4,889원</span></div><div class="bar-row"><span class="bar-label" title="가상 (vibe-trading)">가상 (vibe-trading)</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:9.46%"></i></span><span class="bar-val up">+17,176원</span></div></div></figure>
 <p><strong>진입 근거</strong></p>
 <ul>
 <li>114800: Jev 후보 INV 신뢰도 0.87</li>
@@ -369,7 +380,7 @@
 <td>2026-11-16</td>
 </tr>
 </tbody>
-</table></div>
+</table></div><figure class="figure"><p class="figure-title">등락 한눈에 보기</p><div class="bars" role="img" aria-label="등락 한눈에 보기" style="--zero:50.0%"><div class="bar-row"><span class="bar-label" title="코스피">코스피</span><span class="bar-track"><i class="bar down" style="left:42.57%;width:7.43%"></i></span><span class="bar-val down">-2.78%</span></div><div class="bar-row"><span class="bar-label" title="코스닥">코스닥</span><span class="bar-track"><i class="bar down" style="left:43.66%;width:6.34%"></i></span><span class="bar-val down">-2.37%</span></div><div class="bar-row"><span class="bar-label" title="나스닥">나스닥</span><span class="bar-track"><i class="bar down" style="left:43.34%;width:6.66%"></i></span><span class="bar-val down">-2.49%</span></div><div class="bar-row"><span class="bar-label" title="S&amp;P500">S&amp;P500</span><span class="bar-track"><i class="bar down" style="left:44.87%;width:5.13%"></i></span><span class="bar-val down">-1.92%</span></div><div class="bar-row"><span class="bar-label" title="다우">다우</span><span class="bar-track"><i class="bar down" style="left:46.23%;width:3.77%"></i></span><span class="bar-val down">-1.41%</span></div><div class="bar-row"><span class="bar-label" title="필라델피아 반도체">필라델피아 반도체</span><span class="bar-track"><i class="bar down" style="left:35.88%;width:14.12%"></i></span><span class="bar-val down">-5.28%</span></div><div class="bar-row"><span class="bar-label" title="VIX">VIX</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:50.00%"></i></span><span class="bar-val up">+18.7%</span></div><div class="bar-row"><span class="bar-label" title="금 선물">금 선물</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:1.52%"></i></span><span class="bar-val up">+0.57%</span></div><div class="bar-row"><span class="bar-label" title="WTI 유가">WTI 유가</span><span class="bar-track"><i class="bar down" style="left:48.07%;width:1.93%"></i></span><span class="bar-val down">-0.72%</span></div><div class="bar-row"><span class="bar-label" title="비트코인">비트코인</span><span class="bar-track"><i class="bar down" style="left:46.82%;width:3.18%"></i></span><span class="bar-val down">-1.19%</span></div><div class="bar-row"><span class="bar-label" title="이더리움">이더리움</span><span class="bar-track"><i class="bar down" style="left:48.88%;width:1.12%"></i></span><span class="bar-val down">-0.42%</span></div><div class="bar-row"><span class="bar-label" title="원/달러">원/달러</span><span class="bar-track"><i class="bar up" style="left:50.00%;width:1.02%"></i></span><span class="bar-val up">+0.38%</span></div><div class="bar-row"><span class="bar-label" title="미 국채 10년">미 국채 10년</span><span class="bar-track"><i class="bar down" style="left:48.29%;width:1.71%"></i></span><span class="bar-val down">-0.64%</span></div></div></figure>
 <h3>투자자·프로그램 수급 (순매수, 억 원)</h3>
 <div class="table-wrap"><table>
 <thead>
@@ -716,7 +727,7 @@
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-17 22:43 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
+  <div class="wrap"><p>자동 생성 2026-11-17 23:37 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
 </footer>
 
 </body>
