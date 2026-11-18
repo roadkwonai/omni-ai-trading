@@ -800,6 +800,14 @@
 <li><a href="https://news.google.com/search?q=%22%5B2026%203%EB%B6%84%EA%B8%B0%20%EA%B2%B0%EC%82%B0%5D%20%EC%BD%94%EC%8A%A4%EB%8B%A5%20%EC%83%81%EC%9E%A5%EC%82%AC%203%EB%B6%84%EA%B8%B0%20%ED%9D%91%EC%9E%90%20%EA%B8%B0%EC%97%85%20277%EA%B3%B3%E2%86%93%E2%80%A6%EC%88%9C%EC%9D%B4%EC%9D%B5%EB%8F%84%20%EC%A0%81%EC%9E%90%20%EC%A0%84%ED%99%98%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">[2026 3분기 결산] 코스닥 상장사 3분기 흑자 기업 277곳↓…순이익도 적자 전환</a> · 메트로신문 · 52분</li>
 <li><a href="https://news.google.com/search?q=%22%ED%95%9C%EB%AF%B8%EB%B0%98%EB%8F%84%EC%B2%B4%20%EC%A3%BC%EA%B0%80%20%EC%83%81%EC%8A%B9%20%EC%A4%91%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">한미반도체 주가 상승 중</a> · 아시아뉴스통신 · 51분</li>
 </ul>
+<p><strong>작용한 뉴스와 소음</strong></p>
+<ul>
+<li><strong>작용한 뉴스</strong>: 엔비디아 사상 최대 실적이 국내 반도체 반등의 직접 계기였고, 엔진도 &quot;엔비디아 시간외 4.6%↑&quot;, &quot;SK하닉 6%·삼전 5% 급등&quot;을 받았다. Jev의 오전 반도체·관심종목 진입은 이 흐름과 맞았지만, 보도 시점에 이미 오른 종목(삼성전자)을 추격한 결과는 손절이었다.</li>
+<li><strong>원익홀딩스</strong>: &quot;외국인·기관 쌍끌이 매수에 10%대 급등&quot; 특징주 기사를 엔진이 받았고, 그 뒤 13:52 진입은 수급 근거와 맞았다.</li>
+<li><strong>기업 실적</strong>: 삼성전자·SK하이닉스를 뺀 코스피 3분기 영업익 −21%, 코스닥 순손실 보도는 반도체 쏠림을 보여 준다. 관심종목 강도 경로가 반도체 쪽에 몰리는 이유이기도 하다.</li>
+<li><strong>소음</strong>: '전쟁·분쟁' 분류의 뷰티 전쟁·3D 프린터 전쟁, '지정학' 분류의 세관 교육·수능 부정행위 기사는 매매와 무관했다. 이란 걸프 공습 보도는 실제 지정학 사건이지만 유가가 내려 그날 시장 반응은 작았다.</li>
+<li><strong>신규주</strong>: &quot;에이엘로봇 상장 첫날 20% 급락&quot;은 신규주 차단이 손실을 막은 쪽이었다는 장 마감 개선안의 사후 결과(최근 5거래일 미매수 신규주 마감까지 −14%대)와 맞는다.</li>
+</ul>
 <h2 id="s7">6. 애널리스트</h2>
 <div class="table-wrap"><table>
 <thead>
@@ -884,11 +892,27 @@
 </tr>
 </tbody>
 </table></div>
+<ul>
+<li>애널리스트 의견은 오늘 매매 근거와 거의 겹치지 않았다. 삼성전자는 평균 목표가 465,714원·상향 기조인데도 장중 고점권 추격으로 손절됐다. 목표가는 장기 방향이고 장중 진입 자리와는 별개다.</li>
+<li>성호전자는 평균 의견 4.0·목표가 35,000원(종가 25,900원)이지만 어조는 중립('무게중심은 2027년')이라, 오늘의 +14~19% 급등은 리포트가 아니라 테마 수급이었다고 보인다.</li>
+<li>원익홀딩스는 iM증권 '반도체 실적개선과 로봇 성장성' 리포트가 있고, 그날 외국인·기관 동반 매수와 맞았다.</li>
+<li>장기투자 ETF 6종과 인버스는 애널리스트 자료가 없다.</li>
+</ul>
 <h2 id="s8">7. 시스템</h2>
 <ul>
 <li>오류·결함: v2_holding_decision_error:ValueError 2건 · v2_error:transient_read_failure 11건</li>
 <li>진입하지 않은 이유(상위): jev_low_confidence 63 · jev_wait 50 · opposite_direction_holding 48 · volume_not_rising 37 · losing_streak_cooldown 29 · entry_window_closed 23</li>
 <li>제한 규칙이 막은 횟수: reentry_allow 15 · streak 29 · opposite 48 · volume 37 · rising 63 · add_better 1 · cutoff 23 · order_guard 14</li>
+</ul>
+<aside class="callout warning" role="note" aria-label="주의"><p class="callout-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/></svg>주의</p><p>13:37부터 **NH 시세 유량 초과(rate_limit)**가 몰려 실행기 판단 11회가 건너뛰어졌다. 장중 NH 호출은 대시보드 7,043건으로 실행기(7,349건)와 맞먹었다(장 마감 개선안).</p>
+</aside>
+<ul>
+<li><strong>v2_error transient_read_failure 11건</strong>: 시세 조회 실패로 그 회차 진입 판단을 건너뛰었다. 13:50 주문 가드 거부 1회(장 시간 확인용 시세 없음)로 원익홀딩스 매수가 2분 늦어졌을 가능성이 있다.</li>
+<li><strong>v2_holding_decision_error 2건</strong>: 보유 판단용 분봉(paper signal bars)을 못 읽었다.</li>
+<li><strong>선별 v2 시장 판정(14:30:48)</strong>: 코스피 저가를 읽지 못해(null) 불통과로 남았고, 이후 회복 여부는 기록이 없다. 오늘은 폭락일이 아니라 매매 영향은 없었다.</li>
+<li><strong>실행기 정지·재시작 9회(12:19~15:18)</strong>: 모두 수 초 안에 재시작했고 크래시는 0건, 그중 5회는 인버스 보유 중이었다. 인버스 손절(13:14)은 재시작 사이에 정상 처리됐다.</li>
+<li><strong>진입 차단</strong>: opposite_direction_holding 48회는 인버스 보유 동안 롱 진입이 막힌 것이고, losing_streak_cooldown 29회·reentry_allow 15회는 오전 손절 뒤 쉬기·시황 미확인 재진입 차단이다.</li>
+<li><strong>장 마감 개선안 보고서</strong>: 16:19 작성분(<code>improvement-2026-11-18.md</code>)을 참고했다.</li>
 </ul>
 <h2 id="s9">8. 복기·회고</h2>
 <p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
@@ -907,7 +931,7 @@
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-18 16:52 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
+  <div class="wrap"><p>자동 생성 2026-11-18 16:53 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
 </footer>
 
 </body>
