@@ -915,23 +915,86 @@
 <li><strong>장 마감 개선안 보고서</strong>: 16:19 작성분(<code>improvement-2026-11-18.md</code>)을 참고했다.</li>
 </ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<aside class="callout summary" role="note" aria-label="요약"><p class="callout-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h9"/></svg>요약</p><p>오늘의 교훈은 <mark>일봉 국면이 하락장이어도 그날 지수가 반등 중이면 인버스는 고점을 산다</mark>는 것이다.</p>
+</aside>
+<ol>
+<li><strong>인버스 한 건이 하루를 결정했다(사실).</strong> 11:22 Jev 후보(INV 신뢰도 0.57)로 1,361원(하루 범위 94%)에 사서 112분 동안 최고 +0.22%에 그친 뒤 −2.20%(−22,036원)에 손절됐다. <strong>해석</strong>: 일봉 국면 신호가 엔비디아 실적으로 반등한 당일 흐름을 따라가지 못했다. 13:32 적용된 인버스 신중 진입이 있었다면 지수가 그날 상승 중이라 막혔을 가능성이 높다(추정, 재현 필요).</li>
+<li><strong>성호전자 첫 매매는 잘했고 재진입은 추격이었다(사실).</strong> 첫 매매 +8,754원(절반 익절 뒤 추적 손절), 10:07 재진입은 2분 만에 −6,246원, 30분 뒤 −3.57%. <strong>해석</strong>: 12:21 신중 재진입 전 사례로, Jev 확률 0.16이라 지금 규칙이면 막혔을 것으로 보인다.</li>
+<li><strong>삼성전자 추격은 1% 손절이 막았다(사실).</strong> 범위 76% 자리 매수, −4,600원, 매도 뒤 저가 −3.18%. <strong>해석</strong>: '급등' 보도 뒤 고점권 진입이었고, 외국인이 그날 삼성전자를 −1,700억 판 쪽이었다.</li>
+<li><strong>확률이 가장 높았던 진입이 가장 안정적이었다(사실).</strong> 원익홀딩스 Jev 0.64 → +1,400원. <strong>해석</strong>: 표본 1건이라 단정하지 않지만, 낮은 확률(0.16~0.25) 강도 진입 3건 합계 −2,092원과 대비된다.</li>
+<li><strong>계좌별로</strong>: 실계좌 1은 모의를 비례로 따라 −3,623원, 실계좌 2(장기투자)는 주문 0건이다. 모의 최근 6거래일 실현 합계 +88,096원 중 11/16 하루가 +163,333원이고, 그날을 빼면 −75,237원이다(장 마감 개선안).</li>
+</ol>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>규칙 변경은 제안일 뿐이며 적용은 사용자 승인으로만 한다.</p>
+<ol>
+<li><strong>인버스 신중 진입을 11:22 매수에 재현한다.</strong>
+<ul>
+<li>근거: 오늘 손실의 97%(−22,036원)가 이 한 건이고, 같은 '고가 근처 인버스'가 11/16 폭락일에는 +163,333원이었다.</li>
+<li>달라지는 것: 지수 반등일의 인버스 진입이 빠진다.</li>
+<li>확인 방법: 그 시각 프로그램 매매·30분 지수 흐름으로 inverse_gate 통과 여부를 재현하고, 다음 10거래일 inverse_* 차단 사유와 inverse_quick 청산 결과를 쌓는다.</li>
+</ul>
+</li>
+<li><strong>관심종목 강도의 낮은 Jev 확률 진입을 따로 집계한다.</strong>
+<ul>
+<li>근거: Jev 0.16~0.25 진입 3건 +8,754/−4,600/−6,246원(합 −2,092원), 0.64 진입 1건 +1,400원.</li>
+<li>달라지는 것: strength_min_prob(0.15) 상향 여부를 수치로 판단할 수 있다.</li>
+<li>확인 방법: 20건이 쌓일 때까지 확률 구간별 왕복 손익을 장 마감 개선안 신호 적중률과 함께 본다.</li>
+</ul>
+</li>
+<li><strong>인버스 진입의 당일 위치(high_gap)를 지수 당일 등락과 묶어 성적을 나눈다.</strong>
+<ul>
+<li>근거: 11/16 고가 근처 인버스 19건은 지수 폭락일이라 이익, 오늘 1건은 지수 상승일이라 손실이었다.</li>
+<li>달라지는 것: '고가 근처 + 지수 상승일' 조합의 위험이 수치로 드러난다(기록만, 규칙 변경 없음).</li>
+<li>확인 방법: 이미 기록 중인 submitted의 high_gap_pct와 그날 KODEX 200 등락으로 10거래일 뒤 비교한다.</li>
+</ul>
+</li>
+</ol>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>NH 시세 유량 초과</strong> — 증상: 13:37부터 rate_limit(IGW42902/42903)이 몰렸고 장중 NH 호출은 대시보드 7,043건으로 실행기(7,349건)와 맞먹었다. → 영향: 실행기 v2_error 11회·주문 가드 거부 1회·선별 v2 판정 조회 실패 1회. → 제안: 장 마감 개선안 1처럼 대시보드 quote_cache_s를 장중 60초로 올리는 것을 검토한다(사용자 승인 필요).</li>
+<li><strong>선별 v2 판정의 조회 실패가 불통과와 섞인다</strong> — 증상: 14:30:48 코스피 저가 null이 그냥 불통과로 남았다. → 영향: 폭락일에 조회 실패로 매수를 놓쳐도 알 수 없다. → 제안: 장 마감 개선안 2처럼 시장별 조회 실패를 oversold_v2_gate_error로 남긴다(코드 변경, 승인 필요).</li>
+<li><strong>매매일지 이슈 분류 오탐</strong> — 증상: '전쟁·분쟁'에 뷰티 전쟁·3D 프린터 전쟁, '지정학'에 세관공무원 교육·수능 부정행위 기사가 ★3으로 들어갔고 자동 순위 1위가 전쟁·분쟁(★4)이었다. → 영향: 핵심 이슈 순위와 엔진 참고 맥락이 소음에 끌린다. → 제안: rank_issues의 핵심어 일치에 비유적 용례 제외어나 분야별 문맥 확인을 더하는 것을 검토한다(승인 필요).</li>
+<li><strong>장중 재시작 9회</strong> — 증상: 12:19~15:18, 그중 5회는 인버스 보유 중. → 영향: 손실은 없었지만 재시작마다 대조 조회가 늘어 유량 문제를 키운다. → 제안: 장 마감 개선안 3의 재시작 창 운영을 다시 검토한다.</li>
+<li><strong>장기투자 리포트와 실제 실행 설정 불일치</strong> — 증상: 아침 리포트는 '가상 체결 꺼짐·계획만'이라 했으나 12:02 가상 체결이 켜져 실제 체결이 났다. → 영향: 그날 리포트와 계좌가 어긋난다. → 제안: 장중 실행 설정이 바뀐 날은 16:45 복기·감사가 이 차이를 명시하도록 점검한다.</li>
+</ol>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>판단 맥락이며 매매 지시가 아니다.</p>
+<ul>
+<li>11/18은 엔비디아 실적으로 코스피가 +1.93% 반등한 날이지만 장중 한때 5천선을 다시 밑돌았고, 그 지수 저점 시각의 인버스 매수는 당일 고가였다.</li>
+<li>외국인은 SK하이닉스를 +3,121억 사고 삼성전자를 −1,700억 팔아 반도체 대형주 안에서도 방향이 갈렸다.</li>
+<li>미국 쪽은 S&amp;P500 7월 이후 최저·VIX 25대·미 10년물 5.1%대로 위험 회피가 이어지는 가운데 국내 지수만 반등해, 해외와 국내 방향이 엇갈렸다.</li>
+<li>급등 종목(성호전자 +19%) 같은 날 재진입은 2분 만에 손절됐고 30분 뒤 −3.57%까지 밀렸다.</li>
+<li>신규 상장 첫날 급락 보도(에이엘로봇)가 있었고, 최근 5거래일 미매수 신규주는 장 마감까지 평균 −14%대였다.</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>11/19 09:00</strong> — 11/18 밤 미국장의 엔비디아 실적 반응과 국내 반도체 반등 지속 여부.</li>
+<li><strong>11/19 장중</strong> — 인버스 신중 진입(전일 13:32 적용)·신중 재진입(12:21 적용)의 첫 온종일 적용일: inverse_* 차단 사유와 careful_reentry_review 결과.</li>
+<li><strong>11/19 08:45</strong> — 장기 엔진 판단: 12주 분할 첫 주 처리, 윌리엄스 추세 모듈 첫 적용, 적립식 미체결 638,976원 재매수.</li>
+<li><strong>수시</strong> — 연준 위원 발언과 금리 인상 논쟁, 미 10년물 5.1%대·VIX 25 유지 여부, NH 유량 초과 재발 여부.</li>
+<li><strong>11/25</strong> — 미국 GDP·PCE. 이란 걸프 공습 보도 후속과 유가도 함께 본다.</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://news.google.com/rss/articles/CBMihgFBVV95cUxQTUJONlB1RmVNTkxXR19hZUlDOEVtc3NlU2F6V00xRFhqVlF2eUVLLUlKOTBmbVhNWW4xaFZQUDZlVU8xWHdINXRhdlJSTXdtd3hCYkVUWEc4VjN2ZUFaQlhpejNJcnFoWFlvT2VLem9yYlVtWHFyZ2l3emo0YlJ6Skk2WnY2QQ?oc=5" target="_blank" rel="noopener noreferrer">글로벌이코노믹 · 2026-11-18 · 엔비디아, 젠슨 황 퇴진 속 '어닝 서프'… 반도체 고점론 일축</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiTEFVX3lxTE1QbnB2R3VGVEtHR3lTSVg2MlVuZDlZeHNlVXhueXk3bHE5Q3ZlSDNVTHdDYURCWmlySDR6RVd0UkZiV3hVTzJ5M00yQ2Q?oc=5" target="_blank" rel="noopener noreferrer">아이뉴스24 · 2026-11-18 · 코스피, 2% 급등 '5100선' 탈환⋯엔비디아發 반도체 훈풍</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMicEFVX3lxTE40UHFKU2F1eEpWR213SkVFdWJGNmpBWERaUm1HMklObG9SYU5GVDEzTFFzWDhkTGU1YndFTUh2akxmTDU5dHJpT2dtOVRoTThMeTZxYkpPV3JPMU1hSjRlVTRlcWRKXzVHYUx2ektQdHE?oc=5" target="_blank" rel="noopener noreferrer">연합인포맥스 · 2026-11-18 · 국고채 금리 하락 반전…코스피 상승세 줄며 장중 5천선 하회</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiZ0FVX3lxTE5nWW9Wa1pwYUcyOWxPZ0VHVmRBRUVocXJFTjhjRFFPcGVQRUJKWkVYSEFoV05YVFB0aVZKVVItdjRta1dFSXMybE9zQU1QRnAzai1odG45N1hKWlRqRHlWZVFMZHlrRlE?oc=5" target="_blank" rel="noopener noreferrer">Investing.com 한국어 · 2026-11-18 · 연준 금리 인상 기대에 달러 강세…아시아 통화 약세 지속</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiW0FVX3lxTE5GM05XNXEyTFQ4UVI3bU8teVZkZnFlMmpROW9yamoxaTJ3djB1b1NUVllFak1OYjgybE5Ebl9NaGtpeW5HUzk1VGN4Y3R5OGNGQlZtY010RkxielE?oc=5" target="_blank" rel="noopener noreferrer">KBS 뉴스 · 2026-11-18 · 뉴욕증시 하락세 계속…S&amp;P500 1%↓, 7월 이후 최저</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTE1rd056clhrVXI0TXg1bzI3clRYeWlTeWpqd29neXo1cmlEMGhCMWVLY0lqUVc2X05xeHE5WnhlRjZid19uZ3hIMEFMcldjbVRoc1Q5ZG1NRm9yUQ?oc=5" target="_blank" rel="noopener noreferrer">한국경제 · 2026-11-18 · 금값 1년 만에 최저…美 국채금리·달러 강세 직격</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiXkFVX3lxTE5JMk1YczViYXY2YTNTNlpzS0xLVGVEcDN4aTZfZmlzMUI5SENMcnRNZldfa1J4OFo5MVc4VTBTSVR1WWhqX0hIWFJhYTN3bW1vbTN4WS1MUnI3THpxY3fSAWNBVV95cUxQWTJJazltUVRKdkpXVWJUM1c1N1lBWThIM2k2bVo3ZHFZYmM2M1dVczItY055MjZLVW9WOGlPTWhQeFZaaUV4eVlyb0k2NTJuX2xQWEJIbnhLWk5IeHVuNnAxVWc?oc=5" target="_blank" rel="noopener noreferrer">채널A · 2026-11-18 · 이란, &quot;바레인 미군기지 공습&quot; 발사 영상 공개</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMibEFVX3lxTE5NWmpnVG1wMnRLeW5sNEdfUTM5WTY0LUxpT2ltQWRfb2R1MWQ2RGUxeEFETGtFMkwyTWhKbmM2Q214aC1pNHhpcjRPZ0RYaklsbGRUWm5oSHgtYXdWeHo1dzN0ejd1eDNQOVZ2SQ?oc=5" target="_blank" rel="noopener noreferrer">와이드경제 · 2026-11-18 · [특징주] 원익홀딩스, 외국인·기관 쌍끌이 매수에 10%대 급등</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTE40ejh0b0VDZHliWHk3SlVfTEEwd2FfQzI1OXotQzY5UWNJdFNWUE1CdWZ4c0V5ajBiQ1FUUlgySi1KVXhMeFJEeWpXMmlVVVdvMmVNUG1Vckp3QQ?oc=5" target="_blank" rel="noopener noreferrer">한국경제 on MSN · 2026-11-18 · 에이엘로봇, 코스닥 상장 첫날 20% 급락</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97570" target="_blank" rel="noopener noreferrer">iM증권 · 2026-11-04 · 삼성전자 STRESS TEST</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97409" target="_blank" rel="noopener noreferrer">iM증권 · 2026-11-02 · 원익홀딩스 실적개선(반도체)과 성장성(로봇)의 조화</a></li>
+<li>내부 자료: 장 마감 개선안 <code>improvement-2026-11-18.md</code>(16:19), 장기투자 전략 리포트 <code>strategy-2026-11-18.md</code>, 장기 엔진 기록 <code>longterm.sqlite3</code>(nav)</li>
+</ul>
 </article>
   </main>
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-18 16:53 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
+  <div class="wrap"><p>자동 생성 2026-11-18 16:54 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
 </footer>
 
 </body>
