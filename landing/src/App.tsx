@@ -10,7 +10,7 @@ import {
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
   AI_LOOP, AI_PAID, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
-  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES,
+  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
 // Charts load in their own chunk; the placeholder keeps the height so nothing jumps.
@@ -22,6 +22,10 @@ const ICONS = { TrendDown, Bank, Plant, Notebook, BellRinging, ListChecks, Scale
 const img = (name: string) => `./img/${name}.webp`
 const shot = (id: string) => `./img/screens/${id}.webp`
 const css = (vars: Record<string, string | number>) => vars as React.CSSProperties
+// Inline emphasis in content strings: **bold** for key terms, ==highlight== for the one phrase that matters most.
+const rich = (t: string) => t.split(/(\*\*[^*]+\*\*|==[^=]+==)/g).map((p, i) =>
+  p.startsWith('**') ? <strong key={i} className="em">{p.slice(2, -2)}</strong>
+    : p.startsWith('==') ? <mark key={i} className="hl">{p.slice(2, -2)}</mark> : p)
 
 type Theme = 'system' | 'light' | 'dark'
 const THEME_KEY = 'omni-report-theme' // shared with the report pages on the same site
@@ -133,11 +137,11 @@ function Hero() {
       <div className="container hero-inner">
         <p className="kicker hero-step" style={css({ '--d': 0 })}>국내 ETF 실시간 매매 · 미국 ETF 장기투자 · 오픈소스</p>
         <h1 id="hero-title" className="heading-1 hero-title hero-step" style={css({ '--d': 1 })}>
-          AI가 시황을 읽고<br />규칙 안에서 매매합니다
+          손절을 망설이는 순간에도<br />AI는 원칙대로 움직입니다
         </h1>
         <p className="lead hero-sub hero-step" style={css({ '--d': 2 })}>
-          AI 트레이더 Jev가 1분마다 시장을 읽고, 거장의 원칙이 장기 자산을 지키고, Claude·Codex가 매일 감사하고 보고합니다.
-          모든 판단과 주문, 체결은 기록과 대시보드에 남습니다.
+          투자에서 지는 이유는 정보가 아니라 <mark className="hl">망설임</mark>입니다. AI 트레이더 Jev는 <strong className="em">수급과 시황으로 주도주를 찾아 1분마다 판단</strong>하고,
+          <strong className="em">거장의 원칙은 장기 자산을 천천히 키웁니다.</strong> 모든 판단과 주문은 기록으로 남아 매일 복기됩니다.
         </p>
         <div className="hero-cta hero-step" style={css({ '--d': 3 })}>
           <a className="btn btn-primary button-md" href={START}><GithubLogo size={18} aria-hidden />GitHub에서 시작하기</a>
@@ -185,11 +189,55 @@ function Hero() {
   )
 }
 
+function Why() {
+  return (
+    <section id="why" className="section band why" aria-labelledby="why-title">
+      <div className="container">
+        <div className="head-split">
+        <div className="head">
+          <p className="kicker">왜 AI로 투자해야 할까요</p>
+          <h2 id="why-title" className="heading-2">대부분의 손실은 분석이 아니라<br />망설임에서 시작됩니다</h2>
+          <p className="lead">
+            차트를 볼 줄 몰라서가 아닙니다. <strong className="em">손실 앞에서 머뭇거리고 이익 앞에서 조급해지는 건</strong>, 사람이라서 그렇습니다.
+            연구 결과도 이런 실수가 수익을 깎아 먹는다는 것을 보여 줍니다.
+          </p>
+        </div>
+        <img className="art art-md" src={img('mascot-why')} alt="" width="320" height="320" loading="lazy" />
+        </div>
+        <ul className="why-stats" data-reveal>
+          {WHY_STATS.map((s) => (
+            <li key={s.num} className="why-stat">
+              <strong className="why-num">{s.num}</strong>
+              <span className="small">{rich(s.label)}</span>
+              <a className="caption muted why-src" href={s.href} target="_blank" rel="noopener noreferrer">{s.source}<ArrowUpRight size={12} aria-hidden /></a>
+            </li>
+          ))}
+        </ul>
+        <h3 className="title-1 traps-title">사람이 빠지는 여섯 가지 함정, Omni는 이렇게 막습니다</h3>
+        <ol className="traps" data-reveal>
+          {TRAPS.map((t, i) => (
+            <li key={t.trap} className="trap">
+              <span className="trap-no" aria-hidden>{String(i + 1).padStart(2, '0')}</span>
+              <h4 className="title-2">{t.trap}</h4>
+              <p className="small muted trap-human">{rich(t.human)}</p>
+              <p className="small trap-fix"><ShieldCheck size={16} aria-hidden /><span>{rich(t.fix)}</span></p>
+            </li>
+          ))}
+        </ol>
+        <p className="why-close heading-4">
+          사람이 약해서가 아니라, 사람이라서 그렇습니다.<br />
+          <span className="accent-text">그래서 원칙을 지키는 일을 AI에게 맡겼습니다.</span>
+        </p>
+      </div>
+    </section>
+  )
+}
+
 function Principle() {
   useTaglineWords('tagline')
   let n = 0
   return (
-    <section id="highlights" className="section band" aria-labelledby="highlights-title">
+    <section id="highlights" className="section" aria-labelledby="highlights-title">
       <div className="container">
         <h2 id="highlights-title" className="sr-only">핵심 원칙과 특징</h2>
         <div className="principle-head">
@@ -242,6 +290,61 @@ function Candles() {
   )
 }
 
+function Art() {
+  return (
+    <section id="art" className="section band" aria-labelledby="art-title">
+      <div className="container">
+        <div className="art-head">
+          <p className="kicker">투자 기법 · 오래된 증시 격언</p>
+          <h2 id="art-title" className="art-title">매수는 기술,<br /><span className="accent-text">매도는 예술</span></h2>
+          <p className="lead">
+            사는 이유는 차트와 수급으로 설명할 수 있지만, 파는 순간에는 욕심과 공포가 끼어듭니다. 고점은 아무도 모르니까요.
+            Omni는 그 예술을 <mark className="hl">감정이 끼어들 틈 없는 규칙</mark>으로 바꿨습니다.
+          </p>
+          <img className="art-visual" src={img('mascot-art')} alt="" width="1200" height="800" loading="lazy" />
+        </div>
+        <div className="craft" data-reveal>
+          <div className="craft-col">
+            <h3 className="heading-4">매수 · 기술</h3>
+            <ol className="craft-list">
+              {BUY_CRAFT.map((x, i) => (
+                <li key={x.title}><span className="craft-no" aria-hidden>{i + 1}</span><div><strong className="title-2">{x.title}</strong><p className="small muted">{rich(x.body)}</p></div></li>
+              ))}
+            </ol>
+          </div>
+          <div className="craft-col craft-sell">
+            <h3 className="heading-4">매도 · <span className="accent-text">예술을 규칙으로</span></h3>
+            <ol className="craft-list">
+              {SELL_ART.map((x, i) => (
+                <li key={x.title}><span className="craft-no" aria-hidden>{i + 1}</span><div><strong className="title-2">{x.title}</strong><p className="small muted">{rich(x.body)}</p></div></li>
+              ))}
+            </ol>
+          </div>
+        </div>
+        <figure className="life" data-reveal>
+          <figcaption className="title-1">한 포지션의 일생</figcaption>
+          <ol className="life-steps" aria-label="진입부터 스윙까지 다섯 단계">
+            {LIFECYCLE.map((x, i) => (
+              <li key={x.step} className="life-step" style={css({ '--i': i })}>
+                <strong className="title-2">{x.step}</strong>
+                <span className="caption muted">{x.body}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="life-exits">
+            <span className="caption muted">어느 단계에서든 아래 조건에 먼저 닿으면 정리합니다</span>
+            <ul>{LIFECYCLE_EXITS.map((e) => <li key={e} className={/손절|손실 한도/.test(e) ? 'tag tag-warn' : 'tag'}>{e}</li>)}</ul>
+          </div>
+        </figure>
+        <p className="why-close heading-4">물타기 대신 분할, 버티기 대신 손절,<br /><span className="accent-text">조급한 익절 대신 추적 청산.</span></p>
+        <p className="more-row"><a className="more button-sm" href={doc('strategy.md')}>진입·청산 규칙 전체 보기 <ArrowUpRight size={16} aria-hidden /></a></p>
+      </div>
+    </section>
+  )
+}
+
+const TONE_ICON = { up: '▲', wait: '■', down: '▼' } as const
+
 function Jev() {
   return (
     <section id="jev" className="section" aria-labelledby="jev-title">
@@ -249,8 +352,9 @@ function Jev() {
         <div className="head-split">
           <div className="head">
             <p className="kicker">Jev 실시간 AI 트레이더</p>
-            <h2 id="jev-title" className="heading-2">사람 트레이더가 화면을 보듯, Jev는 1분 차트를 읽습니다</h2>
+            <h2 id="jev-title" className="heading-2">수급과 시황으로 주도주를 찾고, 1분마다 판단합니다</h2>
             <p className="lead">
+              Jev 트레이딩의 핵심은 <mark className="hl">오늘 시장의 돈이 어디로 가는지 읽고, 그 중심에 있는 종목을 공략</mark>하는 것입니다.
               Jev는 TypeSafe의 이미지·선택형 판단 모델입니다. 국내 ETF와 주식을 장중 1분마다 보고 종목 하나(또는 대기)와 신뢰도를 고릅니다.
               진입, 보유, 관심종목, 낙폭과대, 재진입, 개장 이월까지 실시간 매매의 판단을 맡습니다.
             </p>
@@ -308,6 +412,16 @@ function Jev() {
             </ul>
           </div>
         </div>
+        <h3 className="heading-3 regime-title">시황에 따라 다르게 움직입니다</h3>
+        <ul className="regime-plays" data-reveal>
+          {REGIME_PLAYS.map((r) => (
+            <li key={r.name} className={`regime-play ${r.tone}`}>
+              <strong className="title-1"><span aria-hidden>{TONE_ICON[r.tone as keyof typeof TONE_ICON]}</span> {r.name}</strong>
+              <p className="small muted">{rich(r.body)}</p>
+            </li>
+          ))}
+        </ul>
+        <p className="small muted regime-note">지정학·해외 이슈는 별도 규칙이 아니라 90분 뉴스, 해외 선물·원자재·환율 입력으로 Jev 판단에 들어갑니다.</p>
         <p className="more-row"><a className="more button-sm" href={doc('strategy.md')}>매매 전략 가이드 <ArrowUpRight size={16} aria-hidden /></a></p>
       </div>
     </section>
@@ -328,6 +442,7 @@ function Longterm() {
             <p className="kicker">거장의 안목, 장기투자</p>
             <h2 id="longterm-title" className="heading-2">시장의 계절을 읽고, 그 계절의 거장 원칙으로 운용합니다</h2>
             <p className="lead">
+              <mark className="hl">빠르지는 않지만, 천천히 부자가 되는 길</mark>입니다. 시장이 무너질 때 겁먹지 않고 과열될 때 들뜨지 않도록 거장들의 원칙을 미리 정해 둡니다.
               국내 상장 미국 지수·테마 ETF 6종을 코어 60 · 위성 25 · 저수지 15로 담습니다. 매일 아침 나스닥100 낙폭, 200일선, VIX로
               시장의 계절을 정하고, 켜 둔 거장 전략이 목표 비중을 조정합니다. 거장이 직접 운용하는 것이 아니라 공개된 원칙을 본뜬 규칙입니다.
             </p>
@@ -414,6 +529,67 @@ function Dca() {
           </div>
         </div>
         <p className="more-row"><a className="more button-sm" href={doc('longterm-dca.md')}>적립식 가이드 <ArrowUpRight size={16} aria-hidden /></a></p>
+      </div>
+    </section>
+  )
+}
+
+function Styles() {
+  return (
+    <section id="styles" className="section band" aria-labelledby="styles-title">
+      <div className="container">
+        <div className="head">
+          <p className="kicker">내 투자 스타일</p>
+          <h2 id="styles-title" className="heading-2">투자 성향에 맞춰 고르고, 기록으로 키웁니다</h2>
+          <p className="lead">빠른 트레이딩, 천천히 부자가 되는 장기투자, 또는 둘 다. <strong className="em">시간이 지날수록 내 기록과 선택이 쌓여 나에게 맞는 시스템</strong>이 됩니다.</p>
+        </div>
+        <img className="art-visual styles-visual" src={img('mascot-styles')} alt="" width="1200" height="406" loading="lazy" />
+        <ul className="styles" data-reveal>
+          {STYLES.map((x) => (
+            <li key={x.name} className="style-card">
+              <span className="tag">{x.tag}</span>
+              <h3 className="heading-4">{x.name}</h3>
+              <p className="small muted">{rich(x.who)}</p>
+              <dl className="small">
+                <div><dt>운용</dt><dd>{x.run}</dd></div>
+                <div><dt>켜는 곳</dt><dd>{x.how}</dd></div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+        <ol className="grow" data-reveal aria-label="키우는 법 세 단계">
+          {GROW.map((g, i) => (
+            <li key={g.title}><span className="craft-no" aria-hidden>{i + 1}</span><div><strong className="title-2">{g.title}</strong><p className="small muted">{rich(g.body)}</p></div></li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  )
+}
+
+function Data() {
+  return (
+    <section id="data" className="section" aria-labelledby="data-title">
+      <div className="container">
+        <div className="head">
+          <p className="kicker">단순한 구조</p>
+          <h2 id="data-title" className="heading-2">관점은 JSON에,<br />경험은 SQLite에 쌓입니다</h2>
+          <p className="lead">
+            <strong className="em">서버도 클라우드 DB도 없이 내 컴퓨터의 파일로</strong> 움직입니다. 대시보드에서 바꾼 관점과 설정은 JSON으로, 매일의 판단과 체결은 SQLite로 남아
+            다음 판단의 근거가 됩니다. 백업 한 번이면 다른 Mac으로 그대로 옮길 수 있습니다.
+          </p>
+        </div>
+        <div className="data-flow" data-reveal>
+          <div className="data-col">
+            <h3 className="title-1"><span className="file-kind">JSON</span> 관점과 설정</h3>
+            <ul>{DATA_JSON.map((d) => <li key={d.file}><code>{d.file}</code><span className="small muted">{d.body}</span></li>)}</ul>
+          </div>
+          <div className="data-arrow" aria-hidden><span>매분 판단</span><ArrowRight size={20} /><span>매일 복기</span></div>
+          <div className="data-col">
+            <h3 className="title-1"><span className="file-kind">SQLite</span> 경험과 학습 데이터</h3>
+            <ul>{DATA_SQLITE.map((d) => <li key={d.file}><code>{d.file}</code><span className="small muted">{d.body}</span></li>)}</ul>
+          </div>
+        </div>
       </div>
     </section>
   )
@@ -525,7 +701,7 @@ function Integrations() {
           </div>
           <img className="art art-sm" src={img('mascot-integrations')} alt="" width="280" height="280" loading="lazy" />
         </div>
-        <div className="stack" role="group" aria-label="시스템 구조도. 왼쪽에서 데이터가 들어와 가운데 층을 위에서 아래로 거쳐 주문이 되고, 오른쪽으로 알림이 나갑니다">
+        <div className="stack" role="group" aria-label="시스템 구조도. 왼쪽에서 데이터가 들어와 가운데 층을 위에서 아래로 거쳐 주문이 되고, 오른쪽으로 알림이 발송됩니다">
           <div className="stack-side in">
             <p className="kicker">데이터 · 들어옴</p>
             {data.items.map((it) => <a key={it.name} className="svc small" href={link(it)}><strong>{it.name}</strong><span className="caption muted">{it.role}</span></a>)}
@@ -564,8 +740,8 @@ function Safety() {
         <div className="head-split">
           <div className="head">
             <p className="kicker">안전장치와 대시보드</p>
-            <h2 id="safety-title" className="heading-2">실계좌는 세 단계를 거쳐서 엽니다</h2>
-            <p className="lead">처음에는 계획만 기록하고, 가상으로 사고팔아 본 뒤, 계좌마다 스위치와 확인 문구를 거쳐야 실제 주문이 나갑니다.</p>
+            <h2 id="safety-title" className="heading-2">실계좌 주문은 세 단계를 거쳐야 실행됩니다</h2>
+            <p className="lead">처음에는 계획만 기록하고, 가상으로 사고팔아 본 뒤, 계좌마다 스위치와 확인 문구를 거쳐야 실제 주문이 실행됩니다.</p>
           </div>
           <img className="art art-sm" src={img('mascot-safety-v2')} alt="" width="360" height="360" loading="lazy" />
         </div>
@@ -578,6 +754,24 @@ function Safety() {
             </li>
           ))}
         </ol>
+        <div className="calib" data-reveal>
+          <div>
+            <h3 className="heading-4">AI도 틀립니다. 그래서 매일 검증합니다</h3>
+            <p className="small muted">
+              첫 주(11/11~11/17, 공유 모의계좌) Jev 진입 신호를 신뢰도 구간별로 5·15·30분 뒤 결과와 비교해 보니, <mark className="hl">신뢰도가 높을수록 오히려 덜 맞았습니다.</mark>
+              그래서 <strong className="em">신뢰도를 수익 확률로 쓰지 않고</strong>, 손절과 하루 손실 한도를 늘 함께 두고, 장 마감마다 구간별 적중률을 다시 확인합니다.
+            </p>
+          </div>
+          <ul className="calib-bars" aria-label="신뢰도 구간별 적중률">
+            {CALIBRATION.map((c) => (
+              <li key={c.band}>
+                <span className="caption muted">신뢰도 {c.band}</span>
+                <span className="calib-bar"><span style={css({ '--w': `${c.hit}%` })} /></span>
+                <strong className="title-3">{c.hit}%</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
         <details className="limits">
           <summary>주문 한도 요약 보기 <CaretDown size={18} aria-hidden /></summary>
           <table className="small">
@@ -768,10 +962,14 @@ export default function App() {
       <main id="main">
         <span id="top" />
         <Hero />
+        <Why />
         <Principle />
+        <Art />
         <Jev />
         <Longterm />
         <Dca />
+        <Styles />
+        <Data />
         <AiOps />
         <Daily />
         <Integrations />

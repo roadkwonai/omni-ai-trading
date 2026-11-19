@@ -1417,14 +1417,14 @@ def live_order_switch(key, record):
     service = '장기투자 실행기' if longterm else '미러 서비스'
     with st.container(border=True):
         sc.row([{'label': '실주문 스위치', 'value': '켜짐' if on else '꺼짐', 'icon': 'bolt' if on else 'power_settings_new',
-                 'tone': 'up' if on else 'off', 'pulse': on, 'help': '켜면 이 계좌에 실제 주문이 나갑니다. 끄면 다음 회차(약 1분)부터 계획만 기록합니다.'},
+                 'tone': 'up' if on else 'off', 'pulse': on, 'help': '켜면 이 계좌에 실제 주문이 실행됩니다. 끄면 다음 회차(약 1분)부터 계획만 기록합니다.'},
                 {'label': service, 'value': '실주문 대기(--execute)' if armed else '계획만 등록' if longterm else '관찰 전용', 'icon': 'dns',
                  'tone': 'ok' if armed else 'warn', 'help': '서비스가 실주문 가능 상태로 등록돼 있어야 스위치가 효과를 냅니다.'},
                 {'label': '주문 보호(HALT)', 'value': '켜짐 · 주문 막힘' if halted else '꺼짐', 'icon': 'gpp_bad' if halted else 'verified_user',
                  'tone': 'alert' if halted else 'ok'},
                 {'label': '지금 상태', 'value': '실주문 중' if live else '계획만 기록', 'icon': 'radio_button_checked' if live else 'visibility',
                  'tone': 'up' if live else 'warn', 'pulse': live,
-                 'help': '실주문은 서비스 실주문 대기 + 자동매매 ON + 실주문 스위치 켜짐 + HALT 꺼짐일 때만 나갑니다.'}])
+                 'help': '실주문은 서비스 실주문 대기 + 자동매매 ON + 실주문 스위치 켜짐 + HALT 꺼짐일 때만 실행됩니다.'}])
         if on:
             st.warning(f'{label}은 실주문 스위치가 켜져 있습니다. 운용금·하루 손실·1주 가격 상한·회당 한도·새 종목 수·미체결 차단은 그대로 적용됩니다.',
                        icon=':material/warning:')
@@ -1444,8 +1444,8 @@ def live_order_switch(key, record):
                 st.toast(f'{label} 실주문을 켰습니다. 다음 회차(약 1분)부터 적용됩니다.', icon=':material/bolt:')
                 st.rerun()
         if not armed:
-            st.caption('장기투자 실행기가 아직 계획만(--execute 없이) 등록돼 있어 스위치를 켜도 실주문은 나가지 않습니다(재등록은 별도 승인).'
-                       if longterm else '미러 서비스가 아직 관찰 전용으로 돌고 있어 스위치를 켜도 실주문은 나가지 않습니다(서비스 재등록 필요).')
+            st.caption('장기투자 실행기가 아직 계획만(--execute 없이) 등록돼 있어 스위치를 켜도 실주문은 실행되지 않습니다(재등록은 별도 승인).'
+                       if longterm else '미러 서비스가 아직 관찰 전용으로 돌고 있어 스위치를 켜도 실주문은 실행되지 않습니다(서비스 재등록 필요).')
 
 
 def paper_live_table(records):
@@ -2155,7 +2155,7 @@ def account_form(key, record, records, prefix=''):
             engine = 'jev'
             engine_col.markdown('**운용 방식** · Jev 트레이딩 (공유 모의계좌 고정)',
                                 help='공유 모의계좌는 Jev가 매매합니다. 장기투자는 "장기투자" 탭의 가상 계좌와 실계좌에서 운용합니다.')
-        auto = auto_col.toggle('자동매매' + ((' (장기투자 실행)' if engine == 'longterm' else ' (미러 실행)') if live else ''), value=record['auto'], key=f'{prefix}auto_{key}', help=('끄면 이 계좌의 미러 실행기가 멈추고 실주문도 나가지 않습니다. 실제 주문 여부는 위 실주문 스위치가 정합니다.' if live else None))
+        auto = auto_col.toggle('자동매매' + ((' (장기투자 실행)' if engine == 'longterm' else ' (미러 실행)') if live else ''), value=record['auto'], key=f'{prefix}auto_{key}', help=('끄면 이 계좌의 미러 실행기가 멈추고 실주문도 실행되지 않습니다. 실제 주문 여부는 위 실주문 스위치가 정합니다.' if live else None))
         budget = {}
         caps = {}
         if not live:  # the first buy fits in one order and a symbol's total in the held limit: follow those limits as edited
@@ -2977,7 +2977,7 @@ def longterm_algorithm_view():
         for col, k in zip(st.columns(3) * 2, L_REGIMES):
             col.markdown(card(k, None, False), unsafe_allow_html=True)
     st.markdown('##### 매매 경로')
-    st.caption('켜짐은 그 거장 모듈이 지금 설정에서 켜져 있다는 뜻이며, 오늘 주문이 나간다는 뜻은 아닙니다. 조건 문장은 엔진 모듈 규칙 그대로입니다.')
+    st.caption('켜짐은 그 거장 모듈이 지금 설정에서 켜져 있다는 뜻이며, 오늘 주문이 실행된다는 뜻은 아닙니다. 조건 문장은 엔진 모듈 규칙 그대로입니다.')
     routes = LF.route_cards(current)
     for row in (routes[:3], routes[3:]):
         for col, (title, items, color, icon, on) in zip(st.columns(3), row):

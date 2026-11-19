@@ -141,7 +141,7 @@ def live_rules(record):
     size = '1주 기준' if rules['sizing'] == 'share' else f"금액 기준(운용금 비율, 체결 1건당 최대 {won(rules['tranche_krw'])})"
     rows = [
         ('실주문 스위치', '켜짐' if record.get('live_orders') is True else '꺼짐(계획만 기록)', '켜기는 확인 문구 필요',
-         '자동매매 ON · HALT 꺼짐 · 이 스위치가 모두 켜져야 실제 주문이 나갑니다.'),
+         '자동매매 ON · HALT 꺼짐 · 이 스위치가 모두 켜져야 실제 주문이 실행됩니다.'),
         ('운용금', won(budget.get('capital_krw', 0)), '실계좌 잔고 이내', '실계좌 매입 금액의 합이 이 금액을 넘지 않습니다(매수 직전 현금·총자산도 확인).'),
         ('하루 손실 한도', won(budget.get('daily_loss_krw', 0)), '최대 2만 원(계좌별)', '닿으면 그날 매수를 막고 정리합니다. 시세 급변·미체결로 초과할 수 있습니다.'),
         ('1주 가격 상한', won(budget.get('order_price_max_krw', 0)), '최대 200만 원', '이보다 비싼 종목은 사지 않습니다(매수에만 적용).'),

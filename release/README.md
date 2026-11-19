@@ -4,6 +4,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 | 릴리스 | 날짜 | 노트 |
 | --- | --- | --- |
+| v0.1.1 · 투자 철학 소개와 알림 설정 안내 | 2026-11-19 | [2026-11-19-v0.1.1-investment-story.md](2026-11-19-v0.1.1-investment-story.md) |
 | v0.1.0 · 첫 공개 릴리스 | 2026-11-19 | [2026-11-19-v0.1.0-first-public-release.md](2026-11-19-v0.1.0-first-public-release.md) |
 
 ## 규칙

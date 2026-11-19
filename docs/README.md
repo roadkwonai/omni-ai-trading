@@ -72,7 +72,7 @@ flowchart LR
 | [매매일지](journal.md) | 하루 레코드, 16:40 분석 리포트, 기간 일지, 장 마감 개선안, 대시보드 매매일지 탭 |
 | [장전 분석](premarket.md) | 장전 자료 수집, 엔진 참고 맥락, 상세 분석 리포트, 사전 점검과의 관계 |
 | [리포트 발행](report-pages.md) | HTML 리포트 생성·게시·발송, GitHub Pages(`/reports/`), 실패와 재시도 |
-| [알림](notifications.md) | Discord 실시간·장기 채널, 매도 손익, 마감 요약, 중복 방지 |
+| [알림](notifications.md) | Discord·Telegram·Slack 실시간·장기 채널, 매도 손익, 마감 요약, 중복 방지 (설정 절차는 [연동 서비스](integrations.md#알림-채널-두-개)) |
 
 ## 운영
 

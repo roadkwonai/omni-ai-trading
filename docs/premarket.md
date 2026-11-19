@@ -121,7 +121,7 @@ flowchart LR
 > [!WARNING]
 > 상세 분석 리포트는 사람이 읽는 글입니다. 엔진 입력에는 들어가지 않습니다. 엔진은 위 `premarket_context`만 받습니다.
 
-리포트는 HTML 페이지로도 만들어져 Discord 실시간 채널에 링크로 나갑니다. [리포트 발행](report-pages.md)을 보세요.
+리포트는 HTML 페이지로도 만들어져 Discord 실시간 채널에 링크로 발송됩니다. [리포트 발행](report-pages.md)을 보세요.
 
 ## 사전 점검과의 관계
 

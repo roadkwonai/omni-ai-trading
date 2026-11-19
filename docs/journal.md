@@ -166,7 +166,7 @@ sequenceDiagram
 > [!IMPORTANT]
 > 16:40 작업은 읽기 전용입니다. 주문·설정·서비스·코드를 바꾸지 않고, 쓰는 파일은 `journal-<key>.json`·`.md` 두 개뿐입니다. 전략 수치를 바꾸자는 제안은 `strategy_improvements`에 적고, 적용은 사용자가 대화에서 승인할 때만 합니다.
 
-리포트는 HTML 페이지로도 만들어집니다. 템플릿 검사를 통과한 것만 Discord 링크로 나갑니다. [리포트 발행](report-pages.md)을 보세요.
+리포트는 HTML 페이지로도 만들어집니다. 템플릿 검사를 통과한 것만 Discord 링크로 발송됩니다. [리포트 발행](report-pages.md)을 보세요.
 
 ## 기간 매매일지
 

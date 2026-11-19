@@ -220,7 +220,7 @@ def summary_cards(data):
              'tone': 'warn' if data['mode'] == '실주문' else 'off',
              'sub': checklist_text(data['checklist']),
              'help': f"실행기 {data['service'] or '미정의'} · 평일 09:35~14:40. ① launchd 등록 인자(ProgramArguments)에 --execute가 있어야 "
-                     '하고(재등록은 별도 승인) ② 이 계좌의 실주문 스위치(accounts.json live_orders)가 켜져야 실제 주문이 나갑니다.'},
+                     '하고(재등록은 별도 승인) ② 이 계좌의 실주문 스위치(accounts.json live_orders)가 켜져야 실제 주문이 실행됩니다.'},
             {'label': '오늘 엔진 판단', 'value': regime, 'tone': 'ai', 'icon': 'insights',
              'sub': f"{plan.get('day') or '—'} · {L.MODES.get(plan.get('mode'), plan.get('mode') or '—')} 모드"},
             {'label': '오늘 계좌 계획', 'value': f"{len(today.get('orders') or [])}건" if today.get('day') == plan.get('day') else '아직 없음',

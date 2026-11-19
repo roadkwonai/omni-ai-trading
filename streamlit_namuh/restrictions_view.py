@@ -65,7 +65,7 @@ def render(settings, events, day, save, limits=None, budget=None, prefix=''):
              'tone': 'warn' if sum(held.values()) else 'off', 'sub': '대기 회차 기준(같은 신호가 매분 반복되면 매분 셉니다)',
              'help': '각 규칙이 오늘 매수를 막은 횟수의 합입니다. 실행기 기록(events.jsonl)에서 셉니다.'}])
     if off:
-        st.warning('꺼진 제한: ' + ', '.join(r[2] for r in off) + '. 꺼진 규칙이 막던 매수가 그대로 나갑니다.', icon=':material/warning:')
+        st.warning('꺼진 제한: ' + ', '.join(r[2] for r in off) + '. 꺼진 규칙이 막던 매수가 그대로 실행됩니다.', icon=':material/warning:')
     flash = st.session_state.pop(f'{prefix}restrict_flash', None)
     if flash:
         st.success(flash, icon=':material/check_circle:')

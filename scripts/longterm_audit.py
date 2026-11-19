@@ -230,7 +230,7 @@ def _fills(root, rows, span, live_log, now):
     findings = ([f"{v['day']}: 가상 주문 미체결 — {L.asset_name(v['key'])} {v['filled']}/{v['qty']}주" for v in virtual]
                 + [f"{v['day']}: 실계좌 주문 미체결 — {v['account']} {v['symbol']} {'매수' if v['side'] == 'BUY' else '매도'} "
                    f"{v['filled']}/{v['qty']}주(체결 기록 기준)" for v in live]
-                + [f"{v['day']}: 재시작 뒤 전송 복구 — {v['account']} {v['symbol']}(같은 주문이 다시 나가지 않았는지 확인)" for v in recovered]
+                + [f"{v['day']}: 재시작 뒤 전송 복구 — {v['account']} {v['symbol']}(같은 주문이 다시 실행되지 않았는지 확인)" for v in recovered]
                 + [f"여운봉 못 산 몫 대기 — {book}: " + ', '.join(f'{L.asset_name(a)} {v:,}원' for a, v in o.items()) for book, o in owed.items()])
     return {'virtual': virtual, 'live': live, 'recovered': recovered, 'owed': owed}, findings
 

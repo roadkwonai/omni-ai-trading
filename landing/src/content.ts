@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.0' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.1' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 
@@ -16,9 +16,12 @@ export const DISCLAIMER_FULL = [
 export const AI_PAID = "이 서비스는 AI 도구와 함께 쓰는 AI 트레이딩 시스템입니다. 설치·운영·리포트 작성에 Claude Code나 Codex 같은 AI 코딩 에이전트가 필요하고, 이를 쓰려면 해당 서비스의 유료 요금제(Claude Pro·Max 또는 ChatGPT Plus·Pro 같은 구독, 또는 API 사용료)가 필요합니다. 매매 판단에 쓰는 Jev·OpenAI API도 각 서비스의 이용 조건과 요금을 따릅니다."
 
 export const NAV = [
+  { href: '#why', label: '왜 AI인가' },
   { href: '#highlights', label: '핵심 특징' },
+  { href: '#art', label: '투자 기법' },
   { href: '#jev', label: 'Jev' },
   { href: '#longterm', label: '장기투자' },
+  { href: '#styles', label: '내 스타일' },
   { href: '#ai', label: 'AI 운영' },
   { href: '#daily', label: '리포트' },
   { href: '#integrations', label: '연동' },
@@ -33,6 +36,93 @@ export const PILLARS = [
   { href: '#ai', icon: 'ChatsCircle', label: 'AI 에이전트 운영', body: '채팅으로 묻고 맡기기' },
   { href: '#daily', icon: 'ClipboardText', label: '매일의 감사·리포트', body: '장전부터 마감까지 자동 점검' },
   { href: '#integrations', icon: 'PlugsConnected', label: '연동 생태계', body: '증권사·AI·데이터·알림' },
+]
+
+// The "why" section under the hero. Numbers come from the cited studies (docs/landing-story-plan-2026-11-19.md §2).
+export const WHY_STATS = [
+  { num: '1.5배', label: '오른 종목을 내린 종목보다 **더 쉽게 팝니다**', source: 'Odean(1998), 미국 개인 계좌 1만 개', href: 'https://faculty.haas.berkeley.edu/odean/papers/disposition/disposition.html' },
+  { num: '연 11.4%', label: '가장 자주 사고판 가구의 수익률. 같은 기간 **시장은 17.9%**였습니다', source: 'Barber·Odean(2000), 6만 6,465가구', href: 'https://faculty.haas.berkeley.edu/odean/Papers%20current%20versions/Individual_Investor_Performance_Final.pdf' },
+  { num: '1% 미만', label: '수수료를 내고도 **꾸준히 이기는 데이트레이더**의 비율', source: 'Barber·Lee·Liu·Odean(2014), 대만 1992~2006', href: 'https://econpapers.repec.org/RePEc:eee:finmar:v:18:y:2014:i:c:p:1-24' },
+  { num: '46%', label: '2020년에 손실을 본 국내 개인투자자. **잦은 거래와 과잉확신**이 원인으로 꼽혔습니다', source: '자본시장연구원 웨비나(2021), 파이낸셜뉴스 보도', href: 'https://www.fnnews.com/news/202104131912345956' },
+]
+
+// Each trap pairs what people do with the rule that replaces it (all rules exist in docs/strategy.md).
+export const TRAPS = [
+  { trap: '손절을 못 합니다', human: '팔겠다고 정한 가격이 오면 **"조금만 더"**를 외칩니다.', fix: '손절선에 닿으면 ==1분 안에 매도 주문==을 냅니다. 기본 **−2%**, 국면이 불리하면 **−1%**입니다' },
+  { trap: '물을 탑니다', human: '평균 단가를 낮추려던 추가 매수가 **비중만 키웁니다.**', fix: '하락장에서는 ==롱에 물을 타지 않고==, 직전보다 나은 조건일 때만 나눠 삽니다' },
+  { trap: '바닥에서 던집니다', human: '버티고 버티다 **공포가 가장 클 때 전량을 팝니다.**', fix: '==손실이 작을 때 끊고==, 계좌 하루 손실 한도에 닿으면 **그날 매수를 멈춥니다**' },
+  { trap: '이익은 너무 빨리 팝니다', human: '조금 오르면 불안해 팔고, **크게 오를 종목을 놓칩니다.**', fix: '==절반만 먼저 익절==하고, 나머지는 **고점 대비 추적 청산**으로 추세를 따라갑니다' },
+  { trap: '타점을 놓칩니다', human: '차트, 뉴스, 수급을 챙겨 보며 **망설이는 사이 시점이 지나갑니다.**', fix: '차트, 90분 뉴스, 시황, 수급, 해외 선물을 ==1분마다 한 번에== 보고 판단합니다' },
+  { trap: '주도주를 못 찾습니다', human: '돈이 몰리는 곳 대신 **아는 종목, 물린 종목만** 봅니다.', fix: '거래대금·상승률 순위, 테마 대장주, 투자자·프로그램 순매수로 ==주도주를 찾아냅니다==' },
+]
+
+// 매수는 기술, 매도는 예술 (#art). Every line maps to a rule in docs/strategy.md.
+export const BUY_CRAFT = [
+  { title: '국면을 먼저 봅니다', body: '코스피·코스닥을 상승장·횡보장·하락장으로 판정하고, 시장이 매수 방향과 다를수록 크기를 **0.75배, 0.5배**로 줄입니다.' },
+  { title: '돈이 몰리는 곳을 찾습니다', body: '거래대금·거래량·상승률 순위, 테마 대장주, 투자자·프로그램 순매수로 ==오늘의 주도주 후보==를 추립니다.' },
+  { title: 'AI가 1분마다 고릅니다', body: 'Jev가 차트와 90분 뉴스, 시황과 수급을 보고 **종목 하나와 신뢰도**를 냅니다.' },
+  { title: '규칙이 한 번 더 거릅니다', body: '지수 방향, 5분 전보다 올랐는지, 최근 5분 거래량이 **1.2배 이상**인지 확인합니다. 인버스는 **다섯 관점이 모두 맞아야** 삽니다.' },
+  { title: '나눠 삽니다', body: '한 번에 다 사지 않고, **직전보다 나은 조건일 때만** 더 삽니다. 장 마감 30분 전부터는 추가 매수를 하지 않습니다.' },
+]
+export const SELL_ART = [
+  { title: '절반은 먼저 챙깁니다', body: '방어형은 **+1%에 절반, +2%에 나머지**를 팝니다. 추세가 강하면 **+2%에 절반**을 팝니다.' },
+  { title: '나머지는 추세를 따라갑니다', body: '남은 수량은 ==고점에서 1.5% 밀릴 때까지== 들고 갑니다. 2배 ETF는 폭을 1.5배로 넓힙니다.' },
+  { title: '번 돈은 지킵니다', body: '절반을 익절한 뒤 평균가로 돌아오면 **나머지를 본전에 정리**합니다.' },
+  { title: '불리하면 손실을 짧게 끊습니다', body: '손절은 기본 ==−2%==, 국면이 포지션에 불리하면 ==−1%==. 계좌 전체 손실은 **하루 한도**로 따로 막습니다.' },
+  { title: 'AI가 보유를 다시 봅니다', body: '매분 보유 종목마다 AI 판단을 받아, **확신이 크면 전량, 애매하면 33%**만 팝니다. 산 뒤 하락장으로 바뀌면 **절반을 줄입니다.**' },
+  { title: '큰 추세는 다음 날까지 가져갑니다', body: '==조건 11개를 통과한 추세형만== 이월하고, 스윙 조건 6개를 매일 다시 확인해 **최대 5거래일** 들고 갑니다.' },
+]
+// One position from entry to exit (#art diagram). `exits` can end it at any point.
+export const LIFECYCLE = [
+  { step: '진입', body: '분할 1회 · 방어형 또는 추세형' },
+  { step: '1차 익절', body: '+1~2%에서 남은 수량의 절반' },
+  { step: '추적 청산', body: '고점 대비 −1.5%까지 따라감' },
+  { step: '이월', body: '추세형 · 조건 11개 모두 통과' },
+  { step: '스윙', body: '조건 6개 매일 확인 · 최대 5거래일' },
+]
+export const LIFECYCLE_EXITS = ['손절 −2% · 불리한 국면 −1%', '익절 뒤 본전 정리', 'Jev 매도 33%·전량', '하락장 전환 시 절반', '14:40 장 마감 정리', '계좌 하루 손실 한도']
+
+// Jev by market regime (docs/strategy.md 시황별 대응).
+export const REGIME_PLAYS = [
+  { name: '상승장', tone: 'up', body: '롱을 중심으로 사고 ==추세형 포지션은 더 길게== 보유하며, 조건을 통과하면 **이월·스윙**까지 가져갑니다. 인버스는 관문에서 막힙니다.' },
+  { name: '횡보장', tone: 'wait', body: '매수 크기 **0.75배**, 손절 **−1%**. 같은 날 다시 살 때는 추격 매수를 막고 AI에게 한 번 더 확인합니다. ==대부분 그날 정리==합니다.' },
+  { name: '하락장', tone: 'down', body: '롱은 매수 크기 **0.5배**, 손절 **−1%**이고 ==물을 타지 않습니다.== 인버스는 시황·뉴스·수급·미국 시장이 **함께 폭락을 가리킬 때만** 사고, 아니면 **+0.3%**에 빠르게 익절합니다.' },
+]
+
+// 내 투자 스타일 (#styles). `how` is the real setting path.
+export const STYLES = [
+  { name: '안정형', tag: '천천히 부자', who: '매일 차트를 보지 않고 **오래 모으고 싶은 분**', run: '장기투자 + 적립식', how: '운영 엔진 → 장기투자만' },
+  { name: '균형형', tag: '중심은 지키며 일부로 대응', who: '자산의 중심은 지키며 **시장 흐름에도 올라타고 싶은 분**', run: '장기투자 + Jev 트레이딩', how: '운영 엔진 → 둘 다 운영. 실계좌는 계좌마다 엔진 선택' },
+  { name: '공격형', tag: '흐름을 적극적으로', who: '주도주와 시장 흐름을 **적극적으로 따라가고 싶은 분**', run: 'Jev 트레이딩만', how: '운영 엔진 → Jev만. 진입 경로 빠른 선택 → 적극적' },
+  { name: '실험형', tag: '먼저 지켜보기', who: '아직 확신이 없어 **결과부터 보고 싶은 분**', run: '모의계좌·가상 계좌로만', how: '기본값 그대로(실주문 스위치 꺼짐)' },
+]
+export const GROW = [
+  { title: '프리셋으로 시작', body: '진입 경로마다 보수적·기본·적극적·끄기 중에서 고릅니다.' },
+  { title: '매일 복기', body: '장 마감 개선안, 신호 적중률, 사지 않은 후보의 사후 결과를 봅니다.' },
+  { title: '승인한 것만 반영', body: '개선안은 제안으로만 오고, **내가 승인한 설정만** 바뀌며 변경 이력이 남습니다.' },
+]
+
+// 설정은 JSON, 경험은 SQLite (#data).
+export const DATA_JSON = [
+  { file: 'accounts.json', body: '계좌, 운용금, 주문 보호 한도, 실주문 스위치' },
+  { file: 'strategy-settings.json', body: '진입·익절·손절·이월 기준과 제한 규칙 스위치' },
+  { file: 'tunables.json', body: '장 시간, 조회 주기 같은 운영 조정값' },
+  { file: 'vibe-longterm/settings.json', body: '장기투자 거장 모듈, 비중, 적립식' },
+]
+export const DATA_SQLITE = [
+  { file: 'trading-ledger', body: '판단·주문·체결 이벤트 원장' },
+  { file: 'market-research', body: 'Jev 입력과 판단 근거, 신호 적중률, 그림자 후보' },
+  { file: 'trading-journal', body: '일·월·분기·연 매매일지' },
+  { file: 'oversold-cases', body: '10년 일봉으로 만든 낙폭 사례집' },
+  { file: 'longterm', body: '장기투자 결정, 순자산, 주문 근거' },
+  { file: 'settings-history', body: '모든 설정 변경의 이력' },
+]
+
+// First week of signal calibration (shared paper account, 11/11~11/17): higher confidence was not more accurate.
+export const CALIBRATION = [
+  { band: '0.6~0.7', hit: 72 },
+  { band: '0.7~0.8', hit: 56 },
+  { band: '0.8 이상', hit: 38 },
 ]
 
 export const JEV_INPUTS = [
@@ -56,8 +146,8 @@ export const JEV_USES = [
 export const JEV_TRUST = [
   { title: '선택형으로 답합니다', body: '자유 문장이 아니라 종목 하나와 신뢰도로 답해, 규칙으로 걸러 쓰기 쉽습니다.' },
   { title: '근거를 함께 남깁니다', body: '판단마다 결정 요인과 차트·뉴스·시황·수급 방향을 묻는 근거 질문 7개를 기록합니다.' },
-  { title: '적중률을 매일 잽니다', body: '신뢰도 구간별로 5·15·30분 뒤 결과를 모아, 높은 신뢰도가 정말 더 맞는지 확인합니다.' },
-  { title: '주문은 규칙이 정합니다', body: '신뢰도는 수익 확률이 아닙니다. 진입 조건과 주문 가드를 통과해야 주문이 나갑니다.' },
+  { title: '적중률을 매일 확인합니다', body: '신뢰도 구간별로 5·15·30분 뒤 결과를 모아, 높은 신뢰도가 정말 더 맞는지 확인합니다.' },
+  { title: '주문은 규칙이 정합니다', body: '신뢰도는 수익 확률이 아닙니다. 진입 조건과 주문 가드를 통과해야 주문이 실행됩니다.' },
 ]
 
 // Risk order, highest first. `masters` are MASTERS ids recommended in that season.
@@ -136,9 +226,9 @@ export const INTEGRATIONS = [
 ]
 
 export const HIGHLIGHTS = [
-  { icon: 'Scales', title: 'AI는 의견, 규칙이 주문', body: 'Jev와 OpenAI가 의견과 신뢰도를 내고, 주문은 승인된 진입·청산 규칙과 주문 가드를 모두 통과해야 나갑니다.', proof: '신뢰도는 수익 확률이 아닙니다' },
+  { icon: 'Scales', title: 'AI는 의견, 규칙이 주문', body: 'Jev와 OpenAI가 의견과 신뢰도를 내고, 주문은 승인된 진입·청산 규칙과 주문 가드를 모두 통과해야 실행됩니다.', proof: '신뢰도는 수익 확률이 아닙니다' },
   { icon: 'Stack', title: '성격이 다른 두 엔진', body: '국내 ETF·주식을 1분마다 판단하는 실시간 트레이딩과 미국 지수·테마 ETF를 천천히 모으는 장기투자를 따로 켜고 끕니다.', proof: '엔진별 장부와 운영 스위치' },
-  { icon: 'ShieldCheck', title: '모의 먼저, 실계좌는 단계적으로', body: '관찰, 가상 실행, 보호된 실주문 순서로만 엽니다. 실계좌는 계좌마다 실주문 스위치와 하루 손실 한도를 둡니다.', proof: '하루 손실 계좌별 최대 2만 원' },
+  { icon: 'ShieldCheck', title: '모의 먼저, 실계좌는 단계적으로', body: '관찰, 가상 실행, 보호된 실주문 순서로 한 단계씩 넘어갑니다. 실계좌는 계좌마다 실주문 스위치와 하루 손실 한도를 둡니다.', proof: '하루 손실 계좌별 최대 2만 원' },
   { icon: 'ArrowsClockwise', title: '기록하고 매일 돌아봅니다', body: '판단 근거, 주문, 체결이 남고 장 마감 뒤 매매일지와 개선안, 신호 적중률이 쌓입니다. 개선안은 사람이 승인해야 반영됩니다.', proof: '모든 설정 변경에 이력' },
   { icon: 'ChatsCircle', title: 'AI와 채팅으로 운영', body: 'Claude Code나 Codex에 말로 묻고 맡깁니다. 프로젝트 스킬과 예약 작업이 분석, 감사, 리포트를 씁니다.', proof: '스킬 9개 · 예약 작업 15개' },
   { icon: 'LockKey', title: '내 컴퓨터에서, 내 키로', body: 'Mac에서 로컬로 돌고 키와 계좌번호는 .env에만 둡니다. 화면, 리포트, 알림은 계좌번호를 가립니다.', proof: '저장소에 키·원장 없음' },
@@ -174,7 +264,7 @@ export const FEATURES = [
 export const SAFETY_STAGES = [
   { step: '1', title: '관찰', body: '실계좌는 계획만 기록하고 주문하지 않습니다.' },
   { step: '2', title: '가상 실행', body: '실시간 호가로 사고판 것처럼 가상 기록을 만들어 결과를 쌓습니다.' },
-  { step: '3', title: '보호된 실주문', body: '실주문 스위치, 확인 문구 입력, 실행 옵션이 모두 갖춰져야 열립니다.' },
+  { step: '3', title: '보호된 실주문', body: '실주문 스위치, 확인 문구 입력, 실행 옵션이 모두 갖춰져야 실제 주문이 실행됩니다.' },
 ]
 
 export const LIMITS = [
@@ -214,6 +304,8 @@ export const STEPS = [
 ]
 
 export const FAQ = [
+  { q: 'AI가 판단하면 손실이 안 나나요?', a: '아닙니다. Omni가 줄이려는 것은 망설임과 감정이지 손실 자체가 아닙니다. AI도 틀리기 때문에 손절과 계좌 하루 손실 한도가 늘 함께 있고, 신뢰도 구간별 적중률을 매일 다시 확인합니다.' },
+  { q: '트레이딩과 장기투자 중 무엇부터 해야 하나요?', a: '처음에는 모의계좌와 가상 계좌에서 둘 다 켜 두고, 성과 비교 탭과 매매일지로 몇 주 비교해 본 뒤 정하기를 권합니다. 운영 엔진에서 둘 다, Jev만, 장기투자만을 언제든 바꿀 수 있습니다.' },
   { q: '수익이 나나요?', a: '보장하지 않습니다. AI 판단, 모의 성과, 가상 체결, 과거 재현 결과는 미래 수익을 보장하지 않고, 금융투자상품은 원금 손실(0~100%)이 생길 수 있습니다. ' + DISCLAIMER_SHORT },
   { q: 'AI 도구 비용이 드나요?', a: AI_PAID + ' 요금과 이용 조건은 각 서비스의 최신 안내를 확인하세요.' },
   { q: '설치하면 실계좌로 바로 주문하나요?', a: '아닙니다. 기본은 모의계좌입니다. 실계좌는 계좌별 실주문 스위치, 확인 문구, 실행 옵션이 모두 있어야 주문하며 그 전에는 계획만 기록합니다.' },
