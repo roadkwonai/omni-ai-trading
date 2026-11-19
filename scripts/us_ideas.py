@@ -44,9 +44,9 @@ ETFS = {'IVV': ('S&P500', '379800'), 'QQQM': ('나스닥100', '379810'), 'SOXX':
 LARGE = ('IVV', 'QQQM', 'SOXX', 'QTUM', 'UFO')
 # look-alike US ETFs of the engine's US proxies (vibe_longterm.ASSETS[k][4]: QQQ, SPY, SOXX, QTUM, UFO), user approval 2026-11-18
 ALIASES = {'IVV': 'SPY', 'VOO': 'SPY', 'QQQM': 'QQQ', 'SMH': 'SOXX'}
-MANAGERS = {'Berkshire Hathaway': ('워렌 버핏', '버크셔 해서웨이'), 'Bridgewater Associates': ('레이 달리오', '브리지워터'),
+MANAGERS = {'Berkshire Hathaway': ('워런 버핏', '버크셔 해서웨이'), 'Bridgewater Associates': ('레이 달리오', '브리지워터'),
             'Oaktree Capital Management': ('하워드 막스', '오크트리')}
-MASTERS = {'buffett': '워렌 버핏 · 품질 프랜차이즈', 'lynch': '피터 린치 · 성장 대비 가격(PEG)',
+MASTERS = {'buffett': '워런 버핏 · 품질 프랜차이즈', 'lynch': '피터 린치 · 성장 대비 가격(PEG)',
            'fisher': '필립 피셔 · 성장의 질', 'tenbagger': '텐베거 후보 · 린치의 빠른 성장주'}
 FIELDS = ('revenue', 'gross_profit', 'operating_income', 'net_income', 'cfo', 'capex', 'shares_diluted', 'total_debt',
           'total_equity', 'cash')

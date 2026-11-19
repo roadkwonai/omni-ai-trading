@@ -47,7 +47,7 @@ PERIOD = (
 )
 # the written perspective (reviews/journal-<day or period key>.json): the same keys for a day and a period
 LISTS = ('retrospective', 'strategy_improvements', 'system_improvements', 'engine_notes', 'watch_next')
-KINDS = {'month': '월', 'quarter': '분기', 'half': '반기', 'year': '년'}
+KINDS = {'month': '월', 'quarter': '분기', 'half': '반기', 'year': '연'}
 WEEKDAYS = '월화수목금토일'
 PLACEHOLDER = '_작성 전 — '
 EMPTY_WRITTEN = PLACEHOLDER + '평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다._'

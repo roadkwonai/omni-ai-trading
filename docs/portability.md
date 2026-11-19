@@ -8,13 +8,14 @@
 - [복원](#복원)
 - [예약 작업 옮기기](#예약-작업-옮기기)
 - [스킬과 리포트 사이트 다시 잇기](#스킬과-리포트-사이트-다시-잇기)
-- [대시보드 백업·이식 탭](#대시보드-백업이식-탭)
+- [대시보드 백업·이식 화면](#대시보드-백업이식-화면)
 
 ## 어디에 무엇이 있나
 
 | 위치 | 내용 | git |
 | --- | --- | --- |
-| 저장소 | 코드, 문서, `AGENTS.md`, `.claude/skills/`(프로젝트 스킬) | 예 |
+| 저장소 | 코드, 공개 가이드 문서, `.claude/skills/`(프로젝트 스킬) | 예 |
+| `AGENTS.md`, `docs/`의 설계·감사 기록 | 운영자 결정 원문과 내부 설계 문서(비공개) | 아니오(`.gitignore`). 백업 아카이브에도 들어가지 않으므로 새 컴퓨터에는 직접 옮깁니다 |
 | `state/settings/` | 대시보드 설정 JSON의 정리본(계좌번호·해시·마스킹 번호 제거) | 예 |
 | `ops/scheduled-tasks/` | Claude 예약 작업 정의(`<taskId>/SKILL.md`)와 일정 목록 `manifest.json` | 예 |
 | `state/backups/` | 전체 백업 아카이브 `vibe-trading-state-<날짜>-<시각>.tar.gz`, 최근 14개 | 아니오 |
@@ -43,13 +44,13 @@ flowchart TB
   E -. 사용자 승인 뒤 .-> X["실주문 서비스, --execute,<br/>계좌별 실주문 스위치"]
 ```
 
-1. **준비**: 저장소 clone, `.venv` 준비, `.env`를 `.env.example`을 보고 직접 채웁니다(키를 대신 입력하지 않습니다).
+1. **준비**: 저장소 clone, `.venv` 준비 뒤 `.env.example`을 보고 `.env`를 직접 채웁니다(키를 대신 입력하지 않습니다).
 2. **점검**: `PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py check` — `.env` 키 이름(값 없음), 실행 데이터 폴더, launchd 서비스(`loaded`/`plist`/`missing`), 빠진 예약 작업, 일정 없는 예약 작업, 마지막 백업 나이를 JSON으로 냅니다.
 3. **복원**: 실행 데이터가 없거나 비었을 때만 [복원](#복원)합니다.
 4. **서비스**: `scripts/launchd_services.py --out DIR`로 plist를 만들어 `~/Library/LaunchAgents`에 복사하고 `launchctl bootstrap`합니다. 대시보드·관찰·읽기 전용 서비스부터 올립니다([운영 가이드](operations.md#등록과-확인)).
 5. **예약 작업**: [예약 작업 옮기기](#예약-작업-옮기기)
 6. **스킬·리포트 사이트**: [다시 잇기](#스킬과-리포트-사이트-다시-잇기)
-7. **검증**: 대시보드에서 종합 현황·운영 상태·API 연동·백업·이식 탭을 봅니다. 테스트는 `PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python -m pytest -q -p no:cacheprovider scripts/test_state_sync.py`
+7. **검증**: 대시보드에서 종합 현황 탭과 운영 탭의 운영 상태·API 연동·백업·이식 화면을 봅니다. 테스트는 `PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python -m pytest -q -p no:cacheprovider scripts/test_state_sync.py`
 
 > [!IMPORTANT]
 > 실주문과 관련된 서비스(`live-follow-*`, `longterm-live-*`, `--execute` 인자)와 계좌별 실주문 스위치는 사용자의 명시 승인 뒤에만 켭니다. 공유 모의 실행기 `shared-etf-paper`의 `--execute`도 계좌·보호 설정을 확인하고 승인받습니다.
@@ -89,7 +90,7 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py import <아카�
 ## 예약 작업 옮기기
 
 - **내보내기**: `state_sync.py tasks-export`(평일 16:55 `state-sync`가 매일 함께 실행)가 Claude 앱의 예약 작업 저장소에서 작업마다 지시문·제목·cron·한 번 실행 시각(KST)·켜짐·권한 모드를 읽어 `ops/scheduled-tasks/`(`<taskId>/SKILL.md` + `manifest.json`)에 씁니다. 앱에서 지운 작업은 백업에서도 뺍니다. 다만 앱 저장소가 이 저장소의 작업을 하나라도 보여 줄 때만 정리하고, 새 Mac·새 계정에서 복원 전이거나 형식을 모르는 저장소면 백업을 그대로 둡니다(`ops/scheduled-tasks`는 git에 없어 지우면 되돌릴 수 없음). 비밀값처럼 보이는 문자열이 있으면 경고합니다.
-- **새 계정에서 만들기**: manifest의 항목(`taskId`, `description`, `cron`/`schedule`)과 `<taskId>/SKILL.md` 본문으로 scheduled-tasks MCP의 `create_scheduled_task`를 호출합니다. 이미 있는 taskId는 먼저 목록으로 확인해 중복으로 만들지 않습니다. 한 번 실행하는 작업은 날짜가 지났으면 만들지 않고, 날짜가 고정된 cron(일·월 칸이 숫자)도 그 날짜가 지났으면 만들지 않습니다. 꺼진 작업은 만든 뒤 끄고, 권한 모드는 사용자에게 맞추게 알립니다. cron은 Mac 시간대로 돌므로 Asia/Seoul인지 먼저 확인합니다. API 연동 → 스킬·자동 작업의 '하루 일정'이 이 manifest의 모든 작업을 시각 순으로 보여 줍니다.
+- **새 계정에서 만들기**: manifest의 항목(`taskId`, `description`, `cron`/`schedule`)과 `<taskId>/SKILL.md` 본문으로 scheduled-tasks MCP의 `create_scheduled_task`를 호출합니다. 이미 있는 taskId는 먼저 목록으로 확인해 중복으로 만들지 않습니다. 한 번 실행하는 작업은 날짜가 지났으면 만들지 않고, 날짜가 고정된 cron(일·월 칸이 숫자)도 그 날짜가 지났으면 만들지 않습니다. 꺼진 작업은 만든 뒤 끄고, 권한 모드는 사용자에게 맞추게 알립니다. cron은 Mac 시간대로 돌므로 Asia/Seoul인지 먼저 확인합니다. 대시보드 운영 → 자동 작업이 이 manifest의 모든 작업을 날짜별 시각 순으로 보여 줍니다.
 - `state_sync.py check`의 `tasks_without_schedule`·`tasks_not_in_manifest`가 manifest 빈틈을 알려 줍니다.
 
 예약 작업 목록과 일정은 [자동 작업](automation.md#claude-예약-작업)에 있습니다. Codex 자동화를 쓰는 기기라면 같은 일을 하는 Claude 예약 작업과 둘 중 하나만 켭니다.
@@ -102,10 +103,12 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py import <아카�
 | `.agents/skills/`를 가리키는 링크(`ui-ux-pro-max`, `danswer-market-trading`, 애니메이션·랜딩 스킬 등) | 링크 대상 폴더가 git에 없으므로 원본을 다시 설치하고 `ln -s`로 잇습니다. `premarket-analysis`·`intraday-audit`의 공통 원본도 `.agents/skills/`에 있습니다. |
 | `developing-with-streamlit` | `.venv` 안 streamlit 패키지의 스킬로 다시 링크합니다. |
 | `design-taste-frontend` | 용량 때문에 git 제외. `ops-bootstrap` 스킬에 적힌 대로 taste-skill v2.5.1을 다시 설치합니다(Node 22+·Chrome 필요). |
-| 리포트 HTML 사이트 `~/.vibe-trading/report-pages/site` | 원본 리포트에서 다시 만들 수 있습니다: `report_pages.py --scan`. Pages 푸시(`REPORT_PAGES_PUSH=on`)는 사용자 승인 뒤([리포트 발행](report-pages.md)). |
+| 리포트 HTML 사이트 `~/.vibe-trading/report-pages/site` | 원본 리포트에서 다시 만들 수 있습니다(`report_pages.py --scan`). Pages 푸시(`REPORT_PAGES_PUSH=on`)는 사용자 승인 뒤([리포트 발행](report-pages.md)). |
 | 예약 작업 권한 규칙 `.claude/settings.local.json` | git 제외. `Bash(scripts/ro *)`·`Edit(.scratch/**)`·`Edit(~/.vibe-trading/nhplug/shared-etf-paper/reviews/**)`·`Read(~/.vibe-trading/**)`를 다시 넣어야 예약 작업이 승인 대기로 멈추지 않습니다([자동 작업](automation.md#읽기-전용-실행기-scriptsro)). |
 
-## 대시보드 백업·이식 탭
+## 대시보드 백업·이식 화면
+
+대시보드 **운영 → 백업·이식** 화면의 구성입니다.
 
 | 구역 | 하는 일 |
 | --- | --- |

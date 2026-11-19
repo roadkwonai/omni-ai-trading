@@ -147,7 +147,7 @@ def protection_rows(record, capital, settings):
               'daily_new_symbols': f"{limits['daily_new_symbols']}개" + (f' (첫 투입일 {FIRST_DAY_NEW_SYMBOLS}개)' if limits['daily_new_symbols'] == 5 else ''),
               'order_price_max_krw': f"{budget.get('order_price_max_krw', 0):,}원", 'daily_loss_krw': f"{budget.get('daily_loss_krw', 0):,}원"}
     rows = [{'항목': '월 매도 한도', '지금 값': sell, '확인': '엔진(가드 아님)',
-             '장기 계좌에서': '저수지(KOFR)를 뺀 매도는 한 달에 순자산의 이 비율까지만 합니다(워렌 버핏·필립 피셔 저회전 모듈). 리밸런싱 매도가 '
+             '장기 계좌에서': '저수지(KOFR)를 뺀 매도는 한 달에 순자산의 이 비율까지만 합니다(워런 버핏·필립 피셔 저회전 모듈). 리밸런싱 매도가 '
                          '이를 넘으면 다음 달로 미룹니다. 비율은 장기투자 → 전략의 버핏·피셔 카드에서 바꿉니다.'}]
     return rows + [{'항목': label, '지금 값': values[field], '확인': who, '장기 계좌에서': text} for field, (label, who, text) in GUARD.items()]
 
@@ -298,8 +298,51 @@ def nh_price(code):
     return price if row.get('iem_cd') == code and type(price) is int and price > 0 else None
 
 
-def yeo_instruments(cfg):
-    """[{역할, 종목, 코드, 비율, 기준 지수, 저수지 몫}]: the ETFs a 여운봉 저수지 매매법 setting buys and holds, by name."""
+@st.cache_data(ttl=300, show_spinner=False)
+def _reservoir_prices():
+    """{code: today's price or None} of the reservoir ETFs (display only, five minutes)."""
+    return {c: nh_price(c) for c in L.RESERVOIRS}
+
+
+def reservoir_panel(key, prefix, root, capital=None, held=None):
+    """저수지(대기 현금) ETF of book `key` (user 2026-11-19): where the money the strategy is not investing waits. 'auto'
+    keeps KOFR from L.RESERVOIR_AUTO_KRW up and the CD-rate ETF (half the share price) below. One at a time: a book still
+    holding another reservoir ETF switches once that is sold out. Saved in vibe-longterm settings books.<key>.reservoir."""
+    settings = L.load_settings(root)
+    book = settings['books'].get(key) or L.clean_book({})
+    now = L.reservoir_code(settings, key, capital, held)
+    st.markdown('##### 저수지 ETF · 투자할 종목이 없을 때 현금을 두는 곳')
+    prices = _reservoir_prices()
+    st.dataframe(pd.DataFrame([{'': '▶ 지금' if c == now else '', '종목': n, '코드': c,
+                                '1주 가격': f'{prices[c]:,}원' if prices.get(c) else '조회 안 됨', '성격': RESERVOIR_NOTES[c]}
+                               for c, n in L.RESERVOIRS.items()]), hide_index=True, width='stretch')
+    choice = st.radio('저수지 ETF 고르기', list(L.RESERVOIR_CHOICES), format_func=L.RESERVOIR_CHOICES.get, horizontal=True,
+                      index=list(L.RESERVOIR_CHOICES).index(book['reservoir']), key=f'{prefix}lt_res_{key}',
+                      help=f"자동: 운용금 {L.RESERVOIR_AUTO_KRW // 10_000:,}만 원 이상이면 KOFR, 그보다 작으면 1주 가격이 절반인 CD금리. "
+                           '1주 가격이 낮을수록 작은 계좌에서 남는 현금이 줄어듭니다. 주문은 1주 단위입니다.')
+    picked = L.reservoir_code({'books': {key: {'reservoir': choice}}}, key, capital)
+    if picked != now:
+        st.info((f'지금 {L.RESERVOIRS[now]}를 들고 있습니다. 다음 매매(평일 09:40)에 그것을 전량 팔고 그 돈을 {L.RESERVOIRS[picked]}로 옮깁니다'
+                 '(가상 체결이 꺼져 있으면 계획에만 적습니다).' if key == 'actual' else
+                 f'지금 {L.RESERVOIRS[now]}를 들고 있어 그 종목을 다 판 뒤부터 {L.RESERVOIRS[picked]}로 바뀝니다.')
+                + ' 한 장부는 저수지 ETF를 한 종목만 들어 평가 가격이 섞이지 않게 합니다.', icon=':material/swap_horiz:')
+    if st.button('저수지 ETF 저장', key=f'{prefix}lt_res_save_{key}', icon=':material/save:', disabled=choice == book['reservoir']):
+        try:
+            L.save_settings(root, {'books': {key: {'reservoir': choice}}})
+        except (OSError, ValueError) as exc:
+            st.error(f'저장하지 못했습니다: {exc}')
+        else:
+            st.toast('저수지 ETF를 저장했습니다. 다음 주문 계획부터 적용합니다.', icon=':material/check_circle:')
+
+
+RESERVOIR_NOTES = {'449170': 'KOFR(무위험 지표금리) 추종 · 매일 이자가 쌓임 · 1주가 비쌈',
+                   '357870': 'CD 91일물 금리 추종 · 매일 이자가 쌓임 · 거래량 많음',
+                   '272580': '만기 짧은 국공채·우량채 운용 · 금리 변화에 조금 흔들림 · 거래량 적음'}
+
+
+def yeo_instruments(cfg, res=None):
+    """[{역할, 종목, 코드, 비율, 기준 지수, 저수지 몫}]: the ETFs a 여운봉 저수지 매매법 setting buys and holds, by name
+    (res: the book's reservoir ETF, L.reservoir_code)."""
     import yeo_method as Y
     rows = []
     for index, risk, safe, _, steps, share in Y.pairs(cfg):
@@ -307,8 +350,9 @@ def yeo_instruments(cfg):
         for role, key, part in (('위험(성장)', risk, cfg['risk']), ('안전(채권 혼합)', safe, 1 - cfg['risk'])):
             rows.append({'역할': role, '종목': L.asset_name(key), '코드': L.code_of(key), '비율': f'{part:.0%}',
                          '기준 지수': f'{Y.INDEX[index][3]} 전고점 대비 낙폭 (단계: {when})', '저수지 몫': f'{share:.0%}'})
-    rows.append({'역할': '저수지(대기)', '종목': L.asset_name(Y.RESERVOIR), '코드': L.code_of(Y.RESERVOIR), '비율': '—',
-                 '기준 지수': '단계 전까지 현금·KOFR로 대기', '저수지 몫': '—'})
+    code = L.code_of(Y.RESERVOIR, res)
+    rows.append({'역할': '저수지(대기)', '종목': L.RESERVOIRS.get(code, L.asset_name(Y.RESERVOIR)), '코드': code, '비율': '—',
+                 '기준 지수': '단계 전까지 현금·저수지 ETF로 대기', '저수지 몫': '—'})
     return rows
 
 
@@ -339,7 +383,10 @@ def yeo_panel(key, prefix, root, saved, capital=None):
             if pd.notna(r['낙폭(%)']) and pd.notna(r['저수지 사용(%)'])]
     cfg = Y.clean({**saved, 'market': market, 'us_index': us, 'risk': risk / 100, 'band': band / 100, 'steps': rows})
     st.markdown('**이 설정으로 사는 종목** :gray[· 단계가 오면 저수지 돈을 위험 : 안전 비율로 나눠 삽니다]')
-    st.dataframe(pd.DataFrame(yeo_instruments(cfg)), hide_index=True, width='stretch')
+    import vibe_longterm_view as VV
+    held_now, cash_now = VV.holdings(root) if key == 'actual' else ({}, None)
+    res = L.reservoir_code(L.load_settings(root), key, L.CAPITAL if key == 'actual' else capital, held_now)
+    st.dataframe(pd.DataFrame(yeo_instruments(cfg, res)), hide_index=True, width='stretch')
     # what it does now
     plan = L.read_state(root, ('plan',)).get('plan') or {}
     ath = (plan.get('indicators') or {}).get('ath') or {}
@@ -354,10 +401,8 @@ def yeo_panel(key, prefix, root, saved, capital=None):
     info = today.get('info') or {}
     if key == 'actual':  # the reservoir the rule spends: the virtual book's cash less the 적립식's own money, plus its KOFR
         import longterm_dca
-        import vibe_longterm_view as VV
-        held_now, cash_now = VV.holdings(root)
-        res_qty = (held_now.get(L.ASSETS['RES'][0]) or (0,))[0]
-        res_price = (latest_prices({}, VV.load(root)[1]).get('RES') or (None,))[0] or nh_price(L.ASSETS['RES'][0]) or 0
+        res_qty = (held_now.get(res) or (0,))[0]
+        res_price = (latest_prices({}, VV.load(root)[1]).get('RES') or (None,))[0] or nh_price(res) or 0
         waiting = longterm_dca.reserved(L.read_state(root, ('dca:actual',)).get('dca:actual') or {})
         invested = 0
         reservoir_base = max(0, (cash_now if cash_now is not None else L.CAPITAL) - waiting) + res_qty * res_price
@@ -379,7 +424,6 @@ def yeo_panel(key, prefix, root, saved, capital=None):
     held = (any((held_now.get(L.code_of(k)) or (0,))[0] for k in Y.keys(cfg)) if key == 'actual' else
             info.get('weights') and any(k in (info.get('weights') or {}) and info['weights'][k] for k in Y.keys(cfg)))
     st.markdown('**지금 적용** · ' + ' / '.join(lines))
-    import vibe_longterm_view as VV
     recorded = latest_prices(today, VV.load(root)[1])  # the newest recorded plan prices (no broker call), else an NH quote
     prices = {k: (recorded.get(k, (None,))[0] if k in L.ASSETS else None) or nh_price(L.code_of(k)) for k in Y.keys(cfg)}
     plan_rows = Y.share_plan(cfg, reservoir_base, prices, L.FEE)
@@ -396,7 +440,7 @@ def yeo_panel(key, prefix, root, saved, capital=None):
                + f' · 가격: {price_text}. 주 수는 1주 단위(수수료 포함)입니다.')
     import longterm_dca
     dca = longterm_dca.clean(L.load_settings(root)['dca'].get(key))
-    st.info('**위 금액은 지금 저수지로 계산한 예시입니다.** 실제 단계 금액은 그 하락 주기의 1단계가 오는 날의 저수지(현금 + KOFR)로 정해지고, '
+    st.info('**위 금액은 지금 저수지로 계산한 예시입니다.** 실제 단계 금액은 그 하락 주기의 1단계가 오는 날의 저수지(현금 + 저수지 ETF)로 정해지고, '
             '2·3단계도 그 1단계 금액을 기준으로 나눕니다. 그 전에 적립식으로 돈이 들어오거나 잔고가 바뀌면 금액도 달라집니다.'
             + (f" 지금 이 장부는 적립식이 켜져 있어 {longterm_dca.FREQUENCIES[dca['frequency']]} "
                f"{'종목별 ' + format(dca['shares_n'], ',') + '주' if dca['size'] == 'shares' else format(dca['amount_krw'], ',') + '원'}이 들어옵니다"
@@ -489,6 +533,7 @@ def strategy_panel(key, prefix='', root=None, capital=None):
             st.error(f'저장하지 못했습니다: {exc}')
         else:
             st.toast('계좌 전략을 저장했습니다. 다음 주문 계획(평일 09:40)부터 적용합니다.', icon=':material/check_circle:')
+    reservoir_panel(key, prefix, root, capital)
 
 
 def settings_panel(key, record, capital, prefix=''):

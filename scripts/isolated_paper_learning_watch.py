@@ -100,6 +100,11 @@ def main(argv=None):
                     print(json.dumps({'trading_journal_periods': trading_journal.update_periods(now.strftime('%Y-%m-%d'))}), flush=True)
                 except Exception as exc:
                     print(json.dumps({'trading_journal_error': type(exc).__name__}), flush=True)
+                try:  # 성과 비교 rows (Jev vs 장기투자, plan 2026-11-19): after the journal, whose KOSPI regime it reads
+                    import strategy_compare
+                    print(json.dumps({'strategy_compare': strategy_compare.build(root.parent)}), flush=True)
+                except Exception as exc:
+                    print(json.dumps({'strategy_compare_error': type(exc).__name__}), flush=True)
             break
         try:
             n = ingest(root / 'events.jsonl', root / 'trading-ledger.sqlite3')

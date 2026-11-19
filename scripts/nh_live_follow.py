@@ -205,11 +205,18 @@ def tranche_shares(record, paper_record=None, root=None, source=None):
     the paper spends. Fractions add up per position and mirror_target rounds them, at least one share while the paper
     holds: a share dearer than the scaled amount (e.g. 190,000 KRW) is still bought once when it is within tranche_krw
     and the price cap; one above either maps to none."""
-    from accounts import DEFAULT_BUDGET, live_rules, load, paper_limits
+    from accounts import live_rules
     rules = live_rules(record)
     if rules['sizing'] != 'amount':
         return pinned(lambda price, qty=1: 1, record, root, source, rules['max_adds'])
+    return pinned(amount_shares(record, paper_record)[1], record, root, source, rules['max_adds'])
+
+
+def amount_shares(record, paper_record=None):
+    """(ratio, shares(price, qty)) of the amount basis for this live account, whatever basis it has chosen."""
+    from accounts import DEFAULT_BUDGET, live_rules, load, paper_limits
     from nh_paper_isolated import SPLIT_TRANCHES
+    rules = live_rules(record)
     budget = record.get('budget') or {}
     capital = int(budget.get('capital_krw') or DEFAULT_BUDGET['live']['capital_krw'])  # the account's own capital
     if paper_record is None:
@@ -222,7 +229,27 @@ def tranche_shares(record, paper_record=None, root=None, source=None):
         if not 0 < price <= cap:
             return 0
         return min(Decimal(qty) * Decimal(price) * ratio, Decimal(amount)) / Decimal(price)
-    return pinned(shares, record, root, source, rules['max_adds'])
+    return ratio, shares
+
+
+def sizing_example(record, paper_record=None, prices=(10_000, 50_000, 200_000, 800_000)):
+    """For the dashboard: one paper tranche (first_buy_krw) bought at each price, and the live shares each basis
+    buys for it (rounded as mirror_target does; the share basis is still held to the 1-share price cap by the guard)."""
+    from accounts import load
+    if paper_record is None:
+        paper_record = load().get('paper-shared') or {}
+    first_buy = int((paper_record.get('budget') or {}).get('first_buy_krw') or 1_000_000)
+    price_cap = int((record.get('budget') or {}).get('order_price_max_krw', 0))
+    ratio, shares = amount_shares(record, paper_record)
+    rows = []
+    for price in prices:
+        qty = max(1, first_buy // price)
+        units = shares(price, qty)
+        rows.append({'price': price, 'paper_qty': qty, 'paper_krw': qty * price,
+                     'live_krw': int(Decimal(qty * price) * ratio),
+                     'amount': max(1, int(Decimal(units).to_integral_value(ROUND_HALF_UP))) if units else 0,
+                     'share': 1 if 0 < price <= price_cap else 0})
+    return ratio, rows
 
 
 def fill_id(rowid, symbol, qty, price, stamp):

@@ -66,13 +66,6 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(candidate['choice'], 'INV')
         self.assertEqual((rows['114800']['jev_prob'], rows['114800']['vibe_score'], rows['114800']['vote']), (0.6, 0.6, 1))
         self.assertEqual(rows['005930']['jev_holding'], 'SELL 0.36')
-        self.assertEqual(ec.stance(rows['114800']), '같음 · 매수')
-        self.assertEqual(ec.stance(rows['005930']), '다름 · Jev 관망 / vibe 매도')
-        self.assertEqual(ec.stance({'vibe_score': 0.1}), '한쪽만 판단')
-        self.assertEqual(ec.jev_call({'jev_prob': 0.1, 'jev_holding': 'SELL 0.72', 'jev_holding_conf': 0.72}), '보유 매도')
-        self.assertEqual(ec.vibe_call({'vibe_score': 0.25, 'strength': True}), '강도 매수')
-        self.assertEqual(ec.vibe_call({'vibe_score': 0.25}), '관망')
-        self.assertEqual(ec.stance({'jev_prob': 0.1, 'jev_holding': 'SELL 0.8', 'jev_holding_conf': 0.8, 'vibe_score': -0.4}), '같음 · 매도')
 
 
 class LiveJournalTests(unittest.TestCase):
@@ -151,57 +144,6 @@ class ReadEventsCacheTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
-
-def test_entry_split_separates_jev_fast_episodes_from_vibe_own():
-    rows = [
-        {'time': '2026-11-17T09:42', 'symbol': '114800', 'side': 'BUY', 'qty': 10, 'price': 100, 'after': 10, 'pnl': None, 'cost': None, 'path': 'Jev 빠른 매수(vibe 보조)'},
-        {'time': '2026-11-17T10:14', 'symbol': '114800', 'side': 'SELL', 'qty': 10, 'price': 98, 'after': 0, 'pnl': -20, 'cost': 1000, 'path': '익절'},
-        {'time': '2026-11-17T11:00', 'symbol': '328130', 'side': 'BUY', 'qty': 5, 'price': 200, 'after': 5, 'pnl': None, 'cost': None, 'path': '관심종목 강도(vibe 점수)'},
-        {'time': '2026-11-17T11:30', 'symbol': '328130', 'side': 'SELL', 'qty': 5, 'price': 210, 'after': 0, 'pnl': 50, 'cost': 1000, 'path': 'vibe 매도 점수'}]
-    assert ec.entry_split(rows, ec.PATHS['jev_fast']) == (-20, 1, 50)
-
-
-def test_period_daily_lines_up_jev_realized_with_longterm_nav():
-    import engine_compare as ec
-    jev = [{'time': '2026-11-17T10:00', 'side': 'SELL', 'pnl': -100.0}, {'time': '2026-11-18T10:00', 'side': 'SELL', 'pnl': 300.0},
-           {'time': '2026-11-18T11:00', 'side': 'BUY', 'pnl': None}, {'time': '2026-11-19T10:00', 'side': 'SELL', 'pnl': 50.0}]
-    nav = [('2026-11-18', 'actual', 100_000_500), ('2026-11-18', 'base', 99_999_000), ('2026-11-19', 'actual', 100_001_000)]
-    rows = ec.period_daily(jev, nav)
-    assert [r['날짜'] for r in rows] == ['2026-11-18', '2026-11-19']  # from the long-term start
-    assert rows[0]['Jev 누적'] == 300 and rows[1]['Jev 누적'] == 350
-    assert rows[0]['장기투자 누적'] == 500 and rows[1]['기본 그림자 누적'] == -1000  # carried from the last record
-    assert ec.period_daily(jev, []) == []
-
-
-def test_period_daily_carries_the_last_longterm_value_into_days_without_one():
-    import engine_compare as ec
-    jev = [{'time': '2026-11-19T10:00', 'side': 'SELL', 'pnl': 50.0}]
-    rows = ec.period_daily(jev, [('2026-11-18', 'actual', 100_000_500)])
-    assert rows[-1]['날짜'] == '2026-11-19' and rows[-1]['장기투자 누적'] == 500
-
-
-def test_period_compare_has_the_auto_shadow_drawdowns_and_regime_days(tmp_path):
-    import engine_compare as ec
-    import vibe_longterm as LT
-    nav = [('2026-11-18', 'auto', 101_000_000), ('2026-11-19', 'auto', 99_990_000), ('2026-11-18', 'actual', 100_000_000)]
-    assert ec.period_daily([], nav)[-1]['자동 그림자 누적'] == -10_000
-    from vibe_longterm_view import drawdowns
-    falls = drawdowns(nav, {})
-    assert round(falls['auto'], 4) == -0.01 and falls['actual'] == 0.0
-    db = LT.connect(tmp_path)
-    LT.log(db, 'regime', '2026-11-18', regime='bull')
-    LT.log(db, 'regime', '2026-11-19', regime='bull')
-    LT.log(db, 'regime', '2026-11-19', regime='correction')  # the day's last call stands
-    assert ec.regime_days(tmp_path / 'longterm.sqlite3') == [('2026-11-18', 'bull'), ('2026-11-19', 'correction')]
-
-
-def test_period_daily_does_not_count_contributions_as_profit():
-    import engine_compare as ec
-    nav = [('2026-11-18', 'actual', 100_000_500), ('2026-11-19', 'actual', 101_000_500), ('2026-11-19', 'base', 101_000_000)]
-    rows = ec.period_daily([], nav, {'2026-11-19': 1_000_000})
-    assert [r['장기투자 누적'] for r in rows] == [500, 500] and rows[-1]['기본 그림자 누적'] == 0
-    assert [r['적립 누계'] for r in rows] == [0, 1_000_000]
 
 
 def test_one_corrupt_line_does_not_hide_the_other_events(tmp_path):

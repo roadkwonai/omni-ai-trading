@@ -12,7 +12,9 @@ class TestPages(unittest.TestCase):
     self.n+=1
     if self.n==1:return {'status':'ok','data':{'rsp_cd':'00218','rsp_msg':'계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다.','Output_0':[{'ny_cns_qty':1}],'_nh_pagination':{'complete':False,'cts':'c','cts_flag':'Y'}}}
     return {'status':'ok','data':{'rsp_cd':'00166','rsp_msg':'조회가 완료되었습니다.','Output_0':[],'_nh_pagination':{'complete':True}}}
-  self.assertEqual(len(order_pages(Adapter(),'hidden',datetime.now(ZoneInfo('Asia/Seoul')))),1)
+  waits=[]
+  self.assertEqual(len(order_pages(Adapter(),'hidden',datetime.now(ZoneInfo('Asia/Seoul')),sleep=waits.append)),1)
+  self.assertTrue(waits and waits[0]>0.5)  # the second page waits for NH's ~1 request a second (11-19 IGW42903)
   class Bad:
    def call_tool(self,*args):return {'status':'ok','data':{'rsp_cd':'00166','rsp_msg':'조회가 완료되었습니다.','Output_0':[]}}
   with self.assertRaises(ValueError):order_pages(Bad(),'hidden',datetime.now(ZoneInfo('Asia/Seoul')))

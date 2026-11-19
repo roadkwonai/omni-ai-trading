@@ -105,7 +105,7 @@ def test_a_virtual_step_order_that_did_not_fill_is_owed_to_the_next_day(tmp_path
     st = L.read_state(tmp_path)
     L.put_state(L.connect(tmp_path), plan={**st['plan'], 'indicators': {**st['plan']['indicators'], 'ath': {'ndx': {'dd': -0.21}}}})
     L.save_settings(tmp_path, {'execute': True, 'books': {'actual': {'strategy': 'yeo_method'}}})
-    def half_filled(broker, planned, quotes, held, execute, reserved=0):
+    def half_filled(broker, planned, quotes, held, execute, reserved=0, res=None):
         return [{'key': k, 'side': 'BUY', 'qty': 10, 'filled': 0 if k == 'NDXMIX' else 10, 'price': 10_000, 'number': 1}
                 for k in planned], None
     monkeypatch.setattr(L, 'send_orders', half_filled)

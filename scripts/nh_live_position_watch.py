@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from dotenv import dotenv_values
 from src.config.loader import load_agent_config
 from src.tools.mcp import MCPServerAdapter
-from nh_live_broker import _pages
+from nh_live_broker import PAGE_GAP, _pages
 from nh_live_loss_preflight import evaluate
 from src.config.paths import get_runtime_root
 from src.live.halt import halt_flag_set
@@ -18,11 +18,14 @@ from nh_live_policy import decide, record
 KST = ZoneInfo('Asia/Seoul')
 ROOT = Path.home()/'.vibe-trading/nhplug/etf-experiment'
 
-def order_pages(adapter, account, now):
-    rows=[]; cursor=None; flag=None; seen=set()
+def order_pages(adapter, account, now, sleep=time.sleep, clock=time.monotonic):
+    rows=[]; cursor=None; flag=None; seen=set(); started=None
     for _ in range(20):
         request={'operationId':'krstockInquiryDailyOrderExecution','input':{'act_no':account,'orr_dt':now.strftime('%Y%m%d'),'orr_mkt_cd':'00','ost_cns_dit':'0'},'want_pagination':True}
-        if cursor: request.update(cts=cursor,cts_flag=flag)
+        if cursor:
+            request.update(cts=cursor,cts_flag=flag)
+            sleep(max(0.0, started + PAGE_GAP - clock()))  # NH takes the same query ~once a second (11-19 IGW42903)
+        started=clock()
         response=adapter.call_tool('call_api',request); data=response.get('data',{}); meta=data.get('_nh_pagination',{})
         message=data.get('rsp_msg','').strip().rstrip('.')
         accepted={('00218','계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다'),('00166','조회가 완료되었습니다'),('00000','조회가 완료되었습니다'),('11512','데이터가 존재하지 않습니다')}

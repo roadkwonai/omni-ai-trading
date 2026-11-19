@@ -47,3 +47,26 @@ class PrefsHistoryTests(unittest.TestCase):
             path.parent.mkdir()
             prefs.save(path, {'refresh_s': 60})
             self.assertTrue((Path(tmp) / 'nhplug' / 'settings-history.sqlite3').exists())
+
+
+def test_tabs_come_in_three_groups_and_old_names_find_their_new_place():
+    """2026-11-19 menu plan: 10 tabs, 주문·정리 inside 실계좌, the four admin screens inside 운영."""
+    assert [name for name, _ in prefs.GROUPS] == ['매일', '계좌', '관리']
+    assert prefs.TABS[-4:] == ['계좌·자동매매', '장기투자', '실계좌', '운영'] and len(prefs.TABS) == 10
+    assert prefs.place('엔진 비교') == ('성과 비교', None, None)
+    assert prefs.place('주문·정리') == ('실계좌', 'live_view', prefs.LIVE_ORDERS)
+    assert prefs.place('API 연동') == ('운영', 'ops_view', 'API 연동')
+    assert prefs.place('매매일지') == ('매매일지', None, None) and prefs.place('없는 탭') is None
+    assert prefs.place('운영', 'API 연동') == ('운영', 'ops_view', 'API 연동') and prefs.place('매매일지', 'x') == ('매매일지', None, None)
+    assert prefs.place('운영', '없는 화면') == ('운영', None, None)
+    for old, new in (('백업·이식', '운영'), ('엔진 비교', '성과 비교'), ('주문·정리', '실계좌'), ('없는 탭', '종합 현황')):
+        assert prefs.load_from({'start_tab': old})['start_tab'] == new
+
+
+def test_the_sidebar_shows_the_groups_and_the_tab_bar_gets_dividers_before_each_later_group():
+    html = sidebar.nav_html(prefs.TABS, prefs.GROUPS)
+    assert [g for g in ('매일', '계좌', '관리') if f'class="nav-group">{g}<' in html] == ['매일', '계좌', '관리']
+    assert html.count('class="nav-btn"') == len(prefs.TABS)
+    css = sidebar.tab_groups_css(prefs.GROUPS)
+    assert ':nth-of-type(7)' in css and ':nth-of-type(10)' in css and ':nth-of-type(1)' not in css
+    assert css.count('.st-key-main_tab > div > [role="tablist"]') == 4  # main bar only, never a tab's own sub-tabs

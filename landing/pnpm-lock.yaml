@@ -23,6 +23,9 @@ importers:
       react-dom:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
+      ztd-charts:
+        specifier: 0.13.1
+        version: 0.13.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     devDependencies:
       '@types/react':
         specifier: ^19.3.0
@@ -520,6 +523,12 @@ packages:
       yaml:
         optional: true
 
+  ztd-charts@0.13.1:
+    resolution: {integrity: sha512-WtyYW2ooE+e61mi9Xo+FqnK1dhik67IFzreDKlbeuIsUOcwCO7qIMa3utJYaV8O4iL7pYV7iymsBNvBpFARz5A==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+
 snapshots:
 
   '@emnapi/core@2.0.0-beta.2':
@@ -839,3 +848,8 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       fsevents: 2.3.3
+
+  ztd-charts@0.13.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1):
+    dependencies:
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)

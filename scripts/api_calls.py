@@ -34,7 +34,7 @@ HOSTS = (  # host suffix -> provider key (api_catalog.CATALOG); first match wins
     ('nhplug.com', 'nh'), ('kiwoom.com', 'kiwoom'), ('tossinvest.com', 'toss'), ('naver.com', 'naver'),
     ('kind.krx.co.kr', 'kind'), ('krx.co.kr', 'krx'), ('fss.or.kr', 'opendart'), ('news.google.com', 'google_news'),
     ('bing.com', 'bing_news'), ('yahoo.com', 'yahoo'), ('tradingview.com', 'tradingview'), ('openai.com', 'openai'),
-    ('typesafe.ai', 'jev'), ('stlouisfed.org', 'fred'), ('federalreserve.gov', 'fed'), ('sec.gov', 'sec'), ('discord.com', 'discord'),
+    ('typesafe.ai', 'jev'), ('stlouisfed.org', 'fred'), ('federalreserve.gov', 'fed'), ('sec.gov', 'sec'), ('discord.com', 'discord'), ('api.telegram.org', 'telegram'), ('hooks.slack.com', 'slack'),
     ('github.io', 'report_pages'), ('api.github.com', 'report_pages'), ('jsdelivr.net', 'report_pages'))
 CODE_AFTER = {'chart', 'quote', 'stock', 'stocks', 'item', 'index', 'symbols'}
 SCHEMA = """

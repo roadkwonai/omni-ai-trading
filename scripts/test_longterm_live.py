@@ -270,7 +270,7 @@ def test_dca_contribution_is_recorded_only_once_its_order_is_sent(tmp_path):
     cfg = {'on': True, 'amount_krw': 50_000, 'day': 1}
     broker = Broker()
     run(tmp_path, at(9, 41), broker, execute_orders=True)
-    broker.refuse = {c: 'capital limit exceeded' for c in CODE.values()}  # every order refused for good
+    broker.refuse = {c: 'capital limit exceeded' for c in [*CODE.values(), *L.RESERVOIRS]}  # every order refused for good
     assert run(tmp_path, at(10, 0), broker, execute_orders=True, dca=cfg)['action'] == 'DCA'
     send_all(tmp_path, broker, start=(10, 1), dca=cfg)
     state = LL.load_state(tmp_path, 'live-2')

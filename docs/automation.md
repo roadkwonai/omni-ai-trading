@@ -98,7 +98,7 @@ gantt
 | `us-ideas` | 미국 종목 아이디어 | `us_ideas.py --scheduled` (참고 정보, 주문 없음) | 금 07:00 · 07:30 | `vibe-longterm` |
 
 > [!IMPORTANT]
-> `live-follow-1`은 `--execute`로 등록돼 있지만 실제 주문은 계좌별 실주문 스위치(기본 꺼짐)·자동매매 스위치·HALT 꺼짐일 때만 나갑니다. 그 밖에는 계획만 기록합니다. `longterm-live-2`는 `--execute`가 없어 계획만 냅니다. 실주문 전환은 별도 사용자 승인입니다. [안전 장치](safety.md)를 보세요.
+> `live-follow-1`은 `--execute`로 등록돼 있지만 실제 주문은 계좌별 실주문 스위치(기본 꺼짐)·자동매매 스위치·HALT 꺼짐일 때만 나갑니다. 그 밖에는 계획만 기록합니다. `longterm-live-2`는 `--execute`가 없어 계획만 냅니다. 실주문 전환은 별도 사용자 승인입니다. [안전장치](safety.md)를 보세요.
 
 **퇴역한 서비스** (2026-11-17, plist는 `~/.vibe-trading/nhplug/retired-launchd-2026-11-17/`에 보관): `vibe-advisor`, `vibe-paper`, `vibe-fast-exit-observer`, `vibe-event-advisor`, `vibe-event-replay`, `live-follow-2`, `jev-virtual`. 다시 쓰려면 별도 승인과 재등록이 필요합니다.
 
@@ -120,7 +120,7 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 | `oversold-weekly-audit` | 금 16:45 | vibe-trading | `reviews/oversold-weekly-DAY.md` |
 | `longterm-strategy-weekly` | 금 16:50 | longterm-strategy-writer | 주간 전략 리포트 |
 | `longterm-audit-weekly` | 금 17:40 | vibe-trading | `audit-YYYY-Www.md` |
-| `trading-journal-period` | 매월 1일 17:10 | trading-journal-writer | 월·분기·반기·년 매매일지 |
+| `trading-journal-period` | 매월 1일 17:10 | trading-journal-writer | 월·분기·반기·연 매매일지 |
 | `longterm-strategy-monthly` | 매월 1일 17:20 | longterm-strategy-writer | 월간 전략 리포트 |
 | `longterm-audit-monthly` | 매월 1일 17:45 | vibe-trading | `audit-YYYY-MM.md` |
 
@@ -130,23 +130,26 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 
 모든 예약 작업은 공통 규칙을 따릅니다.
 
-- 저장소의 `AGENTS.md`를 먼저 읽습니다.
+- 운영자 로컬의 `AGENTS.md`(사용자 결정 원문, 비공개·git 제외)를 먼저 읽습니다.
 - **읽기 전용**: 주문, 설정·스위치 변경, 서비스 조작, 원장·이벤트 수정을 하지 않습니다. 개선안은 제안만 합니다. (예외: `trading-preflight`는 빠진 서비스 재등록처럼 개장 준비를 고칠 수 있지만, 매매 규칙·한도·실주문 스위치·STOP/HALT는 건드리지 않습니다.)
 - 셸 명령은 [`scripts/ro`](#읽기-전용-실행기-scriptsro)로 하나씩만 실행합니다. 그래서 사람이 없어도 승인 대기로 멈추지 않습니다.
+
+> [!TIP]
+> 새 환경에서 이 작업들을 프롬프트로 만드는 법과 작업마다의 지시문 요약은 [AI와 함께 쓰기 6절](ai-agents.md#6-예약-작업-등록)에 있습니다.
 
 > [!TIP]
 > 예약 작업을 고쳤으면 `state_sync.py tasks-export`로 `ops/scheduled-tasks/` 복사본을 갱신합니다. 새 계정에서 다시 만드는 법은 [이식](portability.md)에 있습니다. 복사본은 내보낸 시점 기준이라 지금 등록된 목록과 다를 수 있습니다.
 
 ## Codex 자동화와의 중복
 
-같은 일을 하는 Codex 자동화가 있습니다. 둘 다 켜면 같은 리포트·감사가 두 번 돕니다.
+같은 일을 하는 Codex 자동화가 있습니다. 둘 다 켜면 같은 리포트·감사가 두 번 돌아갑니다.
 
 | Codex 자동화 | 같은 일을 하는 Claude 예약 작업 | 상태 |
 | --- | --- | --- |
 | 장전 상세 분석 작성 (평일 08:42) | `premarket-analysis-daily` (08:31) | 2026-11-17부터 일시 정지 |
 | 장중 매매·차단 감사 (평일 매시 20분) | `intraday-audit-hourly` | 2026-11-17부터 일시 정지 |
 
-두 쪽은 같은 스킬 원본(`.agents/skills/premarket-analysis`, `.agents/skills/intraday-audit`)과 수집기를 쓰므로 결과 형식이 같습니다. **둘 중 하나만 켭니다.** 상태는 대시보드 **API 연동 → 스킬·자동 작업**에서 봅니다(Codex는 `~/.codex/automations/<id>/automation.toml`의 `status`를 읽음).
+두 쪽은 같은 스킬 원본(`.agents/skills/premarket-analysis`, `.agents/skills/intraday-audit`)과 수집기를 쓰므로 결과 형식이 같습니다. **둘 중 하나만 켭니다.** 상태는 대시보드 **운영 → 자동 작업**에서 봅니다(Codex는 `~/.codex/automations/<id>/automation.toml`의 `status`를 읽음).
 
 > [!NOTE]
 > `scripts/report_pages.py`의 장전 분석 일정 표기는 아직 'Codex 08:42'로 남아 있습니다. 실제로 리포트를 쓰는 것은 08:31 Claude 예약 작업입니다.
@@ -194,13 +197,13 @@ flowchart LR
 - 다시 띄우기는 서비스마다 5번까지입니다(NH 계좌 목록 일시 오류로 시작 직후 멈춘 11-18 사례).
 - 휴장 표를 읽지 못하면 기록에 남기고 시작합니다. 실행기는 실시간 시세 없이는 매매하지 못합니다.
 - 끝나지 않은 주문은 기록만 하고 막지 않습니다. 실행기 첫 회차가 증권사와 대조하고, 풀릴 때까지 새 주문을 내지 않습니다.
-- 주문은 개장(09:00)부터입니다. 손절도 09:00부터 나갑니다(2026-11-19 사용자 결정, 예전 09:00~09:09 관찰).
+- 주문은 개장(09:00)부터입니다. 손절도 09:00부터 나갑니다(2026-11-19 사용자 결정. 예전에는 09:00~09:09에 관찰만 함).
 
 ## 장중 감사
 
 평일 09:20부터 15:20까지 매시 20분에 예약 작업 `intraday-audit-hourly`가 스킬 `intraday-audit`(원본 `.agents/skills/intraday-audit/SKILL.md`)으로 Jev 공유 모의·실계좌 미러·장기투자 실행 상태를 감사합니다.
 
-1. **수집**: `scripts/ro intraday_audit.py --since <직전 회차 HH:MM>`이 서비스 상태, 원장(체결·미종결 주문·회차 간격·진입 차단), 장전 입력, Jev 입력의 출처와 신선도, 실계좌 미러 모드, 날짜별 확인 진행을 JSON 하나로 냅니다. 기록 DB 6개의 `integrity_check`(손상이면 `db.corrupt`)와 학습 관찰기 연속 실패(`learning.error`)도 봅니다. 증권사 API는 부르지 않습니다.
+1. **수집**: `scripts/ro intraday_audit.py --since <직전 회차 HH:MM>`이 서비스 상태, 원장(체결·미종결 주문·회차 간격·진입 차단), 장전 입력, Jev 입력의 출처와 신선도, 실계좌 미러 모드, 날짜별 확인 진행을 JSON 하나로 냅니다. 기록 DB 6개의 `integrity_check`(손상이면 `db.corrupt`)와 학습 관찰기 연속 실패(`learning.error`), 같은 종목·같은 진입 거절 사유가 3분 연속인 경우(`entry.repeat_block`)도 봅니다. 증권사 API는 부르지 않습니다.
 2. **발견**: 수집기가 이상을 키(`영역.종류:대상`, 예 `service.down:shared-etf-paper`)로 만들고, 그날 감사 파일과 비교해 `new`·`ongoing`·`resolved`를 붙입니다.
 3. **기록**: `~/.vibe-trading/nhplug/shared-etf-paper/reviews/operations-audit-YYYY-MM-DD.md` 끝에 회차 절을 덧붙입니다. 같은 문제는 다시 쓰지 않습니다.
 4. **날짜별 확인**: 새 기능이 실제 장에서 처음 도는지 한 번 볼 항목은 `.agents/skills/intraday-audit/references/checks.md`에 있습니다. 완료하면 `[check-done:<id>]`를 씁니다.
@@ -233,7 +236,7 @@ scripts/ro audit_incidents.py --since 2026-11-18
 
 ## 읽기 전용 실행기 scripts/ro
 
-예약 작업은 사람이 없을 때 돕니다. 셸 명령마다 승인을 기다리면 멈추므로(11-18 08:50 장기 리포트가 30분 대기), 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 권한 규칙 하나(`Bash(scripts/ro *)`)로 승인 없이 돕니다.
+예약 작업은 사람이 없을 때 돌아갑니다. 셸 명령마다 승인을 기다리면 멈추므로(11-18 08:50 장기 리포트가 30분 대기), 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 권한 규칙 하나(`Bash(scripts/ro *)`)로 승인 없이 돌아갑니다.
 
 | 형식 | 하는 일 |
 | --- | --- |
@@ -270,7 +273,7 @@ scripts/ro audit_incidents.py --since 2026-11-18
 
 ## 프로젝트 스킬
 
-스킬은 `.claude/skills/`(git에 있음)에 있습니다. 일부는 `.agents/skills/`(개인 폴더, git 제외)를 가리키는 링크라 새 기기에서 다시 연결합니다. 역할과 구동 시점은 `scripts/skill_catalog.py`(대시보드 **API 연동 → 스킬·자동 작업**)에 정리돼 있습니다.
+스킬은 `.claude/skills/`(git에 있음)에 있습니다. 일부는 `.agents/skills/`(개인 폴더, git 제외)를 가리키는 링크라 새 기기에서 다시 연결합니다. Codex에서 쓰려면 `.agents/skills/`에 링크로 연결합니다([AI와 함께 쓰기 3절](ai-agents.md#3-스킬-설치)). 역할과 구동 시점은 `scripts/skill_catalog.py`(대시보드 **운영 → 스킬**)에 정리돼 있습니다.
 
 | 스킬 | 역할 | 구동 |
 | --- | --- | --- |
@@ -281,7 +284,7 @@ scripts/ro audit_incidents.py --since 2026-11-18
 | `report-html-publisher` | 리포트 HTML 발행 ([리포트 발행](report-pages.md)) | `discord-notify`가 30초마다, 요청 |
 | `vibe-trading` | 이 저장소 운영 규칙·보고·리서치 도구 | 진행 보고·마감 보고·개선안·주간 감사 |
 | `ops-bootstrap` | 새 계정·새 기기에서 이어 가기·복원 ([이식](portability.md)) | 요청 |
-| `danswer-market-trading` | 『실전 시황 트레이딩』 판단표(장전 분석·매매일지 복기에서 참조) | 다른 스킬이 참조 |
+| `danswer-market-trading` | 『실전 시황 트레이딩』 판단표(장전 분석·매매일지 복기에서 참조, 운영자 개인 자료라 배포하지 않음) | 다른 스킬이 참조 |
 | `verify-dashboard` | 대시보드 변경을 실제 화면으로 확인 | 개발할 때 |
 | `automation-guideline-review` | 예약 작업·자동화 지침 검수 | 요청할 때만 |
 | `developing-with-streamlit`, `ui-ux-pro-max`, `design-taste-frontend` | 대시보드·리포트 화면 개발 보조 | 개발할 때 |

@@ -717,6 +717,21 @@ class Sizing(unittest.TestCase):
         self.assertEqual(target(5), {'005930': 1})  # 1.19 shares
         self.assertEqual(target(7), {'005930': 2})  # 1.67 shares: the second share
 
+    def test_the_sizing_example_shows_what_each_basis_buys_for_one_paper_tranche(self):
+        """Dashboard example (2026-11-19): one paper tranche (first_buy_krw) at a few prices, live shares per basis."""
+        import nh_paper_isolated
+        paper = {'limits': {'daily_new_symbols': 5}, 'budget': {'first_buy_krw': 1_000_000}}
+        record = {'budget': {'order_price_max_krw': 400_000, 'capital_krw': 1_500_000},
+                  'rules': {'sizing': 'share', 'tranche_krw': 500_000}}
+        with patch.object(nh_paper_isolated, 'SPLIT_TRANCHES', 3):
+            ratio, rows = f.sizing_example(record, paper, (10_000, 50_000, 300_000, 800_000))
+        self.assertAlmostEqual(float(ratio), 0.1)  # 1,500,000 / (1,000,000 x 3 x 5)
+        got = [(r['price'], r['paper_qty'], r['live_krw'], r['amount'], r['share']) for r in rows]
+        self.assertEqual(got, [(10_000, 100, 100_000, 10, 1),   # cheap: amount basis buys 10, share basis 1
+                               (50_000, 20, 100_000, 2, 1),
+                               (300_000, 3, 90_000, 1, 1),    # 0.3 share: still one share while the paper holds
+                               (800_000, 1, 80_000, 0, 0)])   # above the 1-share price cap: neither buys
+
     def test_the_ratio_is_live_capital_over_the_paper_plan(self):
         import nh_paper_isolated
         with patch.object(nh_paper_isolated, 'SPLIT_TRANCHES', 3):

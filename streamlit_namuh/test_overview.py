@@ -18,7 +18,7 @@ class OverviewTests(unittest.TestCase):
                                                                 'action': 'BLOCK'}) + '\n')
             found = overview.alerts(root, {'공유 모의 ETF 실행기': '확인 불가', '실계좌 1 미러 실행기': '실행 중'}, {}, '2026-11-13')
         self.assertEqual(found, ['공유 모의 ETF 실행기: 확인 불가', '정리 요청 대기 · 모의계좌: 114800',
-                                 '정리 요청 대기 · live-1: 005930', 'live-2 미러 차단·오류 1회 (AI·실행 기록에서 확인)'])
+                                 '정리 요청 대기 · live-1: 005930', 'live-2 미러 차단·오류 1회 (운영 → AI·실행 기록에서 확인)'])
 
     def test_an_open_mirror_lag_alert_is_listed_first(self):
         with tempfile.TemporaryDirectory() as d:
@@ -40,9 +40,9 @@ class OverviewTests(unittest.TestCase):
                 {'time': '2026-11-13T09:51:00+09:00', 'event': 'jev_shadow'}, {'time': '2026-11-13T09:58:00+09:00', 'event': 'jev_shadow'},
                 {'time': '2026-11-13T10:01:00+09:00', 'event': 'submitted'}, {'time': '2026-11-12T10:01:00+09:00', 'event': 'submitted'}]))
             (root / 'live-follow.jsonl').write_text(json.dumps({'time': '2026-11-13T09:52:00+09:00', 'account': 'live-1', 'action': 'BUY'}) + '\n')
-            rows = overview.activity(root, '2026-11-13', [{'time': '2026-11-13T09:55:00+09:00'}], root / 'jev')
+            rows = overview.activity(root, '2026-11-13', root / 'jev')
         self.assertCountEqual(rows, [{'구분': 'Jev 판단', '시각': '09:50', '건수': 2}, {'구분': 'live-1 매매 계획', '시각': '09:50', '건수': 1},
-                                {'구분': 'vibe 분석', '시각': '09:50', '건수': 1}, {'구분': '엔진 주문', '시각': '10:00', '건수': 1}])
+                                {'구분': '엔진 주문', '시각': '10:00', '건수': 1}])
 
     def test_live_labels_translate_plan_values(self):
         self.assertEqual((L.ACTIONS['HOLD'], L.EXECUTIONS['DRY_RUN'], L.STATES['terminal']), ('유지', '계획만 기록(관찰)', '완료'))
@@ -70,11 +70,10 @@ class OverviewTests(unittest.TestCase):
                                                             for i, a in enumerate(['BUY', 'BUY', 'HOLD'])))
             with mock.patch('engine_roles.ledger_root', side_effect=lambda r, e: Path(r) / e), \
                     mock.patch.object(overview.ec, 'cached_journal', return_value=[]):
-                rows, waits = overview.timeline(root, '2026-11-13', [{'time': '2026-11-13T09:55:00+09:00',
-                                                'scores': {'069500': {'score': 0.3}}, 'decisions': []}], {'005930': '삼성전자'})
+                rows, waits = overview.timeline(root, '2026-11-13', {'005930': '삼성전자'})
         self.assertEqual(waits, {'거래량 증가 없음': 1})
         self.assertEqual([(r['출처'], r['종류']) for r in rows],
-                         [('실계좌 1', '실계좌 계획'), ('Jev', '판단'), ('Jev 실행기', '매수 주문'), ('실계좌 1', '실계좌 계획'), ('vibe', '판단')])
+                         [('실계좌 1', '실계좌 계획'), ('Jev', '판단'), ('Jev 실행기', '매수 주문'), ('실계좌 1', '실계좌 계획')])
         self.assertEqual(rows[2]['내용'], '4주 · 지정가 213,500원 · 관심종목 강도')  # the repeated 09:51 BUY plan is folded
 
 
@@ -137,7 +136,7 @@ def test_long_term_virtual_account_row_and_its_alerts(tmp_path):
     assert row['label'] == '장기투자 가상 계좌' and row['mode'] == '관찰' and row['rows'] == [] and '초기 투입 · 주문 1건(계획만)' in row['last']
     found = overview.longterm_alerts(root, '2026-11-18')
     assert found == ['장기투자 판단 건너뜀: 시황 자료 없음: ValueError', '장기투자 스토리 훼손: SOL 미국양자컴퓨팅TOP10 (위성 비중 0, 장기투자 → 테마 스토리)',
-                     '장기투자 거시 자료 일부 없음: fomc: OSError (API 연동 → FRED)']
+                     '장기투자 거시 자료 일부 없음: fomc: OSError (운영 → API 연동 → FRED)']
     assert overview.longterm_alerts(root, '2026-11-19')[0].startswith('장기투자 스토리 훼손')  # only today's skip and macro
 
 
@@ -154,7 +153,7 @@ def test_timeline_merges_long_term_decisions_and_its_live_account(tmp_path, monk
                                                               'action': 'PLAN', 'orders': [{}, {}]}) + '\n')
     monkeypatch.setattr('engine_roles.ledger_root', lambda r, e: Path(r) / e)
     monkeypatch.setattr(overview.ec, 'cached_journal', lambda *a: [])
-    rows, _ = overview.timeline(tmp_path, '2026-11-18', [], {})
+    rows, _ = overview.timeline(tmp_path, '2026-11-18', {})
     lt = [(r['출처'], r['종류'], r['내용']) for r in rows]
     assert lt == [('장기투자', '국면', '조정 · 조정 국면'), ('장기투자', '거시 배경', '하이일드 스프레드 3.23%p'),  # vibe_longterm.DECISION_KINDS
                   ('장기투자', '계획(주문 없음)', '초기 투입 · 1건 (KODEX 미국나스닥100 매수 3)'), ('실계좌 2 장기투자', '실계좌 계획', '그날 주문 계획 · 2건')]
@@ -183,7 +182,7 @@ def test_timeline_shows_long_term_dca_decisions(tmp_path, monkeypatch):
            now=datetime.fromisoformat('2026-11-18T10:00:00+09:00'))
     monkeypatch.setattr('engine_roles.ledger_root', lambda r, e: Path(r) / e)
     monkeypatch.setattr(overview.ec, 'cached_journal', lambda *a: [])
-    rows, _ = overview.timeline(tmp_path, '2026-11-18', [], {})
+    rows, _ = overview.timeline(tmp_path, '2026-11-18', {})
     assert [(r['출처'], r['종류'], r['내용']) for r in rows] == [('장기투자', '적립식', '정기 적립 1,000,000원 · 1건 (KODEX 미국S&P500 매수 5)')]
 
 
@@ -354,7 +353,7 @@ def test_a_corrupt_line_in_the_mirror_log_does_not_hide_its_block_alerts(tmp_pat
     (tmp_path / 'shared-etf-paper').mkdir()
     block = json.dumps({'time': '2026-11-18T10:00:00+09:00', 'account': 'live-1', 'action': 'BLOCK', 'reason': 'guard'})
     (tmp_path / 'live-follow.jsonl').write_text('\n'.join([block, block[:30], block]) + '\n')
-    assert 'live-1 미러 차단·오류 2회 (AI·실행 기록에서 확인)' in overview.alerts(tmp_path, {}, {}, '2026-11-18')
+    assert 'live-1 미러 차단·오류 2회 (운영 → AI·실행 기록에서 확인)' in overview.alerts(tmp_path, {}, {}, '2026-11-18')
 
 
 def test_an_earlier_days_activity_carries_its_date(tmp_path, monkeypatch):

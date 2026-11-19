@@ -80,10 +80,25 @@ def symbol_of(code):
     return f'{code}.{market}' if market else code
 
 
-def yahoo_symbols(code):
+def yahoo_symbols(code, kosdaq=()):
     """Yahoo symbols to try in order: the library's checked market when it knows the code (207940 trades on KOSPI
-    though it starts with 2), else .KS then .KQ."""
-    return [symbol_of(code)] if code in MARKETS else [f'{code}.KS', f'{code}.KQ']
+    though it starts with 2), .KQ for a code in `kosdaq` (kosdaq_codes()), else .KS then .KQ."""
+    if code in MARKETS:
+        return [symbol_of(code)]
+    return [f'{code}.KQ'] if code in kosdaq else [f'{code}.KS', f'{code}.KQ']
+
+
+def kosdaq_codes():
+    """Active KOSDAQ stock codes from the Toss stock master (one request), or an empty set when Toss is not set up or
+    fails: then yahoo_symbols() asks .KS first as before. 11-19: 21 KOSDAQ issue candidates each cost a Yahoo 404."""
+    try:
+        import toss_data
+        if not toss_data.configured():
+            return set()
+        rows = toss_data.get('/api/v1/stocks/all', {'market': 'KOSDAQ', 'status': 'ACTIVE', 'securityType': 'STOCK'}) or []
+        return {r['symbol'] for r in rows if isinstance(r, dict) and isinstance(r.get('symbol'), str)}
+    except Exception:  # noqa: BLE001 - a lookup aid: without it the old order still finds the bars
+        return set()
 # similarity weights: the fall itself and the market's fall first (the case study: market-wide crashes rebound,
 # company-specific falls do not), then the night before and the prior trend
 FEATURES = {'drop_pct': 1.5, 'mkt_low_pct': 1.2, 'atr_mult': 1.0, 'rel_drop': 0.7, 'nasdaq_prev': 0.7, 'prior_20d': 0.5,

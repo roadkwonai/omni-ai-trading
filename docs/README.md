@@ -4,17 +4,21 @@
 
 Omni AI Trading의 설치·전략·운영 가이드입니다. 처음이라면 **시작** 묶음부터 차례로 읽고, 이후에는 궁금한 기능의 가이드로 바로 가세요.
 
+> [!CAUTION]
+> 모든 정보는 투자 판단을 위한 참고 자료이며 투자 권유가 아닙니다. 투자의 최종 판단과 손익(원금 손실 포함)의 책임은 투자자 본인에게 있습니다. 이 서비스는 Claude Code·Codex 같은 AI 도구의 유료 이용이 필요합니다. [README · 투자 유의사항 및 면책 고지](../README.md#투자-유의사항-및-면책-고지)
+
 > [!TIP]
-> 한 줄 요약이 필요하면 [README](../README.md)의 기능 표를, 화면에서 어디를 눌러야 하는지 궁금하면 [대시보드 가이드](dashboard.md)를 먼저 봅니다.
+> 한 줄 요약이 필요하면 [README](../README.md)의 기능 표를, 화면에서 어디를 눌러야 하는지 궁금하면 [대시보드 가이드](dashboard.md)를 먼저 보세요.
 
 ## 어떤 순서로 읽나
 
 ```mermaid
 flowchart LR
-  S["시작하기<br/>getting-started"] --> A["동작 구조<br/>architecture"]
+  S["시작하기<br/>getting-started"] --> AI["AI와 함께 쓰기<br/>ai-agents"]
+  AI --> A["동작 구조<br/>architecture"]
   A --> J["Jev 실시간<br/>strategy"]
   A --> L["장기투자<br/>longterm"]
-  J --> SF["안전 장치<br/>safety"]
+  J --> SF["안전장치<br/>safety"]
   L --> SF
   SF --> O["운영<br/>operations · automation"]
   O --> R["기록·알림<br/>journal · notifications"]
@@ -24,7 +28,9 @@ flowchart LR
 
 | 문서 | 내용 |
 | --- | --- |
-| [시작하기](getting-started.md) | 설치, `.env` 키 이름, NH 공식 MCP 연결, 대시보드 실행, 서비스 정의, 첫 모의 회차 확인, AI에게 맡기는 프롬프트 |
+| [시작하기](getting-started.md) | 설치, `.env` 키 이름, NH 공식 MCP 연결, 대시보드 실행, 서비스 정의, 첫 모의 회차 확인 |
+| [AI와 함께 쓰기](ai-agents.md) | Claude Code·Codex 설치, 지침 파일 템플릿, 프로젝트 스킬 설치, MCP 연결, 읽기 전용 권한, 예약 작업 등록, 상황별 프롬프트 예시 |
+| [연동 서비스](integrations.md) | NH 나무 PLUG·키움·토스·Jev·OpenAI·KRX·OpenDART·FRED 키 발급과 `.env` 키, Discord·Telegram·Slack 알림 설정, GitHub Pages |
 | [설정 레퍼런스](configuration.md) | 설정 JSON 파일별 역할·범위·기본값, 변경 이력, `.env` 키 이름 |
 | [이식](portability.md) | 설정 정리본·전체 백업, 다른 계정·새 컴퓨터로 옮기는 순서 |
 
@@ -33,7 +39,7 @@ flowchart LR
 | 문서 | 내용 |
 | --- | --- |
 | [동작 구조](architecture.md) | 두 엔진과 계좌, 데이터 출처, 한 회차의 흐름, 데이터 위치, 원본 Vibe-Trading과의 경계 |
-| [대시보드](dashboard.md) | 14개 탭과 하위 탭, 상태 카드 색, 가이드 팝업과 흐름도 |
+| [대시보드](dashboard.md) | 10개 탭(세 묶음)과 하위 탭, 상태 카드 색, 가이드 팝업과 흐름도 |
 
 ## Jev 실시간 트레이딩
 
@@ -45,7 +51,7 @@ flowchart LR
 | [낙폭과대](oversold.md) | 장중 반등, 선별 v2(분할 진입·분할 익절·저점 재매수), 사례집과 재현 기록, 주간 감사 |
 | [NXT 종가매매](nxt.md) | 강세장 애프터마켓 종가매매의 가상 체결과 학습 데이터 |
 | [실계좌](live-accounts.md) | 실계좌 1 Jev 미러와 실계좌 2 장기투자, 실주문 조건, 크기 계산, 수동 매매, 가드 한도 |
-| [안전 장치](safety.md) | 모의·실계좌 주문 가드, 미확인 주문·원장 대조, STOP·HALT, 관찰 → 가상 → 보호 실주문 |
+| [안전장치](safety.md) | 모의·실계좌 주문 가드, 미확인 주문·원장 대조, STOP·HALT, 관찰 → 가상 → 보호 실주문 |
 
 ## 장기투자
 

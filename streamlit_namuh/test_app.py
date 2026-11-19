@@ -240,6 +240,21 @@ def test_live_share_cap_is_disabled_under_amount_sizing():
     assert any(s.label == '1회 매수 최대 수량 (주)' for s in ui.slider)
 
 
+def test_the_tranche_amount_is_locked_under_share_sizing_and_an_example_shows_both_bases():
+    """2026-11-19: 체결 1건당 최대 금액 is unused by 1주 기준, so it is locked there; an example table shows what each basis buys."""
+    ui = AppTest.from_function(_live_sizing_page, default_timeout=30).run()
+    assert not ui.exception
+    assert not any(n.key == 'sizing_test_live-t_tranche_off' for n in ui.number_input)  # amount: editable
+    text = ' '.join(m.value for m in ui.markdown)
+    assert '이 계좌 예시' in text and '금액 기준 ◀ 지금' in text
+    assert all(word in ui.radio(key='sizing_test_live-t_sizing').help for word in ('1주 기준', '금액 기준', '이 계좌 예시'))
+    ui.radio(key='sizing_test_live-t_sizing').set_value('share').run()
+    assert not ui.exception
+    box = ui.number_input(key='sizing_test_live-t_tranche_off')
+    assert box.disabled and box.value == 300_000  # the saved amount is kept for 금액 기준
+    assert '1주 기준 ◀ 지금' in ' '.join(m.value for m in ui.markdown)
+
+
 def _orders_page():
     import app
     snapshot = {'orders': [{'주문 시각': '095857', '구분': '현금매수', '종목': 'KODEX 인버스', '종목코드': '114800', '주문수량': 74,
@@ -465,18 +480,6 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual(app.ETF_CHARTS['KODEX 반도체레버리지'], ('SEMILEV', '494310'))
         self.assertEqual(set(app.SYMBOLS.values()), {'069500', '122630', '114800', '229200', '233740', '251340', '494310'})
 
-    def test_only_requested_etfs_pass_paper_order_symbol_validation(self):
-        with patch.object(app.time, 'sleep'), patch.object(app, 'check_session', return_value={'allowed': True}):
-            for symbol in ('069500', '122630', '114800', '229200', '233740', '251340', '494310'):
-                paper = Adapter(paper=True)
-                self.assertEqual(app.submit_paper(Adapter(), paper, 'paper', symbol, 'Buy', 1, 50000), 123)
-                self.assertEqual(paper.sent, ['krstockOrderCashBuy'])
-            for symbol in ('005930', '035420', '035720'):
-                paper = Adapter(paper=True)
-                with self.assertRaises(ValueError):
-                    app.submit_paper(Adapter(), paper, 'paper', symbol, 'Buy', 1, 50000)
-                self.assertFalse(paper.sent)
-
     def test_regime_is_research_only_and_does_not_invent_missing_history(self):
         self.assertIsNone(app.latest_regime([]))
         result = app.latest_regime([
@@ -502,7 +505,7 @@ class SubmitTest(unittest.TestCase):
                                     {'event': 'v2_risk_exit_error', 'time': '2026-11-11T09:10:02+09:00', 'symbol': '114800', 'reason': 'signal_or_session_invalid'}])
                 (path / 'events.jsonl').write_text(''.join(json.dumps(record) + '\n' for record in records))
             with patch('src.config.loader.load_agent_config', return_value=configs), patch('src.config.paths.get_runtime_root', return_value=root), patch('src.tools.mcp.MCPServerAdapter', side_effect=[Adapter(), Adapter()] * 10):
-                ui = app_test('AI·실행 기록')
+                ui = app_test('운영', ops_view='AI·실행 기록')
                 ui.session_state['record_source'] = 'jev'  # the record tab opens on its overview; this checks the engine view
                 ui.run()
                 self.assertEqual(ui.session_state['ai_raw_events'][0]['choice'], 'INV')
@@ -695,7 +698,7 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual(len([r for r in rows_list if app.HOLDING_STATES['전체'](r)]), 2)
         days = app.realized_by_period(books, '일')
         self.assertEqual([(r['기간'], r['매도 횟수'], r['실현손익']) for r in days], [('2026-11-11', 2, 475)])
-        self.assertEqual(app.realized_by_period(books, '년')[0]['수익률'], round(475 / (1277 + 4350 * 5) * 100, 2))
+        self.assertEqual(app.realized_by_period(books, '연')[0]['수익률'], round(475 / (1277 + 4350 * 5) * 100, 2))
 
     def test_jev_evidence_pairs_the_answer_with_inputs_from_the_same_cycle(self):
         bars = {'INV': [{'bsop_time': '134800', 'stck_prpr': '1260'}, {'bsop_time': '134700', 'stck_prpr': '1250'}],
@@ -844,50 +847,6 @@ class SubmitTest(unittest.TestCase):
         gap = app.chart_markers([], [{'시각':'2026-11-06T09:09:30+09:00','종목':'114800','구분':'BUY','수량':10}], bars, 'INV', '114800')
         self.assertEqual((gap[0]['time'], gap[0]['text']), (bars[0]['time'], '체결 확인: 매수 10주 (09:09)'))
 
-    def run_submit(self, read, paper, side='Buy'):
-        with patch.object(app.time, 'sleep'), patch.object(app, 'check_session', return_value={'allowed': True}):
-            return app.submit_paper(read, paper, 'paper', '069500', side, 1, 50000)
-
-    def test_verified_paper_order_passes_through_adapter(self):
-        read, paper = Adapter(), Adapter(paper=True)
-        self.assertEqual(self.run_submit(read, paper), 123)
-        self.assertEqual(paper.sent, ['krstockOrderCashBuy'])
-
-    def test_wrong_account_and_pending_order_block(self):
-        for read, paper in ((Adapter(account_type='01'), Adapter()), (Adapter(), Adapter(pending=1))):
-            with self.assertRaises(ValueError):
-                self.run_submit(read, paper)
-            self.assertEqual(paper.sent, [])
-
-    def test_incomplete_order_history_blocks_submission(self):
-        paper = Adapter()
-        original = paper.call_tool
-        def incomplete(tool, args):
-            result = original(tool, args)
-            if args.get('operationId') == 'krstockInquiryDailyOrderExecution':
-                result['data']['_nh_pagination'] = {'complete': None}
-            return result
-        paper.call_tool = incomplete
-        with self.assertRaises(ValueError):
-            self.run_submit(Adapter(), paper)
-        self.assertFalse(paper.sent)
-
-    def test_sellable_and_session_fail_closed(self):
-        read, paper = Adapter(), Adapter(sellable=0)
-        with self.assertRaises(ValueError):
-            self.run_submit(read, paper, 'Sell')
-        self.assertFalse(paper.sent)
-        with patch.object(app.time, 'sleep'), patch.object(app, 'check_session', return_value={'allowed': False}):
-            with self.assertRaises(ValueError):
-                app.submit_paper(read, paper, 'paper', '069500', 'Buy', 1, 50000)
-        self.assertFalse(paper.sent)
-
-    def test_non_finite_sellable_quantity_is_rejected(self):
-        paper = Adapter(sellable='NaN')
-        with self.assertRaises(ValueError):
-            self.run_submit(Adapter(), paper, 'Sell')
-        self.assertFalse(paper.sent)
-
     def test_live_balance_requires_complete_paginated_result(self):
         reader = Adapter(account_type='01')
         with patch.object(app, 'read_live_pages', return_value={'Output_0': {}, 'Output_1': [], '_pagination_complete': True}) as pages:
@@ -966,24 +925,6 @@ class SubmitTest(unittest.TestCase):
              patch('src.tools.mcp.MCPServerAdapter', side_effect=[Adapter(), Adapter()] * 10):
             ui = app_test('트레이딩 현황', etf_desk_tab='전략·AI 설정').run()
             self.assertTrue(any('목록에 표시되는 것만으로 자동주문 대상' in str(item.value) for item in ui.caption))
-
-    def test_review_does_not_send_and_symbol_change_discards_draft(self):
-        config = SimpleNamespace(args=['--mode', 'paper', '--account', 'paper'])
-        configs = SimpleNamespace(mcp_servers={'nhplug_paper': config, 'nhplug_readonly': config})
-        read, paper = Adapter(), Adapter()
-        with patch('src.config.loader.load_agent_config', return_value=configs), patch('src.tools.mcp.MCPServerAdapter', side_effect=[read, paper] * 10):
-            ui = app_test('주문·정리').run()
-            quote_selector = next(s for s in ui.selectbox if s.label == '종목')
-            self.assertEqual(set(quote_selector.options), set(app.SYMBOLS))
-            next(n for n in ui.number_input if n.label == '수량 (주)').set_value(2)
-            next(n for n in ui.number_input if n.label == '지정가 (원)').set_value(50000)
-            next(button for button in ui.button if button.label == '주문 내용 검토').click().run()
-            self.assertTrue(any(button.label == '모의 주문 제출' for button in ui.button))
-            self.assertEqual(paper.sent, [])
-            next(s for s in ui.selectbox if s.label == '종목').select('KODEX 인버스').run()
-            self.assertFalse(any(button.label == '모의 주문 제출' for button in ui.button))
-            self.assertEqual(paper.sent, [])
-
 
 class LiveMarkerTest(unittest.TestCase):
     def test_filled_orders_become_fills_and_virtual_trades_land_on_next_bar(self):
@@ -1087,17 +1028,6 @@ class DashboardHeaderTest(unittest.TestCase):
         self.assertEqual((summary['judgments'], summary['max_conf'], summary['permitted'], summary['orders']), (2, 0.6, 1, 1))
         self.assertEqual((summary['buys'], summary['sells'], summary['waits']), (1, 0, 1))
         self.assertEqual(summary['top_wait'][1], 1)
-
-    def test_paper_owner_reads_the_guard_registry(self):
-        import hashlib, json, tempfile
-        from pathlib import Path
-        with tempfile.TemporaryDirectory() as tmp, patch.object(app, 'get_runtime_root', return_value=Path(tmp)):
-            (Path(tmp) / 'nhplug').mkdir()
-            scope = hashlib.sha256(b'nh-paper:paper').hexdigest()
-            (Path(tmp) / 'nhplug' / 'paper-account-owners.json').write_text(json.dumps({'version': 1, 'accounts': {scope: 'nhplug_paper_isolated'}}))
-            self.assertEqual(app.paper_owner('paper'), 'nhplug_paper_isolated')
-            self.assertIsNone(app.paper_owner('other'))
-
 
 class NewsLinkTest(unittest.TestCase):
     def test_headline_becomes_a_safe_search_link(self):
@@ -1591,3 +1521,16 @@ def test_the_new_listing_panel_reads_the_runners_list_and_never_fetches_it(tmp_p
         ui = AppTest.from_function(_new_listing_page, default_timeout=60).run()
     assert not ui.exception and not fetch.called
     assert list(ui.dataframe[0].value['종목']) == ['넥스아이']
+
+
+def test_fill_rows_put_each_stock_on_its_own_line_by_trading_day_and_minute():
+    """2026-11-19: prices of a 1천 원 ETF and a 20만 원 stock on one price axis hid the cheap one, and nights and weekends
+    took most of the time axis; the chart is now stock × trading day with the minute in the session inside each day."""
+    fills = [{'시각': '2026-11-13T09:31:00+09:00', '종목': '069500', '구분': 'BUY', '수량': 10, '체결가': 10_000},
+             {'시각': '2026-11-13T15:10:00+09:00', '종목': '069500', '구분': 'SELL', '수량': 10, '체결가': 10_100},
+             {'시각': '2026-11-16T10:00:00+09:00', '종목': '005930', '구분': 'BUY', '수량': 1, '체결가': 200_000},
+             {'시각': 'bad', '종목': '005930', '구분': 'BUY', '수량': 1, '체결가': 1}]
+    rows, days = app.fill_rows(fills, {'069500': 'KODEX 200'})
+    assert [r['날짜'] for r in rows] == ['11/13(금)', '11/13(금)', '11/16(월)'] and days == ['11/13(금)', '11/16(월)']
+    assert [r['장중 분'] for r in rows] == [31, 370, 60] and rows[0]['종목'] == 'KODEX 200' and rows[2]['종목'] == '005930'
+    assert [r['금액'] for r in rows] == [100_000, 101_000, 200_000] and rows[1]['구분'] == '매도'

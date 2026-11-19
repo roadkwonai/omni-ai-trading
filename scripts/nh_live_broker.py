@@ -11,6 +11,9 @@ KST = ZoneInfo('Asia/Seoul')
 
 
 RATE_LIMIT_WAITS = (0.5, 1.0, 2.0)  # NH's per-app call limit (IGW42902) is retryable; every service shares one app key
+# NH answers one request of a kind about once a second (11-19, measured on the paper balance: a continuation page asked
+# 0.5 s after the previous one's start was refused with IGW42903, 1.0 s passed); a continuation page waits this long.
+PAGE_GAP = 1.1
 
 
 def _request(adapter, tool, params, sleep=time.sleep):
@@ -19,19 +22,27 @@ def _request(adapter, tool, params, sleep=time.sleep):
         result = adapter.call_tool(tool, params)
         if isinstance(result, dict) and result.get('status') == 'ok' and isinstance(result.get('data'), dict):
             return result
-        if wait is None or 'IGW42902' not in str((result or {}).get('error', '')):
+        if wait is None or not rate_limited(result):
             break
         sleep(wait)
-    raise LiveOrderBlocked('broker rate limit' if 'IGW42902' in str((result or {}).get('error', '')) else 'broker request failed')
+    raise LiveOrderBlocked('broker rate limit' if rate_limited(result) else 'broker request failed')
 
 
-def _pages(adapter, operation, fields, block):
-    cursor, flag, seen, rows, first = None, None, set(), [], None
+def rate_limited(result):
+    """NH's per-app limit (IGW42902) or its same-query limit (IGW42903, ~1 request a second, 11-19); both retryable."""
+    error = str((result or {}).get('error', ''))
+    return 'IGW42902' in error or 'IGW42903' in error
+
+
+def _pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.sleep):
+    cursor, flag, seen, rows, first, started = None, None, set(), [], None, None
     for _ in range(20):
         args = {'operationId': operation, 'input': fields, 'want_pagination': True}
         if cursor is not None:
             args.update(cts=cursor, cts_flag=flag)
-        data = _request(adapter, 'call_api', args)['data']
+            sleep(max(0.0, started + PAGE_GAP - clock()))
+        started = clock()
+        data = _request(adapter, 'call_api', args, sleep=sleep)['data']
         code, msg = data.get('rsp_cd'), data.get('rsp_msg')
         if not isinstance(msg, str):
             raise LiveOrderBlocked('broker page message missing')
@@ -75,9 +86,9 @@ def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL):
         raise LiveOrderBlocked('only configured NH readonly transport permitted')
     day = now.astimezone(KST).strftime('%Y%m%d')
     accounts = _request(adapter, 'list_accounts', {})['data'] if symbol is not None else None
-    history = _pages(adapter, 'krstockInquiryDailyOrderExecution', {'act_no':account, 'orr_dt':day, 'orr_mkt_cd':'00', 'ost_cns_dit':'0'}, 'Output_0')
+    history = _pages(adapter, 'krstockInquiryDailyOrderExecution', {'act_no':account, 'orr_dt':day, 'orr_mkt_cd':'00', 'ost_cns_dit':'0'}, 'Output_0', sleep=sleep)
     history.update(_account=account, _day=day)
-    balance = _pages(adapter, 'krstockInquiryBalance', {'act_no':account, 'bnc_bse_cd':'5', 'ltg_aot_dit_cd':'9', 'aet_bse':'2', 'qut_dit_cd':'UNT', 'aly_qut_cd':'1'}, 'Output_1')
+    balance = _pages(adapter, 'krstockInquiryBalance', {'act_no':account, 'bnc_bse_cd':'5', 'ltg_aot_dit_cd':'9', 'aet_bse':'2', 'qut_dit_cd':'UNT', 'aly_qut_cd':'1'}, 'Output_1', sleep=sleep)
     balance['_account'] = account
     pnl = _request(adapter, 'call_api', {'operationId':'krstockInquiryRealizedPnl', 'input':{'act_no':account,
         'iqr_dit_cd1':'0', 'fee_dit_cd':'1', 'qut_dit_cd':'KRX', 'aly_qut_cd':'1'}})['data']

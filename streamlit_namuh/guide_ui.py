@@ -31,6 +31,27 @@ CSS = """<style>
 .gd-note.warn{background:rgba(245,158,11,.10);border-color:rgba(245,158,11,.45)}
 .gd-note.ok{background:rgba(34,197,94,.08);border-color:rgba(34,197,94,.38)}
 .gd-cap{font-size:12.5px;color:var(--om-muted,#64748b);margin:-4px 0 12px}
+.gd-note .gd-k{display:block;font-size:12px;font-weight:700;letter-spacing:.04em;margin-bottom:2px;opacity:.8}
+.gd-para{font-size:15px;line-height:1.7;margin:4px 0 12px}
+.gd-legend{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px}
+.gd-rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:10px;margin:6px 0 14px}
+.gd-rule{border:1px solid rgba(148,163,184,.28);border-left:4px solid #94a3b8;border-radius:10px;padding:10px 14px}
+.gd-rule .gd-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;font-weight:700;font-size:15px}
+.gd-rule .gd-d{font-size:14px;line-height:1.6;margin-top:4px}
+.gd-rule .gd-why{font-size:12.5px;line-height:1.55;color:var(--om-muted,#64748b);margin-top:6px}
+.gd-badge{flex:0 0 auto;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap;border:1px solid}
+.gd-on{border-left-color:#16a34a}.gd-badge.gd-on{color:#16a34a;background:rgba(22,163,74,.10);border-color:rgba(22,163,74,.35)}
+.gd-off{border-left-color:#dc2626}.gd-badge.gd-off{color:#dc2626;background:rgba(220,38,38,.10);border-color:rgba(220,38,38,.35)}
+.gd-set{border-left-color:#2563eb}.gd-badge.gd-set{color:#2563eb;background:rgba(37,99,235,.10);border-color:rgba(37,99,235,.35)}
+.gd-cmp{display:grid;grid-template-columns:minmax(90px,.55fr) 1fr 1fr;border:1px solid rgba(148,163,184,.30);border-radius:12px;
+  overflow:hidden;margin:6px 0 14px;font-size:14.5px;line-height:1.6}
+.gd-cmp>div{padding:10px 14px;border-bottom:1px solid rgba(148,163,184,.16)}
+.gd-cmp .gd-ch{font-weight:700;font-size:15px;border-bottom:2px solid}
+.gd-cmp .gd-k{font-weight:700;background:rgba(148,163,184,.08)}
+.gd-cmp .gd-a{border-left:3px solid #a855f7}.gd-cmp .gd-b{border-left:3px solid #3b82f6}
+.gd-cmp .gd-ch.gd-a{color:#a855f7;background:rgba(168,85,247,.08)}.gd-cmp .gd-ch.gd-b{color:#3b82f6;background:rgba(59,130,246,.08)}
+@media (max-width:720px){.gd-cmp{grid-template-columns:1fr}.gd-cmp .gd-ch.gd-k{display:none}}
+.gd-fix{border-left-color:#64748b}.gd-badge.gd-fix{color:#64748b;background:rgba(100,116,139,.12);border-color:rgba(100,116,139,.35)}
 </style>"""
 
 
@@ -80,19 +101,56 @@ def steps(items):
                                              for i, item in enumerate(items, 1)) + '</div>')
 
 
-def note(text, tone='info'):
-    _html(f'<div class="gd-note {tone if tone in ("info", "warn", "ok") else "info"}">{_inline(text)}</div>')
+def note(text, tone='info', label=None):
+    head = f'<span class="gd-k">{html.escape(label)}</span>' if label else ''
+    _html(f'<div class="gd-note {tone if tone in ("info", "warn", "ok") else "info"}">{head}{_inline(text)}</div>')
+
+
+def para(text):
+    _html(f'<div class="gd-para">{_inline(text)}</div>')
+
+
+BADGES = {'on': '켜짐', 'off': '꺼짐', 'set': '설정값', 'fix': '항상 적용'}
+
+
+def badge(state, text=None):
+    return f'<span class="gd-badge gd-{state}">{html.escape(text or BADGES[state])}</span>'
+
+
+def legend(counts):
+    """Status badges with how many rules each covers, e.g. {'on': 9, 'off': 1}."""
+    _html('<div class="gd-legend">' + ''.join(badge(k, f'{BADGES[k]} {n}') for k, n in counts.items() if n) + '</div>')
+
+
+def rules(items):
+    """Rule cards in two columns: items are (name, state on·off·set·fix, badge text, what it does, why / what turning it off means)."""
+    _html('<div class="gd-rules">' + ''.join(
+        f'<div class="gd-rule gd-{state}"><div class="gd-h"><span>{_inline(name)}</span>{badge(state, label)}</div>'
+        f'<div class="gd-d">{_inline(what)}</div>' + (f'<div class="gd-why">{_inline(why)}</div>' if why else '') + '</div>'
+        for name, state, label, what, why in items) + '</div>')
+
+
+def compare(rows, left, right):
+    """Two approaches side by side, one aligned row per item (label, left text, right text); stacks on a phone."""
+    cell = lambda cls, text: f'<div class="{cls}">{_inline(text)}</div>'
+    _html('<div class="gd-cmp" role="table">' + cell('gd-ch gd-k', '항목') + cell('gd-ch gd-a', left) + cell('gd-ch gd-b', right)
+          + ''.join(cell('gd-k', k) + cell('gd-a', a) + cell('gd-b', b) for k, a, b in rows) + '</div>')
 
 
 def caption(text):
     _html(f'<div class="gd-cap">{_inline(text)}</div>')
 
 
+# A guide diagram is scaled to fit this box in inches, up or down ('!'): stretched to the pop-up width a tall flow became
+# several screens high, and at its own size small flows were too small to read (2026-11-19).
+MAX_SIZE = '14,9!'
+
+
 def diagram(dot, text=None):
     """A Graphviz diagram (through the theme) in a bordered frame with its caption under it."""
     import theme as THEME
     with st.container(border=True):
-        THEME.graphviz(dot, width='stretch')
+        THEME.graphviz(dot.replace('{', '{ size="%s"; ' % MAX_SIZE, 1), width='content')
     if text:
         caption(text)
 
@@ -143,6 +201,11 @@ def workflow(title, lanes, nodes, edges, main=None, phases=()):
     return spec
 
 
+def archify_frame(path, alt):
+    """An Archify page (strategy_map.render keeps it as tall as its diagram) at its own height: no inner scroll."""
+    st.iframe(path, alt=alt)
+
+
 def flow(key, spec, fallback=None, text=None):
     """Draw an Archify diagram (cached by content under nhplug/diagrams); when node or Archify is missing, or the render fails,
     show `fallback` (Graphviz dot) instead so the screen never breaks."""
@@ -150,7 +213,7 @@ def flow(key, spec, fallback=None, text=None):
     from src.config.paths import get_runtime_root
     try:
         html = smap.render(spec, get_runtime_root() / 'nhplug' / 'diagrams', kind=spec['diagram_type'], prefix=f'guide-{key}')
-        st.iframe(html, alt=spec['meta']['title'])  # height 'content': the whole diagram, no inner scroll
+        archify_frame(html, spec['meta']['title'])
     except Exception as exc:  # noqa: BLE001 - any render failure falls back to the plain diagram
         if fallback is None:
             raise

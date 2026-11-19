@@ -32,3 +32,26 @@ def test_yahoo_bars_try_the_checked_market_then_both_suffixes():
     assert b.yahoo_bars('207940', '2026-11-18', fetch) == []  # KOSPI per the case library: .KQ never asked
     assert b.yahoo_bars('900100', '2026-11-18', fetch) == [bar(10, 0, 1.0)]
     assert asked == ['207940.KS', '900100.KS', '900100.KQ']
+
+
+def test_a_kosdaq_code_from_the_toss_master_is_asked_on_kq_first():
+    """11-19 15:26: the issue candidates' 21 KOSDAQ stocks each got a Yahoo 404 on .KS before .KQ answered."""
+    asked = []
+
+    def fetch(symbol, interval, rng):
+        asked.append(symbol)
+        return [bar(10, 0, 1.0)] if symbol.endswith('.KQ') else []
+    assert b.yahoo_bars('043260', '2026-11-18', fetch, kosdaq={'043260'}) == [bar(10, 0, 1.0)]
+    assert asked == ['043260.KQ']
+    import oversold_cases as oc
+    assert oc.yahoo_symbols('043260', {'043260'}) == ['043260.KQ'] and oc.yahoo_symbols('207940', {'207940'}) == ['207940.KS']
+
+
+def test_the_kosdaq_list_is_empty_rather_than_an_error_when_toss_cannot_answer(monkeypatch):
+    import oversold_cases as oc
+    import toss_data
+    monkeypatch.setattr(toss_data, 'configured', lambda: True)
+    monkeypatch.setattr(toss_data, 'get', lambda *a, **k: (_ for _ in ()).throw(toss_data.TossError('HTTP 429')))
+    assert oc.kosdaq_codes() == set()
+    monkeypatch.setattr(toss_data, 'get', lambda path, params=None: [{'symbol': '043260'}, {'symbol': '035760'}])
+    assert oc.kosdaq_codes() == {'043260', '035760'}

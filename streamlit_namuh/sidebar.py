@@ -4,11 +4,11 @@ from __future__ import annotations
 from html import escape
 
 ICONS = {'장기투자': 'savings', '종합 현황': 'dashboard', '시장 상황': 'monitoring', '전략 구조': 'account_tree', '트레이딩 현황': 'candlestick_chart', '매매일지': 'menu_book',
-         '계좌·자동매매': 'tune', '엔진 비교': 'compare_arrows', '주문·정리': 'receipt_long', 'AI·실행 기록': 'psychology',
-         '실계좌': 'account_balance', '운영 상태': 'settings_heart', 'API 연동': 'cable'}
+         '계좌·자동매매': 'tune', '성과 비교': 'compare_arrows', '실계좌': 'account_balance', '운영': 'settings_heart'}
 
 CSS = """<style>
 .nav-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:2px 0 6px}
+.nav-group{font-size:.74rem;opacity:.7;margin:8px 0 2px;letter-spacing:.02em}
 .nav-btn{display:flex;align-items:center;gap:6px;min-height:40px;padding:6px 10px;border-radius:10px;cursor:pointer;
   border:1px solid rgba(128,128,128,.28);background:transparent;color:inherit;font:inherit;font-size:.86rem;text-align:left;
   transition:background .15s ease,border-color .15s ease}
@@ -45,10 +45,27 @@ setTimeout(win.__navSync, 300);
 </script>"""
 
 
-def nav_html(tabs):
-    return CSS + '<div class="nav-grid" role="navigation" aria-label="화면 바로가기">' + ''.join(
-        f'<button type="button" class="nav-btn" data-tab="{escape(t)}"><span class="ms" aria-hidden="true">{ICONS.get(t, "tab")}</span>{escape(t)}</button>'
-        for t in tabs) + '</div>'
+def nav_html(tabs, groups=None):
+    """Shortcut buttons, one titled block per tab group (매일 · 계좌 · 관리) when groups are given."""
+    button = lambda t: (f'<button type="button" class="nav-btn" data-tab="{escape(t)}"><span class="ms" aria-hidden="true">'
+                        f'{ICONS.get(t, "tab")}</span>{escape(t)}</button>')
+    blocks = [(name, [t for t in group if t in tabs]) for name, group in groups] if groups else [(None, tabs)]
+    return CSS + '<nav aria-label="화면 바로가기">' + ''.join(
+        (f'<div class="nav-group">{escape(name)}</div>' if name else '') + '<div class="nav-grid">' + ''.join(map(button, items)) + '</div>'
+        for name, items in blocks if items) + '</nav>'
+
+
+def tab_groups_css(groups):
+    """A thin divider and gap before the first tab of each later group in the main tab bar (a tab bar has no group titles)."""
+    starts, n = [], 0
+    for _, tabs in groups:
+        if n:
+            starts.append(n + 1)
+        n += len(tabs)
+    sel = lambda i: f'.st-key-main_tab > div > [role="tablist"] > [role="tab"]:nth-of-type({i})'  # not the tabs nested in a tab
+    return ('<style>' + ','.join(sel(i) for i in starts) + '{margin-left:22px;position:relative}'
+            + ','.join(sel(i) + '::before' for i in starts)
+            + "{content:'';position:absolute;left:-12px;top:22%;height:56%;border-left:1px solid rgba(128,128,128,.45)}</style>")
 
 
 def stat_html(label, value, color):
@@ -81,7 +98,8 @@ def render(tabs, states, records, alerts, engines=None):
                 help='종합 현황의 주의 항목과 같은 목록입니다.'):
         dlg.table_dialog('주의 항목', [{'내용': text} for text in alerts], icon=':material/warning:', empty='지금 주의할 항목이 없습니다.')
     st.markdown('**바로가기**')
-    st.markdown(nav_html(tabs), unsafe_allow_html=True)
+    import prefs
+    st.markdown(nav_html(tabs, prefs.GROUPS) + tab_groups_css(prefs.GROUPS), unsafe_allow_html=True)
     st.iframe(SCRIPT, height=1)  # no visible content (0 is refused, 'content' takes 150px); components.html is deprecated
 
 
@@ -100,7 +118,8 @@ def open_trade_history(engine, symbol):
     """Open this engine's confirmed fills for the selected symbol."""
     import streamlit as st
 
-    st.session_state['main_tab'] = 'AI·실행 기록'
+    st.session_state['main_tab'] = '운영'
+    st.session_state['ops_view'] = 'AI·실행 기록'
     st.session_state['record_source'] = engine
     st.session_state['trade_history'] = {'engine': engine, 'code': symbol}
 

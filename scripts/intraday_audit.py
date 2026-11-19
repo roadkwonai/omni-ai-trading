@@ -18,7 +18,7 @@ import json
 import re
 import subprocess
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -34,6 +34,9 @@ SESSION_SERVICES = ('shared-etf-paper', 'shared-etf-learning', 'shared-etf-regim
 SERVICE_UNTIL = {'shared-etf-regime': '15:00', 'market-movers': '15:05'}  # etf_regime_observer stops itself at 15:00 (11/18 false service.down)  # longterm: 08:40~15:40 (longterm-live-2 runs 09:35~14:40 only)
 LEDGERS = ('shared-etf-paper',)  # the intraday vibe book is frozen and jev-virtual retired (2026-11-17)
 CYCLE_GAP_MIN = 3        # a runner cycle is ~1 minute; a longer silence is worth a look
+REPEAT_BLOCK_ROUNDS = 3  # the same pick refused this many minutes in a row (user 2026-11-19: a per-minute stall is fatal)
+NH_SAME_QUERY_HITS = 10  # NH same-query refusals (IGW42903) per caller in the window; 11-19 ran ~40 an hour, hidden by retries
+NH_APP_LIMIT_HITS = 20  # NH per-app refusals (IGW42902, 5 calls a second for every service) per caller; 11-19 movers ~26 an hour
 RESTART_GRACE_MIN = 5    # restart_runner appends restarts.jsonl only after the new runner's first cycle
 FIGURES_MAX_AGE_MIN = 14  # latest_mover_rows' 12 minutes + the HH:MM truncation and Jev's answer time
 REGRESSION_SHARE = 0.2   # source-fed inputs: a few gaps are an outage, a fifth of the calls is a regression
@@ -91,6 +94,46 @@ def services(run=subprocess.run):
     return out
 
 
+def repeat_blocks(events):
+    """Runs of one symbol refused for one reason at the order gate in consecutive minutes (gaps up to 150 s), at least
+    REPEAT_BLOCK_ROUNDS long: [{symbol, reason, from, to, count}]."""
+    runs, out = {}, []
+
+    def close(key, run):
+        if run['count'] >= REPEAT_BLOCK_ROUNDS:
+            out.append({'symbol': key[0], 'reason': key[1], 'from': run['first'].strftime('%H:%M'),
+                        'to': run['last'].strftime('%H:%M'), 'count': run['count']})
+    for e in sorted(events, key=lambda e: str(e.get('time'))):
+        at, key = _time(e.get('time')), (e.get('symbol') or e.get('choice'), e.get('reason'))
+        if e.get('event') != 'v2_execution_gate' or e.get('permitted') is not False or at is None or None in key:
+            continue
+        run = runs.get(key)
+        if run and (at - run['last']).total_seconds() <= 150:
+            run['last'], run['count'] = at, run['count'] + 1
+        else:
+            if run:
+                close(key, run)
+            runs[key] = {'first': at, 'last': at, 'count': 1}
+    for key, run in runs.items():
+        close(key, run)
+    return out
+
+
+def nh_limits(nhplug, now, since):
+    """{caller: {'IGW42903': same-query refusals, 'IGW42902': per-app refusals}} since `since` (else the last hour) from
+    api-calls.sqlite3."""
+    start = (since or now - timedelta(hours=1)).isoformat(timespec='seconds')
+    rows = _query(Path(nhplug) / 'api-calls.sqlite3', "SELECT caller, CASE WHEN detail LIKE '%IGW42903%' THEN 'IGW42903' ELSE 'IGW42902' END, "
+                  "COUNT(*) FROM failures WHERE time >= ? AND time <= ? AND (detail LIKE '%IGW42903%' OR detail LIKE '%IGW42902%') "
+                  "GROUP BY 1, 2", (start, now.isoformat(timespec='seconds')))
+    if rows is None:
+        return None
+    out = {}
+    for caller, code, n in rows:
+        out.setdefault(caller, {})[code] = n
+    return out
+
+
 def ledger(root, day, since):
     root = Path(root)
     fills = _query(root / 'orders.sqlite3', 'SELECT side, COUNT(*), SUM(quantity) FROM fills WHERE time LIKE ? GROUP BY side',
@@ -128,6 +171,8 @@ def ledger(root, day, since):
         entry_blocks=dict(Counter(e.get('reason') for e in window
                                   if e.get('event') in ('v2_entry_gate', 'v2_execution_gate') and e.get('permitted') is False
                                   ).most_common()),
+        repeat_blocks=repeat_blocks(window),
+        pick_cooldowns=sum(e.get('event') == 'pick_cooldown' for e in window),
         errors=dict(Counter(e.get('event') for e in window if 'error' in str(e.get('event'))).most_common()),
         jev_busy=sum('JevRequestBusy' in json.dumps(e, ensure_ascii=False) for e in window),
         overnight_hold=[{k: e.get(k) for k in ('time', 'symbol', 'permitted', 'reason')}
@@ -385,6 +430,8 @@ def anomalies(facts, now, skipped=None):
         last = _time(row.get('last_cycle'))
         if ran(in_session, 'cycle.silent') and (last is None or (now - last).total_seconds() / 60 > CYCLE_GAP_MIN):
             found[f'cycle.silent:{name}'] = f"마지막 회차 {row.get('last_cycle')}"
+        for run in row.get('repeat_blocks') or ():
+            found[f"entry.repeat_block:{run['symbol']}:{run['reason']}"] = f"{run['from']}~{run['to']} {run['count']}분 연속 같은 사유로 주문 단계 거절"
         for gap in row.get('long_gaps') or ():
             found[f"cycle.gap:{name}:{gap['after']}"] = f"{gap['after']} 뒤 {gap['minutes']}분 회차 공백"
     jev = facts.get('jev_inputs') or {}
@@ -444,6 +491,11 @@ def anomalies(facts, now, skipped=None):
                     late.append(f'{part} {lag}분 지연(한도 {limit}분)')
             if late:
                 found[f'source.lagging:{section}'] = ', '.join(late)
+    for who, hits in (facts.get('nh_limits') or {}).items():
+        if ran(in_session, 'nh.same_query_limit') and hits.get('IGW42903', 0) >= NH_SAME_QUERY_HITS:
+            found[f'nh.same_query_limit:{who}'] = f"IGW42903 {hits['IGW42903']}건(같은 조회 1초 1번 제한, 재시도로 가려진 지연)"
+        if ran(in_session, 'nh.app_rate_limit') and hits.get('IGW42902', 0) >= NH_APP_LIMIT_HITS:
+            found[f'nh.app_rate_limit:{who}'] = f"IGW42902 {hits['IGW42902']}건(앱 키 초당 5회 제한, 같은 순간 다른 서비스 호출도 거절됨)"
     for key, on in facts['live']['live_orders'].items():
         if on is True:
             found[f'live.switch_on:{key}'] = '실계좌 실주문 스위치 켜짐'
@@ -510,7 +562,7 @@ def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=No
              'databases': database_health(nhplug),
              'learning': learning_rounds(Path(nhplug) / 'shared-etf-paper' / 'com.vibetrading.shared-etf-learning.log', day),
              'jev_inputs': jev_inputs(Path(nhplug) / 'shared-etf-paper', day, since),
-             'sources': sources(Path(nhplug) / 'shared-etf-paper')}
+             'sources': sources(Path(nhplug) / 'shared-etf-paper'), 'nh_limits': nh_limits(nhplug, now, since)}
     reviews = Path(nhplug) / 'shared-etf-paper' / 'reviews'
     facts['checks'] = checks(reviews, checks_file)
     skipped = set()

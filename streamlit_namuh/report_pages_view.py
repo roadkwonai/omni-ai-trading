@@ -1,4 +1,4 @@
-"""API 연동 → 리포트 발행 (user request 2026-11-17): which reports become HTML pages and go to Discord, when, and what
+"""운영 → 리포트 발행 (user request 2026-11-17): which reports become HTML pages and go to Discord, when, and what
 happened to each one: browse every generated page (search, kind, year/month/day), open it, and regenerate / republish /
 resend a failed one with the stored reason. Reads scripts/report_pages.py records; buttons call its retry()."""
 from __future__ import annotations

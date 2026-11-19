@@ -126,7 +126,7 @@ flowchart LR
 - 하이픈이 든 계좌번호 형식(숫자 10자리 이상)
 - 16자 이상 16진수 해시
 
-생성한 페이지는 검사(`check`)를 통과해야 합니다: `lang`·viewport·description·`noindex`·`<h1>` 하나·본문 랜드마크·건너뛰기 링크가 있고, 인라인 스크립트·토큰·웹훅 주소가 없어야 합니다. JSON 값이나 표 칸에 잘못된 값이 있어도 페이지 전체가 실패하지 않습니다.
+생성한 페이지는 검사(`check`)를 통과해야 합니다. 검사는 `lang`·viewport·description·`noindex`·`<h1>` 하나·본문 랜드마크·건너뛰기 링크가 있는지, 인라인 스크립트·토큰·웹훅 주소가 없는지 봅니다. JSON 값이나 표 칸에 잘못된 값이 있어도 페이지 전체가 실패하지 않습니다.
 
 > [!CAUTION]
 > Pages 주소는 공개입니다. 검색 노출은 막지만(`noindex`, `robots.txt`) 링크를 아는 사람은 볼 수 있습니다.
@@ -142,7 +142,7 @@ flowchart LR
 
 ## 대시보드 화면
 
-**API 연동 → 리포트 발행**
+**운영 → 리포트 발행**
 
 - 요약 카드
 - 리포트 목록: 검색, 종류, 연·월·날짜, 열기 링크
@@ -153,7 +153,7 @@ flowchart LR
 > [!NOTE]
 > '다시 발송'은 Pages가 꺼져 있으면 보내지 않고 "Pages 배포 전이라 보내지 않음"을 돌려줍니다. 버튼 도움말의 '꺼져 있으면 본문을 보냄' 문구는 옛 표기입니다.
 
-API 연동 목록에는 Discord 웹훅과 GitHub Pages 리포트 항목이 있습니다.
+운영 → API 연동 목록에는 Discord 웹훅과 GitHub Pages 리포트 항목이 있습니다.
 
 ## 배포를 켤 때
 
@@ -162,7 +162,7 @@ API 연동 목록에는 Discord 웹훅과 GitHub Pages 리포트 항목이 있�
 1. Pages 저장소를 공개로 바꿉니다(무료 계정에서 Pages를 쓰려면 필요).
 2. `.env`를 고칩니다.
    - `REPORT_PAGES_REPO=roadkwonai/omni-ai-trading`
-   - `REPORT_PAGES_URL`은 비워 두면 `https://roadkwonai.github.io/omni-ai-trading/`을 씁니다(사용자 도메인이면 적음).
+   - `REPORT_PAGES_URL`은 비워 두면 `https://roadkwonai.github.io/omni-ai-trading/`를 씁니다(사용자 도메인이면 적음).
    - `REPORT_PAGES_BRANCH`는 기본 `gh-pages`
 3. 푸시 토큰을 확인합니다. `.env`의 `GH_TOKEN`(없으면 저장소 상위 폴더 `.envrc`의 `GH_TOKEN` 또는 `GITHUB_TOKEN`)에 그 저장소 Contents 쓰기 권한이 있어야 하고, Pages를 코드로 켜려면 Pages 권한도 필요합니다. 권한이 없으면 게시 실패 사유에 HTTP 코드가 남습니다.
 4. `.env`의 `REPORT_PAGES_PUSH=off`를 `on`으로 바꿉니다.
@@ -200,8 +200,8 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/report_pages.py --preview long
 | 2026-11-17 | 디자인 개선: 넓은 화면, 테마 버튼, 콜아웃·형광펜·자동 막대·chart·archify |
 | 2026-11-18 | 리포트 본문 텍스트 발송 제거. Pages 배포 전에는 대기 |
 | 2026-11-18 | 장기투자 복기·감사(`longterm-audit`) 추가 |
-| 2026-11-19 | Pages 저장소를 `roadkwonai/omni-ai-trading`으로 정하고 공개, 루트 랜딩·`/reports/` 목록으로 배포 켬 |
+| 2026-11-19 | Pages 저장소를 `roadkwonai/omni-ai-trading`로 정하고 공개, 루트 랜딩·`/reports/` 목록으로 배포 켬 |
 
-랜딩페이지 기획은 `docs/omni-landing-plan.md`에 있습니다. (비공개 설계 기록이라 공개 저장소에는 없습니다)
+랜딩페이지 기획은 `docs/omni-landing-plan.md`에 있습니다(비공개 설계 기록이라 공개 저장소에는 없습니다).
 
 </details>

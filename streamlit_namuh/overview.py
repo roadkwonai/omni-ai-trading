@@ -107,7 +107,7 @@ def longterm_alerts(root, today):
         found.append(f"장기투자 스토리 훼손: {', '.join(broken)} (위성 비중 0, 장기투자 → 테마 스토리)")
     plan = state.get('plan') or {}
     if plan.get('day') == today and (errors := (plan.get('macro') or {}).get('errors')):
-        found.append(f"장기투자 거시 자료 일부 없음: {', '.join(errors)} (API 연동 → FRED)")
+        found.append(f"장기투자 거시 자료 일부 없음: {', '.join(errors)} (운영 → API 연동 → FRED)")
     return found
 
 
@@ -156,8 +156,8 @@ def heatmap(frame):
             ).properties(height=200)
 
 
-def activity(runtime, day, advice_history, jev_root):
-    """10-minute activity counts for the heatmap: Jev judgments, vibe analyses, engine orders, live plans and blocks."""
+def activity(runtime, day, jev_root):
+    """10-minute activity counts for the heatmap: Jev judgments, engine orders, live plans and blocks."""
     rows = []
     bucket = lambda stamp: stamp[11:15] + '0'
     for event in ec.recent_events(Path(jev_root) / 'events.jsonl', 8000):
@@ -170,10 +170,6 @@ def activity(runtime, day, advice_history, jev_root):
             rows.append(('엔진 주문', bucket(stamp)))
         elif kind and kind.endswith('error'):
             rows.append(('오류', bucket(stamp)))
-    for item in advice_history:
-        stamp = str(item.get('time', ''))
-        if stamp.startswith(day):
-            rows.append(('vibe 분석', bucket(stamp)))
     for event in ec.recent_events(Path(runtime) / 'live-follow.jsonl', 8000):
         stamp = str(event.get('time', ''))
         if not stamp.startswith(day):
@@ -231,7 +227,7 @@ def alerts(runtime, states, follow, today, now=None):
     for event in ec.recent_events(runtime / 'live-follow.jsonl', 8000):
         if str(event.get('time', '')).startswith(today) and (event.get('action') == 'BLOCK' or event.get('error_type')):
             blocked[event.get('account')] = blocked.get(event.get('account'), 0) + 1
-    found += [f'{k} 미러 차단·오류 {n}회 (AI·실행 기록에서 확인)' for k, n in blocked.items()]
+    found += [f'{k} 미러 차단·오류 {n}회 (운영 → AI·실행 기록에서 확인)' for k, n in blocked.items()]
     for path in sorted((runtime / 'live-follow').glob('lag-alert-*.json')):  # nh_live_follow.mirror_lag (11/17)
         try:
             lag = json.loads(path.read_text())
@@ -528,7 +524,7 @@ def render(runtime, records, states, names, refresh_balances=None):
                              + base.mark_point(filled=True, size=60).encode(
                                  y='누적:Q', tooltip=['계좌', '종목', 'path', alt.Tooltip('pnl:Q', title='손익', format='+,.0f')])
                              ).properties(height=230), width='stretch')
-            st.caption('실계좌는 금액이 작아(1주 기준) 0 근처에 보일 수 있습니다. 실계좌만 보려면 엔진 비교의 실계좌 범위를 쓰세요.')
+            st.caption('실계좌는 금액이 작아(1주 기준) 0 근처에 보일 수 있습니다. 실계좌만 보려면 실계좌 탭을 쓰세요.')
         else:
             st.caption('오늘 매도 기록이 없습니다.')
     with c2:
@@ -578,7 +574,7 @@ def render(runtime, records, states, names, refresh_balances=None):
             st.caption('오늘 거래가 없습니다.')
     with st.container():
         st.markdown('###### 판단·실행 활동 (10분 단위)')
-        heat = activity(runtime, today, [], ledger_root(runtime, 'jev'))
+        heat = activity(runtime, today, ledger_root(runtime, 'jev'))
         if heat:
             frame = pd.DataFrame(heat)
             frame['구분'] = frame['구분'].map(lambda k: k.replace('live-1', '실계좌 1').replace('live-2', '실계좌 2'))
@@ -626,7 +622,7 @@ def render(runtime, records, states, names, refresh_balances=None):
                                        for c, r in sorted(table.items(), key=lambda kv: -(kv[1].get('jev_prob') or 0))]),
                          hide_index=True, width='stretch',
                          column_config={'Jev 확률': st.column_config.ProgressColumn(format='%.2f', min_value=0.0, max_value=1.0)})
-        st.caption('Jev 판단 근거는 "엔진 비교", 실행 과정은 "AI·실행 기록", 장기투자 판단은 "장기투자" 탭에서 봅니다.')
+        st.caption('Jev 판단 근거와 실행 과정은 "운영 → AI·실행 기록", 장기투자 판단은 "장기투자" 탭에서 봅니다.')
     with alert_tab:
         if warnings:
             for line in warnings:
@@ -645,7 +641,7 @@ def render_orders(runtime, records, states, names):
     warnings = [w for w in alerts(runtime, states, latest_follow(runtime), today) if w.startswith('정리 요청')]
     st.subheader('주문·정리 종합')
     st.caption('모든 계좌의 보유·오늘 체결·정리 요청을 원장과 실행기 기록으로 모았습니다(증권사 조회 없음). '
-               '증권사 잔고·미체결 확인과 정리 요청은 위 "계좌" 버튼에서 계좌를 고르세요.')
+               '증권사 잔고·미체결 확인과 정리 요청은 위 "보기"에서 계좌 이름을 고른 뒤 그 계좌의 "주문·정리" 탭에서 합니다.')
     cards = []
     for i in items:
         day = ec.summary(ec.in_period(i['rows'], today))
@@ -721,7 +717,7 @@ def record_days(runtime, today):
     return sorted((d for d in days if re.fullmatch(r'\d{4}-\d\d-\d\d', str(d))), reverse=True)
 
 
-def timeline(runtime, day, advice_history, names, reason_label=str):
+def timeline(runtime, day, names, reason_label=str):
     """One day's judgments and executions of every engine and live account, oldest first:
     [{time, 출처, 종류, 종목, 내용, 값}] plus {wait reason: count} of the engine runners' refused entries."""
     from engine_roles import ledger_root
@@ -731,7 +727,7 @@ def timeline(runtime, day, advice_history, names, reason_label=str):
     rows, waits = [], {}
     add = lambda event, source, kind, symbol, text, value=None: rows.append(
         {'time': str(event.get('time', '')), '출처': source, '종류': kind, '종목': name(symbol), '내용': text, '값': value})
-    for engine in ec.ENGINES:
+    for engine in ('jev',):  # the intraday vibe ledger moved to the archive (2026-11-19)
         root, label = ledger_root(runtime, engine), ec.ENGINES[engine]
         for event in ec.recent_events(root / 'events.jsonl', 12000):
             if not str(event.get('time', '')).startswith(day):
@@ -765,13 +761,6 @@ def timeline(runtime, day, advice_history, names, reason_label=str):
         for r in ec.in_period(ec.cached_journal(root, engine), day):
             add(r, f'{label} 실행기', '체결', r['symbol'], f"{'매수' if r['side'] == 'BUY' else '매도'} {r['qty']:,}주 · {r['price']:,.0f}원 · {r['path']}"
                 + (f" · {r['return_pct']:+.2f}%" if r['return_pct'] is not None else ''))
-    for item in advice_history:
-        if str(item.get('time', '')).startswith(day):
-            scores = item.get('scores') or {}
-            best = max(scores.items(), key=lambda kv: kv[1].get('score', 0), default=None)
-            add(item, 'vibe', '판단', best[0] if best else None,
-                f"최고 {name(best[0])} {best[1]['score']:+.2f} · {len(scores)}종목 · 매매 결정 {len(item.get('decisions') or [])}" if best else '점수 없음',
-                best[1]['score'] if best else None)
     previous = {}
     for event in ec.recent_events(runtime / 'live-follow.jsonl', 8000):
         account = event.get('account')
@@ -852,17 +841,14 @@ def render_records(runtime, records, names, settings, reason_label=str):
     import altair as alt
     import pandas as pd
     import streamlit as st
-    from research_store import history
     runtime = Path(runtime)
-    advice_history = history('vibe_advice', 400)  # the retired intraday vibe's judgments, still shown on their days
     days = record_days(runtime, datetime.now().astimezone().strftime('%Y-%m-%d'))
     head, pick = st.columns([3, 1], vertical_alignment='bottom')
     head.subheader('AI·실행 기록 종합')
     day = pick.selectbox('기록 날짜', days, key='records_overview_day')
-    rows, waits = timeline(runtime, day, advice_history, names, reason_label)
+    rows, waits = timeline(runtime, day, names, reason_label)
     count = lambda source, kind: sum(1 for r in rows if r['출처'].startswith(source) and r['종류'] == kind)
     jev = [r['값'] for r in rows if r['출처'] == 'Jev' and r['종류'] == '판단' and r['값'] is not None]
-    vibe = [r['값'] for r in rows if r['출처'] == 'vibe' and r['종류'] == '판단' and r['값'] is not None]
     orders = sum(1 for r in rows if r['종류'].endswith('주문'))
     fills = sum(1 for r in rows if r['종류'] == '체결')
     live_plans = sum(1 for r in rows if r['종류'] == '실계좌 계획')
@@ -870,8 +856,6 @@ def render_records(runtime, records, names, settings, reason_label=str):
     entry = settings.get('entry_confidence', 0.5)
     sc.row([{'label': 'Jev 판단', 'value': f'{len(jev)}회', 'tone': 'ai' if jev else 'off', 'icon': 'psychology',
              'sub': f"최고 신뢰도 {max(jev):.2f} (기준 {entry:.2f})" if jev else '기록 없음'},
-            *([{'label': 'vibe 장중 분석(보관)', 'value': f'{len(vibe)}회', 'tone': 'ai', 'icon': 'insights',
-                'sub': f"최고 점수 {max(vibe):+.2f} (기준 +0.50) · 11-17 종료"}] if vibe else []),  # past days only
             {'label': '진입 허용 · 대기', 'value': f"{count('', '진입 허용')} · {sum(waits.values())}", 'icon': 'rule',
              'tone': 'ok' if count('', '진입 허용') else 'off', 'sub': '실행기 진입 조건 통과 / 대기 회차'},
             {'label': '주문 · 체결', 'value': f'{orders} · {fills}', 'icon': 'swap_vert', 'tone': 'up' if fills else 'off',
@@ -899,10 +883,9 @@ def render_records(runtime, records, names, settings, reason_label=str):
         st.markdown('###### 판단 강도 추이와 체결')
         frame = pd.DataFrame(judged)
         frame['시각'] = pd.to_datetime(frame['time'], format='ISO8601')
-        frame['엔진'] = frame['출처'].map({'Jev': 'Jev 후보 신뢰도', 'vibe': 'vibe 최고 점수'})
-        color = alt.Color('엔진:N', scale=alt.Scale(domain=['Jev 후보 신뢰도', 'vibe 최고 점수'], range=[ec.COLORS['Jev'], ec.COLORS['vibe-trading']]),
-                          legend=alt.Legend(orient='top', title=None))
-        rules = pd.DataFrame([{'y': entry, '기준': f'Jev 진입 기준 {entry:.2f}'}] + ([{'y': 0.5, '기준': 'vibe 매수 기준 +0.50(보관)'}] if vibe else []))
+        frame['엔진'] = 'Jev 후보 신뢰도'
+        color = alt.Color('엔진:N', scale=alt.Scale(domain=['Jev 후보 신뢰도'], range=[ec.COLORS['Jev']]), legend=alt.Legend(orient='top', title=None))
+        rules = pd.DataFrame([{'y': entry, '기준': f'Jev 진입 기준 {entry:.2f}'}])
         layers = [alt.Chart(frame).mark_line(point=True, strokeWidth=2).encode(
                       x=alt.X('시각:T', title=None, axis=alt.Axis(format='%H:%M')), y=alt.Y('값:Q', title='신뢰도 · 점수'),
                       color=color, tooltip=[alt.Tooltip('시각:T', format='%H:%M'), '엔진', '내용']),
@@ -918,13 +901,13 @@ def render_records(runtime, records, names, settings, reason_label=str):
                 color=alt.Color('구분:N', scale=alt.Scale(domain=['매수 ▲', '매도 ▼'], range=['#ef4444', '#3b82f6']), legend=None),
                 tooltip=['출처', '종목', '내용']))
         st.altair_chart(alt.layer(*layers).resolve_scale(color='independent').properties(height=260), width='stretch')
-        st.caption('보라 선 = Jev 후보 신뢰도, 초록 선 = vibe 최고 점수(장중 vibe, 11-17까지), 주황 점선 = 매수 기준, 아래 ▲▼ = 엔진 실행기 체결. '
+        st.caption('보라 선 = Jev 후보 신뢰도, 주황 점선 = 매수 기준, 아래 ▲▼ = 엔진 실행기 체결. '
                    '신뢰도·점수는 수익 확률이 아닙니다.')
     c1, c2 = st.columns(2)
     with c1:
         st.markdown('###### 판단·실행 활동 (10분 단위)')
         from engine_roles import ledger_root
-        heat = activity(runtime, day, advice_history, ledger_root(runtime, 'jev'))
+        heat = activity(runtime, day, ledger_root(runtime, 'jev'))
         if heat:
             frame = pd.DataFrame(heat)
             frame['구분'] = frame['구분'].map(lambda k: k.replace('live-', '실계좌 '))

@@ -1,6 +1,6 @@
-# 알림 (Discord)
+# 알림 (Discord · Telegram · Slack)
 
-체결·마감 요약·장기투자 판단 같은 짧은 알림은 Discord 채널 두 곳에 텍스트로 보내고, 리포트는 GitHub Pages 페이지의 링크로만 보냅니다. 알림 서비스는 엔진 기록을 읽기만 하는 별도 감시 프로그램이라, 알림이 실패해도 매매에는 영향이 없습니다.
+체결·마감 요약·장기투자 판단 같은 짧은 알림은 채널 두 개(실시간·장기투자)로 나눠 Discord·Telegram·Slack 중 설정한 곳 모두에 텍스트로 보내고, 리포트는 GitHub Pages 페이지의 링크로만 보냅니다. 알림 서비스는 엔진 기록을 읽기만 하는 별도 감시 프로그램이라, 알림이 실패해도 매매에는 영향이 없습니다.
 
 - [채널과 키](#채널과-키)
 - [무엇을 보내나](#무엇을-보내나)
@@ -13,17 +13,19 @@
 
 ## 채널과 키
 
-| 채널 | `.env` 키 | 받는 것 |
-| --- | --- | --- |
-| 실시간 (Jev) | `DISCORD_WEBHOOK_REALTIME` | 공유 모의 체결, Jev 미러 실계좌 체결, 15:40 마감 요약, 장전 사전 점검 실패, Jev 쪽 리포트 링크 |
-| 장기투자 | `DISCORD_WEBHOOK_LONGTERM` | 장기 엔진 판단·가상 주문·적립식·순자산, 장기투자 실계좌 체결·계획, 장기 리포트 링크 |
+| 채널 | Discord | Telegram | Slack | 받는 것 |
+| --- | --- | --- | --- | --- |
+| 실시간 (Jev) | `DISCORD_WEBHOOK_REALTIME` | `TELEGRAM_CHAT_REALTIME` | `SLACK_WEBHOOK_REALTIME` | 공유 모의 체결, Jev 미러 실계좌 체결, 15:40 마감 요약, 장전 사전 점검 실패, Jev 쪽 리포트 링크 |
+| 장기투자 | `DISCORD_WEBHOOK_LONGTERM` | `TELEGRAM_CHAT_LONGTERM` | `SLACK_WEBHOOK_LONGTERM` | 장기 엔진 판단·가상 주문·적립식·순자산, 장기투자 실계좌 체결·계획, 장기 리포트 링크 |
+
+Telegram은 봇 토큰 `TELEGRAM_BOT_TOKEN`도 있어야 켜집니다. 발송처는 하나만 써도 되고 셋 다 써도 됩니다(2026-11-19부터). 발급과 설정 절차는 [연동 서비스](integrations.md#알림-채널-두-개)에 있습니다.
 
 > [!CAUTION]
-> 웹훅 주소 자체가 비밀입니다. `.env`에만 두고, 로그·기록·화면 어디에도 쓰지 않습니다. 키가 비어 있으면 그 채널은 보내지 않고 기다립니다.
+> 웹훅 주소와 봇 토큰 자체가 비밀입니다. `.env`에만 두고, 로그·기록·화면 어디에도 쓰지 않습니다. 키가 비어 있으면 그 채널은 보내지 않고 기다립니다.
 
 ## 무엇을 보내나
 
-서비스는 launchd `discord-notify`(`scripts/discord_notify.py --watch`, 로그인 시 시작)이고 30초마다 한 번 돕니다.
+서비스는 launchd `discord-notify`(`scripts/discord_notify.py --watch`, 로그인 시 시작)이고 30초마다 한 번 돌아갑니다.
 
 ```mermaid
 flowchart LR
@@ -107,22 +109,23 @@ flowchart LR
 알림 서비스가 쓰는 파일은 커서 `~/.vibe-trading/nhplug/discord-notify.json` 하나입니다.
 
 - **처음 실행**: 지금 있는 기록을 모두 '보낸 것'으로 표시하고 끝냅니다. 지난 기록을 한꺼번에 보내지 않습니다.
-- **보낸 목록**: 항목마다 고유 키(모의 주문 번호, 실계좌 키·날짜·주문 번호, 장기 기록 행 번호, `summary:날짜` 등)를 남깁니다. 최근 3,000개만 보관합니다.
+- **보낸 목록**: 항목마다 고유 키(모의 주문 번호, 실계좌 키·날짜·주문 번호, 장기 기록 행 번호, `summary:날짜` 등)를 남깁니다. 발송처마다 따로 둡니다(Discord `seen`, Telegram `seen_telegram`, Slack `seen_slack`). 한 곳이 실패해도 다른 곳에 다시 보내지 않고, 실패한 곳만 다음 회차에 이어 보냅니다. 새 발송처를 켜면 Discord가 이미 보낸 목록에서 시작해 지난 알림을 몰아 보내지 않습니다. 목록마다 최근 3,000개만 보관합니다.
 - **최근 3일**: 3일보다 오래된 체결은 보내지 않습니다.
 - **한 건씩 확정**: 한 건을 보낼 때마다 커서를 저장합니다. 도중에 멈춰도 이미 보낸 것을 다시 보내지 않습니다.
 - **장기 기록 커서**: 아직 못 보낸 장기 기록이 있으면 커서를 그 앞까지 되돌려 다음 회차에 다시 모읍니다.
 - **멘션 차단**: `@everyone` 같은 멘션은 막아서 보냅니다(`allowed_mentions` 비움).
-- **긴 메시지**: Discord 한도(2,000자) 안에서 1,900자씩 줄 단위로 나눕니다.
+- **긴 메시지**: 줄 단위로 나눕니다. Discord 1,900자, Telegram 4,000자, Slack 3,500자.
+- **서식**: Discord는 마크다운 그대로, Slack은 mrkdwn(`*굵게*`, `<주소|제목>`)으로, Telegram은 서식 없는 글자로 바꿔 보냅니다.
 
 ## 실패했을 때
 
 | 상황 | 동작 |
 | --- | --- |
-| 429 (속도 제한) | Discord가 알려 준 시간(최대 30초)만큼 기다렸다가 3번까지 다시 보냅니다. |
+| 429 (속도 제한) | 발송처가 알려 준 시간(Discord·Telegram은 응답 본문, Slack은 `Retry-After`, 최대 30초)만큼 기다렸다가 3번까지 다시 보냅니다. |
 | 연결 실패·일시 오류 | 그 건을 보내지 않은 채로 두고 다음 회차(30초 뒤)에 다시 보냅니다. |
 | 4xx 거절 (429 제외) | 3번 연속 거절되면 그 건을 건너뜁니다(영원히 막히지 않게). |
-| 웹훅 키 없음 | 그 채널은 보내지 않고 기다립니다. |
-| 한 채널의 건이 실패 | 그 채널의 뒤 건은 순서를 지키려고 다음 회차로 미룹니다. 다른 채널은 계속 보냅니다. |
+| 발송처 키 없음 | 그 발송처는 보내지 않습니다. 채널에 발송처가 하나도 없으면 그 채널은 기다립니다. |
+| 한 발송처의 건이 실패 | 그 채널·발송처의 뒤 건은 순서를 지키려고 다음 회차로 미룹니다. 다른 채널과 다른 발송처는 계속 보냅니다. |
 | 기록 읽기 오류 | 그 부분(손익·잔고 줄)만 빼고 보냅니다. 회차 전체가 실패해도 서비스는 멈추지 않습니다. |
 
 실패 사유는 서비스 로그(`~/.vibe-trading/nhplug/shared-etf-paper/com.vibetrading.discord-notify.log`)에 예외 종류만 남습니다.
@@ -149,10 +152,10 @@ flowchart LR
 
 ```bash
 PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/discord_notify.py --once --dry-run   # 보낼 메시지 미리보기(발송·커서 저장 없음)
-PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/discord_notify.py --test            # 두 채널에 연결 확인 메시지 한 번
+PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/discord_notify.py --test            # 채널·발송처마다 연결 확인 메시지 한 번
 ```
 
-대시보드 **API 연동**의 Discord 웹훅 항목에서 호출 기록을, **API 연동 → 리포트 발행**에서 리포트 발송 상태를 봅니다.
+대시보드 **운영 → API 연동**의 Discord 웹훅·Telegram 봇·Slack 웹훅 항목에서 호출 기록을, **운영 → 리포트 발행**에서 리포트 발송 상태를 봅니다.
 
 > [!TIP]
-> 서비스를 다시 시작하려면 `launchctl kickstart -k gui/$(id -u)/com.vibetrading.discord-notify`를 씁니다. 커서가 남아 있으므로 보낸 알림을 다시 보내지 않습니다.
+> 서비스는 시작할 때 `.env`를 읽으므로 발송처를 더하거나 바꾼 뒤에는 `launchctl kickstart -k gui/$(id -u)/com.vibetrading.discord-notify`로 다시 시작합니다. 커서가 남아 있으므로 보낸 알림을 다시 보내지 않습니다.

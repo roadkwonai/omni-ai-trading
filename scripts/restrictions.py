@@ -56,7 +56,7 @@ RULES = [
      '이미 보유한 종목은 새 진입으로 다시 사지 않고, 분할 계획(2·3차)으로만 더 삽니다.', '분할 계획과 손절 기준이 섞이지 않게 합니다.'),
     ('cutoff', '시간', '신규 매수 마감 · 장 마감 정리 시각', 'value', 'entry_cutoff_hhmm',
      '마감 시각부터 새로 사지 않고(분할 추가 매수 포함), 정리 시각부터 보유를 팝니다. 종가매매 조건을 모두 충족한 종목만 보유 한도 안에서 넘깁니다.',
-     '마감 10:00~15:00, 정리 14:00~15:05에서 정합니다(기본 14:30·14:40). 정리는 주문당 약 2분이 걸려 실행기가 정리 뒤 20분(최대 15:18, 15:20 종가 단일가 전)까지 돕니다. '
+     '마감 10:00~15:00, 정리 14:00~15:05에서 정합니다(기본 14:30·14:40). 정리는 주문당 약 2분이 걸려 실행기가 정리 뒤 20분(최대 15:18, 15:20 종가 단일가 전)까지 돌아갑니다. '
      '정리를 늦출수록 막판 움직임을 더 타지만 팔 시간이 줄어 미체결로 다음 날까지 남을 위험이 커집니다. 실계좌 미러·vibe도 같은 시각을 씁니다.'),
     ('averaging', '추가 매수', '약세장 물타기 금지', 'switch', 'averaging_down_guard',
      '하락장의 약세·혼조일(인버스는 상승장의 강세일)에는 2·3차 추가 매수를 하지 않습니다.',
@@ -93,12 +93,12 @@ RULES = [
     ('ipo_add', '추가 매수', '신규주 추가 매수 금지', 'switch', 'ipo_add_guard',
      '신규주는 떨어져도 2·3차 추가 매수를 하지 않습니다.', '하루 −40%까지 움직이는 신규주에 물타기를 막습니다. 끄면 일반 종목처럼 분할 추가 매수합니다.'),
     ('reconcile', '안전', '미확인 주문 · 잔고 불일치 시 정지', 'fixed', None,
-     '결과가 확인되지 않은 주문이 있거나 증권사 잔고와 원장이 다르면 새 주문을 내지 않고 멈춥니다.', '중복·유령 주문을 막는 핵심 안전 장치라 끌 수 없습니다.'),
+     '결과가 확인되지 않은 주문이 있거나 증권사 잔고와 원장이 다르면 새 주문을 내지 않고 멈춥니다.', '중복·유령 주문을 막는 핵심 안전장치라 끌 수 없습니다.'),
     ('read_fail', '안전', f'조회 실패 {_READ_FAILS}번 연속이면 정지', 'fixed', None,
-     f'시세·분봉·잔고 조회가 한 번 실패하면 다음 주기에 다시 하고, {_READ_FAILS}번 연속이면 실행기를 멈춥니다(횟수는 운영 상태 탭).',
+     f'시세·분봉·잔고 조회가 한 번 실패하면 다음 주기에 다시 하고, {_READ_FAILS}번 연속이면 실행기를 멈춥니다(횟수는 운영 → 운영 상태).',
      '잘못된 데이터로 주문하지 않기 위한 규칙입니다.'),
     ('broker', '안전', f"하루 주문 998건 · {f'보유 {_HELD_MAX:,}주 상한' if _HELD_MAX else '보유 수량 제한 없음'}", 'fixed', None,
-     '하루 주문이 998건(증권사 모의계좌 제한)에 닿거나 전체 보유가 운영 상태 탭의 총 보유 최대 수량(0이면 제한 없음)에 닿으면 새로 사지 않습니다.',
+     '하루 주문이 998건(증권사 모의계좌 제한)에 닿거나 전체 보유가 운영 → 운영 상태의 총 보유 최대 수량(0이면 제한 없음)에 닿으면 새로 사지 않습니다.',
      '증권사 규칙과 운영 설정입니다.'),
 ]
 
@@ -110,7 +110,7 @@ REASONS = {'reentry_allow': ('reentry_disabled', 'reentry_market_unconfirmed'),
            'volume': ('volume_not_rising',), 'rising': ('trend_not_rising',), 'one_position': ('split_plan_holding',),
            'add_cutoff': ('add_cutoff',), 'add_count': ('add_count_limit',), 'add_better': ('add_not_better',), 'ipo_daily': ('ipo_daily_limit',),
            'cutoff': ('entry_window_closed',), 'ipo_count': ('ipo_already_held',), 'averaging': ('downtrend_no_averaging_down',), 'spread': ('stop_inside_spread',),
-           'order_guard': ('order_guard_refused', 'single_order_limit', 'split_limit'), 'broker': ('order_limit', 'position_limit'),
+           'order_guard': ('order_guard_refused', 'single_order_limit', 'split_limit', 'one_share_over_buy'), 'broker': ('order_limit', 'position_limit'),
            'inverse_guard': ('inverse_regime_not_falling', 'inverse_index_not_falling', 'inverse_index_rebounding',
                              'inverse_flows_not_selling', 'inverse_us_not_falling', 'inverse_market_unknown')}
 

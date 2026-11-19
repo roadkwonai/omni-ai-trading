@@ -32,6 +32,10 @@ PUBLIC_DOCS = frozenset({
     # guides added with the README rewrite (2026-11-19)
     "oversold.md", "live-accounts.md", "longterm.md", "longterm-dca.md", "yeo-method.md", "journal.md",
     "premarket.md", "report-pages.md", "automation.md", "notifications.md", "portability.md",
+    # AI agent guide (2026-11-19)
+    "ai-agents.md",
+    # external services and webhooks (2026-11-19)
+    "integrations.md",
 })
 PUBLIC_DOC_IMAGES = frozenset({".jpg", ".png", ".svg"})
 

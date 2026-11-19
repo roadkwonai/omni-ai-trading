@@ -45,11 +45,25 @@ def constituents(read):
     return result
 
 
-def scan(read, universe, pause=0.0):
-    rows = []
+# 11-19: the 60-stock burst every five minutes went past NH's 5 calls a second per app key (IGW42902) and also refused the
+# runner, mirror and dashboard calls at that moment; a quote starts at most this often (2 a second, as the dashboard)
+SCAN_GAP = 0.5
+RATE_LIMIT_WAIT = 1.0  # one more ask after a rate-limit refusal, so the stock stays in the rankings
+
+
+def scan(read, universe, gap=0.0, clock=time.monotonic, sleep=time.sleep):
+    from nh_live_broker import rate_limited
+    rows, last = [], None
     for code, meta in universe.items():
         try:
-            response = read.call_tool('get_stock_price', {'stock_code': code})
+            for retry in (RATE_LIMIT_WAIT, None):
+                if last is not None:
+                    sleep(max(0.0, last + gap - clock()))
+                last = clock()
+                response = read.call_tool('get_stock_price', {'stock_code': code})
+                if retry is None or not rate_limited(response):
+                    break
+                sleep(retry)
             quote = (response.get('data') or {}).get('Output_0') or {}
             if response.get('status') != 'ok' or quote.get('iem_cd') != code:
                 continue
@@ -62,8 +76,6 @@ def scan(read, universe, pause=0.0):
                          'change_pct': round((price / previous - 1) * 100, 2), 'volume': int(volume), 'value_mil': int(value)})
         except (AttributeError, TypeError, ValueError):
             continue
-        if pause:
-            time.sleep(pause)
     return rows
 
 
@@ -217,7 +229,7 @@ def main():
                 universe, universe_day = constituents(read), now.date()
             started = time.time()
             quoted, source = targets(universe, lambda line: print(line, flush=True))
-            rows = scan(read, quoted)
+            rows = scan(read, quoted, gap=SCAN_GAP)
             rankings, candidates, by_code = rank(rows)
             payload = {'time': datetime.now(KST).isoformat(), 'scanned': len(rows), 'source': source, 'universe': len(universe),
                        'seconds': round(time.time() - started, 1), 'rankings': rankings,

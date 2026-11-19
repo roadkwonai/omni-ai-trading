@@ -211,17 +211,7 @@ def macro_data(runtime, now):
 
 def render(runtime):
     now = datetime.now(KST)
-    section = st.segmented_control('보기', ['외부 API', '스킬·자동 작업', '리포트 발행'], default='외부 API', key='api_section',
-                                   label_visibility='collapsed') or '외부 API'
-    if section == '리포트 발행':
-        import report_pages_view
-        report_pages_view.render(runtime)
-        return
-    if section == '스킬·자동 작업':
-        import skills_view
-        st.subheader('스킬·자동 작업')
-        skills_view.render(runtime)
-        return
+    # 스킬 · 리포트 발행 · 자동 작업 are their own 운영 screens since 2026-11-19 (skills_view, report_pages_view, schedule_view)
     head, pick, refresh = st.columns([3, 2, 1], vertical_alignment='bottom')
     head.subheader('API 연동')
     period = pick.segmented_control('기간', list(PERIODS), default='오늘', key='api_period', label_visibility='collapsed') or '오늘'

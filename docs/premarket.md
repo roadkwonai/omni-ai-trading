@@ -59,7 +59,7 @@ gantt
 | `dart` | 관심 종목 공시 목록 | Open DART | 접수일만 있고 접수 시각은 없음 |
 | `listings` | 오늘 이후 상장 예정 보통주 | 토스증권 Open API | 거래소 확정값 아님, 엔진에 보내지 않음 |
 
-관심 종목(`premarket.watch`)은 이 순서로 정합니다: 공유 모의계좌 보유 종목 → Jev가 매매하는 ETF 7종 → 수동 추가·스캐너 선정·대형주(합쳐 8개까지).
+관심 종목(`premarket.watch`)은 공유 모의계좌 보유 종목 → Jev가 매매하는 ETF 7종 → 수동 추가·스캐너 선정·대형주 순서로 정합니다(합쳐 8개까지).
 
 브리프에는 이 밖에 `summary`(국면·뉴스·공시 건수·미국 마감·상장 예정·주요 뉴스 한 줄)와 `strategy`(상승·하락·혼조 출발별 기본 대응 문장), `report_template`(상세 분석 틀의 절별 자료 상태)이 들어갑니다.
 
@@ -170,4 +170,4 @@ scripts/ro premarket_template.py --check ~/.vibe-trading/nhplug/shared-etf-paper
 | `market-research.sqlite3` | 수집 이력(`premarket`)과 엔진 입력 기록(`model_inputs`) |
 | `../preflight/YYYY-MM-DD.jsonl` | 사전 점검 기록 |
 
-사용하는 키는 `.env`의 `KRX_API_KEY`, `OPENDART_API_KEY`와 키움·토스 키입니다(없으면 그 절만 `unavailable`). 설계 배경은 `docs/premarket-research-design.md`, 변경 기록은 `docs/premarket-strategy-change-history.md`에 있습니다. (비공개 설계 기록이라 공개 저장소에는 없습니다)
+사용하는 키는 `.env`의 `KRX_API_KEY`, `OPENDART_API_KEY`와 키움·토스 키입니다(없으면 그 절만 `unavailable`). 설계 배경은 `docs/premarket-research-design.md`, 변경 기록은 `docs/premarket-strategy-change-history.md`에 있습니다(비공개 설계 기록이라 공개 저장소에는 없습니다).

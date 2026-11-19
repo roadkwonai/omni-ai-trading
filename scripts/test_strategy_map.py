@@ -150,6 +150,15 @@ class StrategyMapTests(unittest.TestCase):
             self.assertEqual(len(set(paths)), 1)
             self.assertEqual(sorted(p.suffix for p in Path(d).iterdir()), ['.html', '.json'])
 
+    def test_a_rendered_page_is_as_tall_as_its_diagram(self):
+        """2026-11-19: Archify's 100vh canvas made a content-height iframe grow without end (99,548px, blank canvas)."""
+        with tempfile.TemporaryDirectory() as d:
+            page = m.render(m.spec(state()), d).read_text()
+        self.assertEqual(page.count('id="omni-frame"'), 1)
+        self.assertLess(page.index('id="omni-frame"'), page.index('</head>'))
+        for rule in ('min-height:0!important', '.reader-rail{display:none!important}', '>svg{width:100%!important;height:auto!important', '.container{max-width:none!important'):
+            self.assertIn(rule, m.FRAME_CSS)
+
     def test_the_regime_table_says_what_the_runner_does_for_longs_and_inverses(self):
         # 11-18 review: the table hand-copied the rules: inverse stops long-only (−2% in 상승장, −1% in 하락장), inverse adds
         # 허용 where inverse_gate blocks them, "인버스는 추세형" where the runner uses inverse_quick off a crash day

@@ -1,16 +1,18 @@
-"""Discord notifier: a decoupled watcher that reads the engines' own records and posts them to two webhooks.
+"""Notifier: a decoupled watcher that reads the engines' own records and posts them to two channels, each delivered to
+every configured destination: Discord webhooks, a Telegram bot and Slack incoming webhooks (user 2026-11-19).
 
 REALTIME (Jev): shared paper fills, fills of every Jev live account, a 15:40 day summary (KRX trading days).
 LONGTERM (vibe long-term): daily decision, virtual orders, closing NAV, long-term live account fills and plans.
 Report documents (journal, improvement, oversold audit, premarket, long-term strategy) are HTML pages on GitHub Pages:
 report_pages.cycle builds, publishes and sends their links in the same pass (2026-11-17).
 Read-only on every ledger; the only thing written is the cursor file (config_store.write_json), after each delivered
-message. Webhook URLs come from .env (DISCORD_WEBHOOK_REALTIME / DISCORD_WEBHOOK_LONGTERM) and are never logged. A failed
-send keeps the item unsent. Fills older than RECENT_DAYS are not alerted (the cursor keeps only the last SEEN_KEEP ids).
+message. Addresses come from .env and are never logged: DISCORD_WEBHOOK_REALTIME / _LONGTERM, SLACK_WEBHOOK_REALTIME /
+_LONGTERM, TELEGRAM_BOT_TOKEN with TELEGRAM_CHAT_REALTIME / _LONGTERM. Each destination keeps its own sent list, so a
+failure at one never resends to another and a failed send keeps the item unsent for that destination only. Fills older than RECENT_DAYS are not alerted (the cursor keeps only the last SEEN_KEEP ids).
 
     PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/discord_notify.py --watch     # every 30 s
     ... --once [--dry-run]     one pass (dry-run prints the messages, sends nothing, writes no cursor)
-    ... --test                 one "connection check" message to both webhooks
+    ... --test                 one "connection check" message to every configured destination
 """
 from __future__ import annotations
 
@@ -44,6 +46,15 @@ SEEN_KEEP = 3000
 RECENT_DAYS = 3  # fills older than this are never sent: the full history is re-read every pass but seen keeps SEEN_KEEP ids
 SUMMARY_AT = '15:40'
 WEBHOOK_KEYS = {'realtime': 'DISCORD_WEBHOOK_REALTIME', 'longterm': 'DISCORD_WEBHOOK_LONGTERM'}
+CHANNEL_KEYS = {  # destination -> channel -> .env key (Telegram also needs TELEGRAM_BOT_TOKEN)
+    'discord': WEBHOOK_KEYS,
+    'telegram': {'realtime': 'TELEGRAM_CHAT_REALTIME', 'longterm': 'TELEGRAM_CHAT_LONGTERM'},
+    'slack': {'realtime': 'SLACK_WEBHOOK_REALTIME', 'longterm': 'SLACK_WEBHOOK_LONGTERM'},
+}
+TELEGRAM_TOKEN_KEY = 'TELEGRAM_BOT_TOKEN'
+DEST_KO = {'discord': 'Discord', 'telegram': 'Telegram', 'slack': 'Slack'}
+DEST_LIMIT = {'discord': LIMIT, 'telegram': 4000, 'slack': 3500}  # Telegram allows 4096, Slack keeps a message readable
+SEEN_KEY = {'discord': 'seen', 'telegram': 'seen_telegram', 'slack': 'seen_slack'}  # Discord keeps the old key
 ROUTE_KO = {'jev': 'Jev 판단', 'watchlist_strength': '관심종목 강도 경로', 'split': '가격 단계 추가', 'manual': '수동',
             'new_listing': '신규주', 'vibe': 'vibe'}
 
@@ -461,8 +472,8 @@ def summary_item(seen, accounts=None):
     return [('realtime', ident, '\n'.join(lines))]
 
 
-def collect(state, accounts, names, names_ko):
-    seen = set(state.get('seen', []))
+def collect(state, accounts, names, names_ko, urls=None):
+    seen = done_ids(state, {ch: as_targets(v) for ch, v in (urls or {}).items()}) if urls else set(state.get('seen', []))
     items = paper_items(names, seen) + live_items(accounts, names, seen) + plan_items(seen) + summary_item(seen, accounts)
     extra, state['lt_cursor'] = longterm_items(seen, state.get('lt_cursor', 0), names_ko)
     return items + extra
@@ -513,34 +524,132 @@ def send_all(url, texts, sender=post, sleep=time.sleep):
     return True, False
 
 
+MD_LINK = re.compile(r'\[([^\]\n]+)\]\((https?://[^)\s]+)\)')
+
+
+def render(kind, text):
+    """The message in each destination's markup: Discord markdown as written, Slack mrkdwn, Telegram plain text."""
+    text = str(text)
+    if kind == 'slack':
+        text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        text = MD_LINK.sub(lambda m: f'<{m[2]}|{m[1]}>', text)
+        return re.sub(r'\*\*(.+?)\*\*', r'*\1*', text)
+    if kind == 'telegram':
+        return MD_LINK.sub(lambda m: f'{m[1]} ({m[2]})', text).replace('**', '')
+    return text
+
+
+def _http(url, body, retry_after, timeout):
+    """POST JSON. (ok, retry_after_seconds, permanent_error); the address never reaches a log or an exception text."""
+    try:
+        request = urllib.request.Request(url, json.dumps(body).encode(),
+                                         {'Content-Type': 'application/json', 'User-Agent': 'vibe-trading-notify/1'})
+        urllib.request.urlopen(request, timeout=timeout).close()
+        return True, 0, False
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            return False, min(retry_after(exc), 30.0), False
+        return False, 0, 400 <= exc.code < 500
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
+        return False, 0, False
+
+
+def post_slack(url, text, timeout=10):
+    """One Slack incoming-webhook message (429 waits for Retry-After)."""
+    def wait(exc):
+        try:
+            return float(exc.headers.get('Retry-After') or 2)
+        except (TypeError, ValueError):
+            return 2.0
+    return _http(url, {'text': text, 'unfurl_links': False, 'unfurl_media': False}, wait, timeout)
+
+
+def post_telegram(address, text, timeout=10):
+    """One Telegram Bot API sendMessage to (token, chat_id); plain text, so no markup can break a message."""
+    token, chat = address
+
+    def wait(exc):
+        try:
+            return float(json.loads(exc.read()).get('parameters', {}).get('retry_after', 2))
+        except (ValueError, OSError, AttributeError):
+            return 2.0
+    return _http(f'https://api.telegram.org/bot{token}/sendMessage',
+                 {'chat_id': chat, 'text': text, 'disable_web_page_preview': False}, wait, timeout)
+
+
+POSTERS = {'discord': post, 'telegram': post_telegram, 'slack': post_slack}
+
+
+def as_targets(value):
+    """[(kind, address)] of one channel; a bare string is a Discord webhook (the form every caller used before)."""
+    if not value:
+        return []
+    return [('discord', value)] if isinstance(value, str) else list(value)
+
+
+def send_to(kind, address, text, sender=None, sleep=time.sleep):
+    """Send `text` to one destination in its markup and size; (ok, permanent). `sender` replaces the poster (tests)."""
+    return send_all(address, split_text(render(kind, text), DEST_LIMIT[kind]), sender or POSTERS[kind], sleep)
+
+
+def send_everywhere(targets, text, sender=None, sleep=time.sleep):
+    """{kind: ok} for every destination of one channel (one message, no cursor: tests and alerts)."""
+    return {kind: send_to(kind, address, text, sender if kind == 'discord' else None, sleep)[0] for kind, address in as_targets(targets)}
+
+
+def seen_lists(state, targets):
+    """Each active destination's sent ids. A destination met for the first time starts from what Discord already sent,
+    so turning Telegram or Slack on does not replay the history."""
+    kinds = {kind for dests in targets.values() for kind, _ in dests} or {'discord'}
+    base = list(state.get('seen', []))
+    return {kind: state.setdefault(SEEN_KEY[kind], list(base)) for kind in kinds}
+
+
+def done_ids(state, targets):
+    """Ids every active destination has (what collect may skip); with nothing configured, Discord's list as before."""
+    lists = seen_lists(state, targets)
+    sets = [set(v) for v in lists.values()]
+    return set.intersection(*sets) if sets else set(state.get('seen', []))
+
+
 def deliver(items, state, urls, sender=post, sleep=time.sleep, save=lambda: None):
-    """Send each channel's items in order; an unsent item stays for the next pass (cursor never skips it). `save` runs
-    after each delivered item, so a pass killed mid-way does not send again what already went out."""
-    seen, fail = state.setdefault('seen', []), state.setdefault('fail', {})
+    """Send each channel's items in order to each of its destinations; an item unsent at one destination stays for that
+    destination on the next pass (its own sent list), never resent where it already went. `save` runs after each
+    delivered message, so a pass killed mid-way does not send again what already went out."""
+    targets = {ch: as_targets(v) for ch, v in (urls or {}).items()}
+    lists, fail = seen_lists(state, targets), state.setdefault('fail', {})
     blocked, collected = set(), state.get('lt_cursor', 0)
     rows = [int(ident[3:]) for _, ident, _ in items if ident.startswith('lt:')]
     if rows:  # a save mid-pass must not carry the cursor past a long-term row not sent yet
         state['lt_cursor'] = min(collected, min(rows) - 1)
     for channel, ident, text in items:
-        if channel in blocked or not urls.get(channel):
-            continue
-        ok, permanent = send_all(urls[channel], split_text(text), sender, sleep)
-        if ok:
-            seen.append(ident)
-            fail.pop(ident, None)
-            save()
-            sleep(1)
-            continue
-        fail[ident] = fail.get(ident, 0) + 1
-        if permanent and fail[ident] >= 3:
-            print(f'skip after 3 rejected tries: {ident[:40]}', file=sys.stderr)
-            seen.append(ident)
-            continue
-        blocked.add(channel)  # keep the order: later items of this channel wait
-    unsent = [int(ident[3:]) for _, ident, _ in items if ident.startswith('lt:') and ident not in seen]
+        for kind, address in targets.get(channel) or []:
+            sent = lists[kind]
+            if ident in sent or (channel, kind) in blocked:
+                continue
+            ok, permanent = send_to(kind, address, text, sender if kind == 'discord' else None, sleep)
+            key = ident if kind == 'discord' else f'{kind}:{ident}'
+            if ok:
+                sent.append(ident)
+                fail.pop(key, None)
+                save()
+                sleep(1)
+                continue
+            fail[key] = fail.get(key, 0) + 1
+            if permanent and fail[key] >= 3:
+                print(f'skip after 3 rejected tries ({DEST_KO[kind]}): {ident[:40]}', file=sys.stderr)
+                sent.append(ident)
+                continue
+            blocked.add((channel, kind))  # keep the order: later items of this channel wait at this destination
+
+    def finished(channel, ident):
+        dests = targets.get(channel) or []
+        return bool(dests) and all(ident in lists[kind] for kind, _ in dests)
+    unsent = [int(ident[3:]) for channel, ident, _ in items if ident.startswith('lt:') and not finished(channel, ident)]
     # the long-term cursor steps back to the first unsent row, so it is collected again
     state['lt_cursor'] = min(collected, min(unsent) - 1) if unsent else collected
-    state['seen'] = seen[-SEEN_KEEP:]
+    for kind, sent in lists.items():
+        state[SEEN_KEY[kind]] = sent[-SEEN_KEEP:]
 
 
 # ---------- loop ----------
@@ -554,9 +663,23 @@ def load_state():
     return state
 
 
-def urls_from_env():
-    values = dotenv_values(ENV, interpolate=False)
-    return {ch: (values.get(key) or '').strip() for ch, key in WEBHOOK_KEYS.items()}
+def urls_from_env(values=None):
+    """{channel: [(kind, address)]} for every destination set in .env (Discord, Telegram, Slack)."""
+    values = dotenv_values(ENV, interpolate=False) if values is None else values
+
+    def get(key):
+        return (values.get(key) or '').strip()
+    token, out = get(TELEGRAM_TOKEN_KEY), {}
+    for channel in WEBHOOK_KEYS:
+        dests = []
+        for kind, keys in CHANNEL_KEYS.items():
+            value = get(keys[channel])
+            if value and kind != 'telegram':
+                dests.append((kind, value))
+            elif value and token:
+                dests.append((kind, (token, value)))
+        out[channel] = dests
+    return out
 
 
 def report_links(urls):
@@ -582,7 +705,7 @@ def run_once(urls, dry_run=False, sender=post, sleep=time.sleep, state_path=None
         write_json(state_path or STATE, state)
         print('first run: cursors set to now')
         return []
-    items = collect(state, accounts, names, names_ko)
+    items = collect(state, accounts, names, names_ko, urls)
     if dry_run:
         for channel, _, text in items:
             print(f'[{channel}]\n{text[:500]}\n')
@@ -603,8 +726,11 @@ def main():
     args = parser.parse_args()
     urls = urls_from_env()
     if args.test:
-        for channel, url in urls.items():
-            print(channel, 'sent' if url and send_all(url, ['✅ 연결 확인 · Omni AI Trading 알림'])[0] else 'failed or no webhook')
+        for channel, dests in urls.items():
+            if not dests:
+                print(channel, 'no destination')
+            for kind, ok in send_everywhere(dests, '✅ 연결 확인 · Omni AI Trading 알림').items():
+                print(channel, DEST_KO[kind], 'sent' if ok else 'failed')
         return
     if args.once:
         run_once(urls, args.dry_run)

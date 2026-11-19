@@ -315,12 +315,24 @@ def _mtime(path):
         return 0.0
 
 
+# Archify sizes its page to the viewport (body and canvas min-height 100vh) and lists the nodes under the canvas. In a
+# dashboard iframe whose height follows its content that grew without end (2026-11-19: 99,548px, an empty-looking canvas),
+# so the page is as tall as the diagram itself: the frame then fits it at any width with no inner scroll.
+# The diagram is also pinned to the frame width (height from its own aspect ratio): Archify's reader layout sized wide
+# diagrams (ratio >= 1.55) from the window height, so they grew a few pixels at a time (2026-11-19, 신규주 · 장기투자 도식).
+FRAME_CSS = ('<style id="omni-frame">html,body{min-height:0!important;height:auto!important}'
+             '.container{max-width:none!important;width:auto!important}'
+             '.diagram-container{min-height:0!important;height:auto!important}'
+             '.diagram-container>svg{width:100%!important;height:auto!important;max-height:none!important;min-height:0!important}'
+             '.reader-rail{display:none!important}</style>')
+
+
 def render(diagram, out_dir, kind='workflow', prefix='strategy-map'):
     """Draw with Archify (`kind`: workflow, lifecycle, ...); returns the HTML path (cached by content) or raises when
     Archify is unavailable. Each `prefix` keeps its own last few files."""
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    text = json.dumps(diagram, ensure_ascii=False, sort_keys=True)
+    text = json.dumps(diagram, ensure_ascii=False, sort_keys=True) + FRAME_CSS  # a new frame rule re-renders once
     digest = hashlib.sha256(text.encode()).hexdigest()[:16]
     html = out_dir / f'{prefix}-{digest}.html'
     if html.exists():
@@ -338,6 +350,7 @@ def render(diagram, out_dir, kind='workflow', prefix='strategy-map'):
                                 cwd=out_dir, capture_output=True, text=True, timeout=30)
         if result.returncode != 0 or not drawn.exists():
             raise ValueError('Archify render failed: ' + (result.stderr or result.stdout)[-300:])
+        drawn.write_text(drawn.read_text().replace('</head>', FRAME_CSS + '</head>', 1))
         candidate.replace(out_dir / f'{prefix}-{digest}.json')
         drawn.replace(html)
     finally:

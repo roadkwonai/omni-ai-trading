@@ -25,7 +25,7 @@ import theme as THEME
 from guides import help_row, guide_dialog, LIVE_LIMITS, live_dot, values as guide_values
 import status_cards as sc
 import live_labels as LL
-from settings_view import LIVE_STOP_GUIDE, krw_words
+from settings_view import LIVE_STOP_GUIDE, SIZING_HELP, TRANCHE_HELP, krw_words
 from nh_live_buy_control import buy_allowed
 from nh_paper_isolated import paper_pages
 from etf_universe import SYMBOLS as ETF_CODES, NAMES as ETF_NAMES
@@ -33,12 +33,10 @@ from paper_ai_modes import read_modes, read_pending_modes, write_modes
 from engine_compare import apply_fill, read_events, signed
 from strategy_settings import read_settings, write_settings, DEFAULTS as STRATEGY_DEFAULTS, LIMITS as STRATEGY_LIMITS, LABELS as STRATEGY_LABELS
 from nh_live_broker import _pages as read_live_pages
-from kr_swing_v5_forward import read_paginated
 from src.live.halt import halt_flag_set
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.mcp import MCPServerAdapter
-from src.tools.nhplug_calendar import check_session
 from sqlite_ro import ro_connect
 from tunables import setting
 
@@ -123,10 +121,6 @@ def display_quotes(read, codes, ttl):
         return dict(zip(codes, pool.map(one, codes)))
 
 
-def api(adapter, account, op, fields):
-    return call(adapter, 'call_api', {'operationId': op, 'input': {'act_no': account, **fields}})
-
-
 def verify_account(read, account, account_types, cache_s=0):
     """cache_s only for screens that read balances (the account list is shared with resolve_accounts); never before an order."""
     data = call(read, 'list_accounts', {}, cache_s=cache_s)
@@ -134,15 +128,6 @@ def verify_account(read, account, account_types, cache_s=0):
     if not isinstance(rows, list) or not any(isinstance(row, dict) and row.get('acct_no') == account
                                                and row.get('acct_type') in account_types for row in rows):
         raise ValueError('계좌 유형을 확인할 수 없습니다.')
-
-
-def orders(paper, account):
-    data = read_paginated(paper, 'krstockInquiryDailyOrderExecution',
-                          {'act_no': account, 'orr_dt': datetime.now(KST).strftime('%Y%m%d'),
-                           'orr_mkt_cd': '00', 'ost_cns_dit': '0'}, 'Output_0')
-    if data.get('_pagination_complete') is not True or not isinstance(data.get('Output_0'), list):
-        raise ValueError('주문내역을 확인할 수 없습니다.')
-    return data['Output_0']
 
 
 def live_balance(read, account):
@@ -165,38 +150,6 @@ def live_order_rows(read, account, now):
               ('can_qty', '취소수량'), ('cns_avg_uit_pr', '평균체결가'),
               ('orr_rjt_rsn_cd_nm', '거부 사유'), ('orr_tmd', '주문 시각')]
     return display_rows(rows, fields)
-
-
-def submit_paper(read, paper, account, symbol, side, qty, price):
-    if symbol not in SYMBOLS.values() or side not in ('Buy', 'Sell') or type(qty) is not int or type(price) is not int or qty < 1 or price < 1:
-        raise ValueError('주문 입력을 확인하세요.')
-    verify_account(read, account, {'03'})
-    balance = api(paper, account, 'krstockInquiryBalance', BALANCE)
-    if balance.get('rsp_cd') != '00000' or not isinstance(balance.get('Output_0'), dict) or not isinstance(balance.get('Output_1'), list):
-        raise ValueError('모의 잔고를 확인할 수 없습니다.')
-    if any(not isinstance(row, dict) or 'ny_cns_qty' not in row or int(row['ny_cns_qty']) != 0 for row in orders(paper, account)):
-        raise ValueError('미체결 또는 확인되지 않은 주문이 있습니다.')
-    if side == 'Sell':
-        sellable = api(paper, account, 'krstockInquirySellableQuantity', {'iem_cd': symbol, 'cfd_lon_cd': '00'})
-        row = sellable.get('Output_0')
-        try:
-            available = float(row.get('sll_pbl_qty', 0)) if isinstance(row, dict) else 0
-        except (TypeError, ValueError):
-            available = 0
-        if sellable.get('rsp_cd') not in ('00000', 'XA102') or not isinstance(row, dict) or row.get('iem_cd') != symbol or not math.isfinite(available) or available < qty:
-            raise ValueError('매도 가능 수량을 확인할 수 없습니다.')
-    first = read.call_tool('get_stock_price', {'stock_code': symbol})
-    time.sleep(2)
-    second = read.call_tool('get_stock_price', {'stock_code': symbol})
-    if not check_session(datetime.now(KST), second, first).get('allowed') or second['data']['Output_0'].get('iem_cd') != symbol:
-        raise ValueError('갱신 중인 정규장 시세를 확인할 수 없습니다.')
-    fields = {'iem_cd': symbol, 'orr_qty': qty, 'orr_pr': price, 'nmn_pr_tp_cd': '01',
-              'orr_cnd_dit_cd': '00', 'ssl_nmn_pr_dit_cd': '00', 'rmt_mkt_cd': 'KRX', 'sor_mkt_sli_yn': 'N'}
-    result = api(paper, account, 'krstockOrderCash' + side, fields)
-    number = result.get('Output_0', {}).get('mkt_orr_no')
-    if type(number) is not int or number <= 0:
-        raise ValueError('주문 결과가 불명확합니다. 재전송하지 말고 주문내역을 대조하세요.')
-    return number
 
 
 def display_rows(rows, fields):
@@ -400,7 +353,7 @@ def stock_names():
 
 HOLDING_STATES = {'보유': lambda row: (row.get('보유수량') or 0) > 0, '전체': lambda row: True,
                   '미보유': lambda row: not (row.get('보유수량') or 0) > 0}
-PERIOD_UNITS = {'일': 10, '월': 7, '년': 4}  # prefix length of an ISO time: 2026-11-13 / 2026-11 / 2026
+PERIOD_UNITS = {'일': 10, '월': 7, '연': 4}  # prefix length of an ISO time: 2026-11-13 / 2026-11 / 2026
 
 
 def pct(pnl, cost):
@@ -670,9 +623,9 @@ def new_listing_panel(now):
         '판단': st.column_config.TextColumn('판단', help=f'상장 후 {days}거래일 안 · NH 상장일 확인 · 기준가 위 · 시가 위 · 고가 {near:g}% 안을 차례로 봅니다. '
                                                          '통과해도 실행기가 1분봉 상승과 거래량 증가를 다시 확인한 뒤에만 삽니다.', width='large')})
     with st.expander('신규주 진입은 어떻게 하나요? (도식)', icon=':material/schema:'):
-        from guides import topic, ipo_dot, values as guide_values
+        from guides import topic_view, ipo_dot, values as guide_values
         v = guide_values()
-        st.markdown(topic('ipo', v))
+        topic_view('ipo', v)
         import guide_ui as GU
         from guides import ipo_flow
         GU.flow('jev-ipo', ipo_flow(v), ipo_dot(v))
@@ -754,9 +707,9 @@ def market_watch_panel(watch, movers, now):
                                                                          '통과한 종목도 전일 대비 상승률·1분봉 상승·거래량을 다시 확인한 뒤에만 삽니다. 이미 보유한 종목은 건너뜁니다.'),
         })
         with st.expander(f'관심종목 강도 진입은 어떻게 고르나요? (상위 {top}위 + 확률 {floor:g} · 도식)', icon=':material/schema:'):
-            from guides import topic, strength_dot, values as guide_values
+            from guides import topic_view, strength_dot, values as guide_values
             v = guide_values()
-            st.markdown(topic('strength', v))
+            topic_view('strength', v)
             if ranked:
                 st.markdown('**지금 선정 기준으로 계산하면**')
                 st.dataframe([{'순위': i, '종목': (stocks.get(c) or {}).get('name', c), '확률': f'{probs[c]:.2f}',
@@ -993,17 +946,9 @@ def account_switcher(records, picked):
 
 
 def compare_panel():
-    """엔진 비교 (2026-11-17): Jev and the long-term engine over the same days; the intraday Jev vs vibe comparison stays
-    as an archive (vibe's intraday runner stopped on 11-17, Jev's side keeps updating)."""
-    import engine_compare
-    view = st.segmented_control('보기', ['period', 'archive'], default='period', key='compare_view',
-                                format_func={'period': 'Jev · 장기투자 기간 성과', 'archive': 'Jev vs vibe 장중 (보관 · ~11-17)'}.get) or 'period'
-    if view == 'period':
-        engine_compare.period_view(get_runtime_root() / 'nhplug')
-        return
-    st.caption('vibe 장중 엔진은 2026-11-17에 멈췄습니다. Jev 쪽은 지금도 갱신되고, vibe 쪽은 그날까지의 기록입니다.')
-    names = stock_names()
-    engine_compare.render(get_runtime_root() / 'nhplug', processes(), names, strategy_settings()[0])
+    """성과 비교 (2026-11-19, was 엔진 비교): Jev trading and the long-term engine over the same days."""
+    import strategy_compare_view
+    strategy_compare_view.render(get_runtime_root() / 'nhplug')
 
 
 UP, DOWN = '#ef4444', '#3b82f6'  # Korean convention: red rise, blue fall
@@ -1102,7 +1047,8 @@ def strategy_panel():
         diagram = smap.spec(current)
         try:
             html = smap.render(diagram, root / 'strategy-map')
-            st.iframe(html, alt='전략 구조 도식')  # height 'content': the whole diagram, no inner scroll  # components.html is deprecated
+            import guide_ui as GU
+            GU.archify_frame(html, '전략 구조 도식')
             st.caption('Archify 도식 · 초록 굵은 경로는 설정·시간 기준 예상 흐름이며 실제 실행이나 주문을 뜻하지 않습니다. 주문은 09:00 개장부터 냅니다(장전 준비는 그 전에 끝남).')
             st.caption('데이터 갱신 · ' + ' · '.join(f"{src['name']} {src['age_min']}분 전" if src['age_min'] is not None
                                                   else f"{src['name']} 기록 없음" for src in current['sources']))
@@ -1156,7 +1102,7 @@ def strategy_panel():
         oversold_watch_view(root)
         st.caption(f"주문 가드(회당·하루 한도)는 각 경로에 적용됩니다. 일반 신규 매수는 {current['clock']['cutoff']} 이후 제한되며, 선별 v2는 별도 매수 창을 따르고 반대 방향 보유 차단을 적용하지 않습니다. "
                    + ('Jev가 반대 방향을 고르고 보유 종목이 손실 중이며 약세장이면 그 보유를 먼저 정리합니다(방향 전환). ' if rules['direction_switch'] else '')
-                   + '도식은 오른쪽 위 "도식 가이드" → 매수 전략 · 관심종목 진입 · 신규주 진입.')
+                   + '도식은 오른쪽 위 "가이드 센터" → 매수 전략 · 관심종목 진입 · 신규주 진입.')
 
         from nh_paper_isolated import OVERNIGHT_RULES, SWING_RULES
         st.markdown('##### 다음 날까지 보유하는 조건')
@@ -1394,11 +1340,9 @@ def accounts_panel(read):
         go.button('장기투자 탭 열기', key='acc_open_longterm', icon=':material/savings:', width='stretch',
                   on_click=lambda: st.session_state.update(main_tab='장기투자'))
         with st.expander('Jev(단타)와 장기투자 차이', icon=':material/psychology:'):
-            from guides import ENGINE_ROWS, engines_dot, values as guide_values
-            st.dataframe([{'항목': a, 'Jev': b, '장기투자 (vibe)': c} for a, b, c in ENGINE_ROWS], hide_index=True, width='stretch',
-                          height=38 + 35 * len(ENGINE_ROWS))
-            THEME.graphviz(engines_dot(guide_values()))
-            st.caption('두 엔진은 서로 주문에 관여하지 않습니다. 장기투자는 Jev 자료를 하루 요약으로만 참고합니다. 기간 성과 비교는 "엔진 비교" 탭, 장기투자 설정은 "장기투자" 탭에서 봅니다.')
+            from guides import engines_view, values as guide_values
+            engines_view(guide_values())
+            st.caption('두 엔진은 서로 주문에 관여하지 않습니다. 장기투자는 Jev 자료를 하루 요약으로만 참고합니다. 기간 성과 비교는 "성과 비교" 탭, 장기투자 설정은 "장기투자" 탭에서 봅니다.')
         with st.expander('모의계좌와 실계좌 설정 비교', icon=':material/compare_arrows:'):
             paper_live_table(records)
     for tab, (key, record) in zip(tabs[1:], records.items()):
@@ -1489,9 +1433,11 @@ def live_order_switch(key, record):
                 st.toast(f'{label} 실주문을 껐습니다.', icon=':material/stop_circle:')
                 st.rerun()
         else:
+            import disclaimer
+            disclaimer.order_note(st)
             phrase = f'{label} 실주문'
             typed = st.text_input(f'실주문을 켜려면 "{phrase}"를 그대로 입력하세요', key=f'live_orders_phrase_{key}',
-                                  placeholder=phrase, help='실수로 켜지지 않게 확인 문구를 받습니다. 켜고 끈 기록은 설정 변경 이력(운영 상태 탭)에 남습니다.')
+                                  placeholder=phrase, help='실수로 켜지지 않게 확인 문구를 받습니다. 켜고 끈 기록은 설정 변경 이력(운영 → 운영 상태)에 남습니다.')
             if st.button('실주문 켜기', key=f'live_orders_on_{key}', disabled=typed.strip() != phrase, icon=':material/bolt:'):
                 set_live_orders(key, True)
                 st.session_state.pop(f'live_orders_phrase_{key}', None)
@@ -1556,6 +1502,30 @@ def follow_state(key):
     """The latest live-follow.jsonl record of one live account (nh_live_follow), or None."""
     from engine_compare import latest_follow
     return latest_follow(get_runtime_root() / 'nhplug').get(key)
+
+
+def sizing_example_view(record, budget, rules, sizing, tranche):
+    """What this live account buys for one paper tranche under each sizing basis (with the values on screen)."""
+    import nh_live_follow as F
+    try:
+        ratio, rows = F.sizing_example({**record, 'budget': budget, 'rules': {**rules, 'tranche_krw': tranche}})
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.caption(f'예시를 계산하지 못했습니다({type(exc).__name__}).')
+        return
+    mark = {'amount': ' ◀ 지금', 'share': ''}, {'share': ' ◀ 지금', 'amount': ''}
+    cap = int(budget.get('order_price_max_krw', 0))
+
+    def shares(n, price):
+        return f'{n}주' if n else f'안 삼 (1주 {krw_words(price)} > 상한)'
+    lines = ['| 1주 가격 | 모의가 산 것 | 금액 기준' + mark[0][sizing] + ' | 1주 기준' + mark[1][sizing] + ' |', '|---|---|---|---|']
+    for r in rows:
+        lines.append(f"| {krw_words(r['price'])} | {r['paper_qty']:,}주 ({krw_words(r['paper_krw'])}) | "
+                     f"{krw_words(r['live_krw'])}어치 → {shares(r['amount'], r['price'])} | {shares(r['share'], r['price'])} |")
+    st.markdown(f'**이 계좌 예시** · 모의가 분할 1회로 한 종목을 살 때 실계좌가 따라 사는 수량입니다. '
+                f'금액 기준 비율 **{float(ratio):.1%}**, 1주 가격 상한 {krw_words(cap)}, 체결 1건당 최대 {krw_words(tranche)}.')
+    st.markdown('\n'.join(lines))
+    st.caption('차이는 싼 종목에서 납니다. 금액 기준은 모의와 금액 비중을 맞추려 여러 주를 사고, 1주 기준은 늘 1주라 싼 종목일수록 실계좌 비중이 작아집니다. '
+               '1주가 안 되는 몫도 모의가 보유하는 동안 최소 1주는 삽니다.')
 
 
 def follow_mode_view(key, prefix=''):
@@ -2274,14 +2244,16 @@ def account_form(key, record, records, prefix=''):
             s1, s2 = st.columns([3, 2])
             sizing = s1.radio('매수 크기 기준', ['share', 'amount'], index=['share', 'amount'].index(current['sizing']), horizontal=True,
                               format_func=lambda v: {'share': '1주 기준 (모의 분할 1회 = 1주)', 'amount': '금액 기준 (모의 체결 금액의 운용금 비율)'}[v],
-                              key=f'{prefix}{key}_sizing',
-                              help='1주 기준: 모의가 분할 매수할 때마다 실계좌 1주(1회 최대 수량 적용). 금액 기준(2026-11-17): 모의 체결 금액 × '
-                                   '(실계좌 운용금 ÷ 모의 분할 1회 매수 금액 × 3분할 × 하루 새 종목 수)만큼, 체결 1건당 아래 금액 이하로 삽니다. 모의가 계획만큼 다 사면 실계좌는 운용금만큼 삽니다. 1주에 못 미치면 1주가 아래 금액 이하일 때 1주를 사고, '
-                                   '남는 몫은 모의가 더 살 때 쌓여 다음 주가 됩니다. 주수 제한은 없고 회당 매수 한도·운용금·하루 손실·1주 가격 상한이 적용됩니다.')
-            tranche = money_input(s2, '체결 1건당 최대 금액 (금액 기준)', *map(int, LIVE_RULE_LIMITS['tranche_krw']), int(current['tranche_krw']),
-                                  f'{prefix}{key}_tranche', unit,
-                                  '금액 기준일 때 모의 체결 1건을 실계좌에서 비율대로 따라 살 때의 상한입니다. 1주가 이 금액보다 비싸면 그 종목은 사지 않습니다. '
-                                  '운용금보다 클 수 없습니다.', slide)
+                              key=f'{prefix}{key}_sizing', help=SIZING_HELP)
+            if sizing == 'amount':
+                tranche = money_input(s2, '체결 1건당 최대 금액 (금액 기준)', *map(int, LIVE_RULE_LIMITS['tranche_krw']), int(current['tranche_krw']),
+                                      f'{prefix}{key}_tranche', unit, TRANCHE_HELP, slide)
+            else:  # not used by the share basis: shown disabled, the saved value kept for 금액 기준
+                tranche = int(current['tranche_krw'])
+                s2.number_input('체결 1건당 최대 금액 (금액 기준) (원)', value=tranche, disabled=True, key=f'{prefix}{key}_tranche_off',
+                                help='1주 기준에서는 쓰지 않습니다. 모의가 몇 주를 사든 실계좌는 1주를 삽니다. ' + TRANCHE_HELP)
+                s2.caption(f'1주 기준: 쓰지 않음 (저장값 {krw_words(tranche)} 유지)')
+            sizing_example_view(record, budget, current, sizing, int(tranche))
             limits = live_limit_inputs(key, record, budget, unit, prefix, slide)
             r1, r2, r3 = st.columns(3)
             if sizing == 'amount':  # not used by amount sizing (2026-11-17): shown disabled, the saved value kept for 1주 기준
@@ -2439,19 +2411,55 @@ def activity_charts(counts, waits):
             tooltip=['사유', '건수']).properties(height=70 + 40 * len(waits)), width='stretch')  # height includes the axis
 
 
+def fill_rows(fills, names):
+    """(rows, trading days in order) of verified fills for the chart: day label, minute since the 09:00 open (0~390), stock
+    name, side, quantity, price and KRW; a fill without a readable time or price is left out."""
+    rows = []
+    for f in fills or []:
+        at = event_time(f.get('시각'))
+        if not at or type(f.get('체결가')) not in (int, float) or type(f.get('수량')) not in (int, float):
+            continue
+        rows.append({'날짜': f"{at:%m/%d}({'월화수목금토일'[at.weekday()]})", 'day': at.date().isoformat(), '시각': f'{at:%H:%M}',
+                     '장중 분': min(390, max(0, at.hour * 60 + at.minute - 540)), '종목': names.get(f.get('종목'), f.get('종목')),
+                     '구분': '매수' if str(f.get('구분')).upper() == 'BUY' else '매도', '수량': f['수량'], '체결가': f['체결가'],
+                     '금액': round(f['수량'] * f['체결가'])})
+    rows.sort(key=lambda r: (r['day'], r['장중 분']))
+    return rows, list(dict.fromkeys(r['날짜'] for r in rows))
+
+
 def fills_chart(fills, names):
-    """Verified paper fills as price-over-time points: ▲ buy (red), ▼ sell (blue)."""
-    rows = [{'시각': event_time(f.get('시각')).replace(tzinfo=None), '종목': names.get(f.get('종목'), f.get('종목')),
-             '구분': '매수' if str(f.get('구분')).upper() == 'BUY' else '매도', '가격': f.get('체결가'), '수량': f.get('수량')}
-            for f in fills or [] if event_time(f.get('시각')) and type(f.get('체결가')) in (int, float)]
+    """Verified paper fills (2026-11-19 redesign): one line per stock, trading days side by side with the minute of the
+    session inside each day (no night or weekend gaps, no shared price axis), ▲ buy red · ▼ sell blue sized by KRW; then the
+    day's buy and sell totals."""
+    rows, days = fill_rows(fills, names)
     if not rows:
         return
-    st.altair_chart(alt.Chart(pd.DataFrame(rows)).mark_point(size=120, filled=True).encode(
-        x=alt.X('시각:T', title=None, axis=alt.Axis(format='%m/%d %H:%M')), y=alt.Y('가격:Q', scale=alt.Scale(zero=False)),
-        color=alt.Color('구분:N', scale=alt.Scale(domain=['매수', '매도'], range=[UP, DOWN])),
-        shape=alt.Shape('구분:N', scale=alt.Scale(domain=['매수', '매도'], range=['triangle-up', 'triangle-down'])),
-        tooltip=[alt.Tooltip('시각:T', format='%m/%d %H:%M'), '종목', '구분', '수량', '가격']).properties(height=200),
-        width='stretch')
+    frame = pd.DataFrame(rows)
+    buys, sells = frame.loc[frame['구분'] == '매수', '금액'].sum(), frame.loc[frame['구분'] == '매도', '금액'].sum()
+    st.caption(f"{rows[0]['day']} ~ {rows[-1]['day']} · 체결 {len(rows)}건 · {frame['종목'].nunique()}종목 · "
+               f"매수 {buys:,.0f}원 · 매도 {sells:,.0f}원 (체결가 기준, 수수료·세금 전)")
+    stocks = list(frame.sort_values('day', ascending=False)['종목'].drop_duplicates())  # the latest traded on top
+    side = alt.Scale(domain=['매수', '매도'], range=[UP, DOWN])
+    x = alt.X('날짜:O', sort=days, title=None, axis=alt.Axis(labelAngle=0, grid=True, bandPosition=0, orient='top'))
+    st.altair_chart(alt.Chart(frame).mark_point(filled=True, opacity=0.85).encode(
+        x=x, xOffset=alt.XOffset('장중 분:Q', scale=alt.Scale(domain=[0, 390])),
+        y=alt.Y('종목:N', sort=stocks, title=None, axis=alt.Axis(labelLimit=200, grid=True)),
+        color=alt.Color('구분:N', scale=side, legend=alt.Legend(orient='bottom', title=None)),
+        shape=alt.Shape('구분:N', scale=alt.Scale(domain=['매수', '매도'], range=['triangle-up', 'triangle-down']), legend=None),
+        size=alt.Size('금액:Q', scale=alt.Scale(range=[50, 420]), legend=None),
+        tooltip=['날짜', '시각', '종목', '구분', alt.Tooltip('수량:Q', format=','), alt.Tooltip('체결가:Q', format=','),
+                 alt.Tooltip('금액:Q', format=',', title='금액(원)')]).properties(height=alt.Step(30)), width='stretch')
+    st.caption('줄 하나가 종목 하나, 칸 하나가 거래일입니다. 칸 안에서 왼쪽이 09:00 개장, 오른쪽이 15:30 마감이고, 점이 클수록 체결 금액이 큽니다. '
+               '빨강 ▲ 매수 · 파랑 ▼ 매도. 점에 마우스를 올리면 시각·수량·체결가가 보입니다.')
+    totals = frame.groupby(['날짜', '구분'], as_index=False).agg(금액=('금액', 'sum'), 건수=('금액', 'size'))
+    totals['만원'] = totals['금액'] / 10_000
+    bars = alt.Chart(totals).encode(
+        x=alt.X('날짜:O', sort=days, title=None, axis=alt.Axis(labelAngle=0)), xOffset=alt.XOffset('구분:N', sort=['매수', '매도']),
+        y=alt.Y('만원:Q', title='체결 금액(만원)'), color=alt.Color('구분:N', scale=side, legend=None),
+        tooltip=['날짜', '구분', alt.Tooltip('금액:Q', format=',', title='금액(원)'), '건수'])
+    st.altair_chart((bars.mark_bar() + bars.mark_text(dy=-6, fontSize=11).encode(text=alt.Text('건수:Q', format='d'))).properties(height=170),
+                    width='stretch')
+    st.caption('거래일별 매수(빨강)·매도(파랑) 체결 금액, 막대 위 숫자는 체결 건수입니다.')
 
 
 def operations_panel(root):
@@ -2714,7 +2722,7 @@ STRATEGY_HELP = {
     'strength_slot_max': ('강도 슬롯으로 산 종목을 한 번에 이 수까지만 보유합니다.', '1~5, 기본 2.'),
     'strength_slot_daily': ('강도 슬롯으로 하루에 이 횟수까지만 삽니다.', '1~10, 기본 3.'),
     'entry_cutoff_hhmm': ('이 시각부터 새로 사지 않습니다(분할 추가 매수 포함).', '제한 규칙 탭에서 10:00~15:00으로 정합니다.'),
-    'flatten_hhmm': ('이 시각부터 보유를 팝니다(종가매매 조건 충족 종목만 예외).', '제한 규칙 탭에서 14:00~15:05로 정합니다. 실행기는 정리 뒤 20분(최대 15:18)까지 돕니다.'),
+    'flatten_hhmm': ('이 시각부터 보유를 팝니다(종가매매 조건 충족 종목만 예외).', '제한 규칙 탭에서 14:00~15:05로 정합니다. 실행기는 정리 뒤 20분(최대 15:18)까지 돌아갑니다.'),
     'oversold_stock_drop_pct': ('개별주가 전일 종가보다 오늘 저가 기준 이만큼 빠져야 낙폭과대로 봅니다.', '리서치: 6% 미만 하락은 반등 성적이 없었습니다(11/13, 2년 일봉).'),
     'oversold_etf_drop_pct': ('KODEX 200 같은 1배 ETF의 낙폭 기준입니다.', '지수 ETF는 −6% 이상이 드물어 기회가 적습니다.'),
     'oversold_lev_drop_pct': ('2배 ETF의 낙폭 기준입니다(2배 ETF 포함을 켰을 때만).', '리서치에서 2배 ETF는 어떤 설정에서도 이익이 나지 않아 기본은 꺼짐입니다.'),
@@ -2729,7 +2737,7 @@ STRATEGY_HELP = {
     'oversold_jev_min': ('Jev가 시황·뉴스·수급·애널리스트 의견을 보고 BUY를 이 신뢰도 이상으로 골라야 삽니다.', ''),
     'oversold_v2_on': ('1이면 선별 v2 조건의 시장 폭락일에 모의계좌가 실제로 삽니다(엔진 확인 없이 규칙대로).', '사례 재현에서 나온 가설을 모의매매로 시험하는 경로입니다(2026-11-13).'),
     'oversold_v2_from_hhmm': ('이 시각부터 선별 v2 매수를 봅니다. 신규 매수 마감 뒤에도 이 경로만 삽니다.', '재현(폭락일 18일, 60분봉): 14~15시 매수가 3일 뒤 +2.02%로 가장 좋았고 9시 매수는 +0.47%였습니다.'),
-    'oversold_v2_until_hhmm': ('이 시각까지 선별 v2 매수를 봅니다.', '실행기는 장 마감 정리 뒤 20분(최소 15:00)까지 돕니다.'),
+    'oversold_v2_until_hhmm': ('이 시각까지 선별 v2 매수를 봅니다.', '실행기는 장 마감 정리 뒤 20분(최소 15:00)까지 돌아갑니다.'),
     'oversold_v2_add_on': ('1이면 첫날 절반만 사고, 다음 거래일 매수 창에 첫 매수가보다 싸고 손절가보다 위면 나머지 절반을 삽니다.', '재현: 다음 날 2차 매수가 모든 조합에서 성적을 올렸습니다.'),
     'oversold_v2_half_tp_pct': ('평균가 대비 이만큼 오르면 절반을 팝니다.', '나머지는 나머지 익절 %에서 팝니다.'),
     'oversold_v2_veto_conf': ('Jev가 모든 데이터(차트·뉴스·수급·시황·애널리스트·과거 사례)를 보고 WAIT를 이 신뢰도 이상으로 고르면 사지 않습니다.', '1.0이면 거부하지 않습니다. 종목 고유 악재·애널리스트 하향·위기 확산 같은 분명한 이유일 때 WAIT를 고르도록 묻습니다.'),
@@ -2808,7 +2816,7 @@ def strength_presets(settings, prefix=''):
                                ('확률 최소', f"{v['strength_min_prob']:.2f}"),
                                ('오늘 등락', f"+{v['strength_change_min']:g}~{v['strength_change_max']:g}%")],
                     PRESET_NOTES, settings, lambda name: save_preset(settings, STRENGTH_PRESETS[name], name), f'{prefix}strength_')
-    st.caption('판단 순서와 예시는 "시장·관심종목" 탭의 "관심종목 강도 진입은 어떻게 고르나요?" 또는 도식 가이드 → 관심종목 진입')
+    st.caption('판단 순서와 예시는 "시장·관심종목" 탭의 "관심종목 강도 진입은 어떻게 고르나요?" 또는 가이드 센터 → 관심종목 진입')
 
 
 OVERSOLD_NOTES = {
@@ -3215,7 +3223,7 @@ def ipo_presets(settings, prefix=''):
                                ('고가 대비', f"{v['ipo_near_high_pct']:g}% 안"), ('손절', f"−{v['ipo_stop_pct']:g}%"),
                                ('절반 익절', f"+{v['ipo_half_pct']:g}%"), ('추적 손절', f"−{v['ipo_trail_pct']:g}%")],
                     IPO_NOTES, settings, lambda name: save_preset(settings, IPO_PRESETS[name], name), f'{prefix}ipo_')
-    st.caption('판단 순서는 "시장·관심종목" 탭의 신규주 패널 또는 도식 가이드 → 신규주 진입')
+    st.caption('판단 순서는 "시장·관심종목" 탭의 신규주 패널 또는 가이드 센터 → 신규주 진입')
 
 
 SIZING_SETTINGS = (  # position_sizing (user 2026-11-17)
@@ -3738,6 +3746,7 @@ def entry_reason_label(reason):
             'opposite_direction_holding': '보유 종목과 반대 방향(레버리지↔인버스)이라 진입 안 함',
             'split_plan_holding': '보유 종목의 추가 진입 조건 미충족',
             'reentry_below_last_exit': '같은 날 재진입 제한(오늘 판 종목의 직전 매도가 아래)',
+            'one_share_over_buy': '1주 값이 한 번 매수 금액보다 큼(강도 후보 건너뜀)',
             'losing_streak_cooldown': '연속 손실 쉬기(3번 연속 손실 후 30분)',
             'direction_not_confirmed': '지수 방향이 맞지 않음', 'market_unconfirmed': '시장 요약 없음(지수 확인 불가)',
             'downtrend_no_averaging_down': '약세장 물타기 금지'}.get(reason, reason or '—')
@@ -4316,17 +4325,6 @@ def paper_trade_chart(read, snapshot, refresh, auto, preferred=None, fills=None,
 EXIT_REQUESTS, MANUAL_BUYS = 'exit-requests.json', 'manual-buys.json'  # the shared paper runner's request files
 
 
-def paper_owner(account):
-    """The order runner the paper account is reserved for (paper-account-owners.json), or None."""
-    import hashlib
-    scope = hashlib.sha256(('nh-paper:' + account).encode()).hexdigest()  # same scope as NHOrderGuard
-    try:
-        data = json.loads((get_runtime_root() / 'nhplug' / 'paper-account-owners.json').read_text())
-        return (data.get('accounts') or {}).get(scope) if isinstance(data, dict) else None
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
 class _AllHeld:
     """`owned` for reading exit requests on screen: every code counts, so reading never prunes or writes the file (the
     runner drops a request itself once it no longer holds the symbol)."""
@@ -4348,66 +4346,6 @@ def request_paper(name, code, qty):
     write_requests(get_runtime_root() / 'nhplug' / 'shared-etf-paper' / name, {**paper_requests(name), code: qty})
 
 
-def paper_order_panel(read, paper, account, name, symbol):
-    """Default paper account: balance and orders as cards; orders by hand only when no runner owns the account."""
-    owner = paper_owner(account)
-    runner_owned = owner is not None and owner != 'nhplug_paper'
-    head, button = st.columns([4, 1], vertical_alignment='center')
-    head.subheader('모의 주문·정리 요청' if runner_owned else '모의 수동 주문')
-    if button.button('잔고·주문 조회', width='stretch', icon=':material/refresh:',
-                     help='증권사에서 이 모의계좌의 예수금·보유 종목·오늘 주문을 조회합니다(조회 전용).'):
-        try:
-            verify_account(read, account, {'03'})
-            balance = api(paper, account, 'krstockInquiryBalance', BALANCE)
-            if balance.get('rsp_cd') != '00000' or not isinstance(balance.get('Output_0'), dict) or not isinstance(balance.get('Output_1'), list):
-                raise ValueError('잔고 응답 오류')
-            rows = orders(paper, account)
-            st.session_state.paper_snapshot = {
-                'time': datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S'),
-                'cash': balance['Output_0'].get('dca'),
-                'holdings': display_rows(balance['Output_1'], [('iem_nm', '종목'), ('iem_cd', '종목코드'), ('rsdl_qty', '잔량'), ('phs_pr', '평균단가'),
-                                                               ('now_pr', '현재가'), ('eal_pls_amt', '평가손익'), ('pft_rt', '수익률(%)')]),
-                'orders': display_rows(rows, [('iem_cd', '종목코드'), ('itg_orr_no', '주문번호'), ('tot_cns_qty', '체결수량'), ('ny_cns_qty', '미체결수량'), ('can_qty', '취소수량')]),
-            }
-        except Exception:
-            st.session_state.pop('paper_snapshot', None)
-            st.error('잔고 또는 주문내역을 확인할 수 없습니다. 빈 계좌로 간주하지 마세요.')
-    snapshot = st.session_state.get('paper_snapshot')
-    positive = lambda v: type(v) in (int, float) and v > 0  # NH sends numbers; anything else is not counted
-    held = [r for r in (snapshot or {}).get('holdings') or [] if positive(r.get('잔량'))]
-    pending = sum(1 for r in (snapshot or {}).get('orders') or [] if positive(r.get('미체결수량')))
-    cash = (snapshot or {}).get('cash')
-    sc.row([{'label': '계좌 사용처', 'value': '실행기 전용' if runner_owned else '수동 주문 가능', 'icon': 'smart_toy' if runner_owned else 'edit_note',
-             'tone': 'ai' if runner_owned else 'ok',
-             'help': '주문 가드에 등록된 이 계좌의 주문 주체입니다. 자동 실행기 전용 계좌에 직접 주문하면 실행기 원장과 어긋나 실행기가 멈추므로 가드가 막습니다.'},
-            {'label': '예수금', 'value': f'{cash:,.0f}원' if isinstance(cash, (int, float)) else '조회 전', 'icon': 'account_balance_wallet',
-             'tone': 'ok' if isinstance(cash, (int, float)) else 'off', 'help': '증권사 응답의 예수금입니다.'},
-            {'label': '보유 종목', 'value': f'{len(held)}종' if snapshot else '조회 전', 'icon': 'inventory_2',
-             'tone': 'up' if held else 'off', 'help': '잔량이 있는 종목 수입니다.'},
-            {'label': '미체결 주문', 'value': f'{pending}건' if snapshot else '조회 전', 'icon': 'pending_actions',
-             'tone': 'alert' if pending else 'off' if not snapshot else 'ok',
-             'help': '오늘 주문 중 아직 체결되지 않은 수량이 남은 주문 수입니다. 남아 있으면 깜박입니다.'}])
-    if snapshot:
-        st.caption(f"조회: {snapshot['time']} · 다시 조회하기 전까지 과거 상태입니다. 페이지 제한으로 일부만 표시될 수 있습니다.")
-        holdings_tab, orders_tab = st.tabs([f'보유 종목 {len(held)}', f"오늘의 주문 {len(snapshot['orders'])}"])
-        with holdings_tab:
-            if held:
-                st.dataframe(held, hide_index=True, width='stretch')
-            else:
-                st.caption('조회된 보유 종목이 없습니다.')
-        with orders_tab:
-            if snapshot['orders']:
-                st.dataframe(snapshot['orders'], hide_index=True, width='stretch')
-            else:
-                st.caption('조회된 주문이 없습니다.')
-    else:
-        st.caption('오른쪽 위 "잔고·주문 조회"를 누르면 증권사 기준 잔고와 오늘 주문이 표시됩니다.')
-    if runner_owned:
-        exit_request_panel(held)
-    else:
-        paper_order_form(read, paper, account, name, symbol)
-
-
 def request_live_exit(root, key, codes, qty=None):
     """Add sell requests for a live account: all shares (qty None) or `qty` shares of each code (nh_live_follow)."""
     from nh_live_follow import exit_request_path, exit_requests, write_request_file
@@ -4426,6 +4364,8 @@ def quick_sell_panel(items, pending, sell, buy, key, note):
     with st.container(border=True):
         st.markdown('**수동 매수·매도**')
         st.caption(note)
+        import disclaimer
+        disclaimer.order_note(st)
         if pending:
             st.warning('대기 중인 요청: ' + ', '.join(f'{c} {t}' for c, t in pending.items()))
         if not items:
@@ -4503,41 +4443,6 @@ def paper_quick_sell(prefix):
                      lambda code, qty: request_paper(MANUAL_BUYS, code, qty), prefix,
                      f"공유 모의 실행기가 다음 회차(약 1분 안)에 AI 판단 없이 보호 경로·주문 가드로 매도하거나 추가 매수합니다(수동 매수는 출처 'manual'로 기록). "
                      f"기준 잔고: 실행기 기록 {LL.clock(state['time'], f'{datetime.now(KST):%Y-%m-%d}')}. 실계좌는 모의 매도를 비율대로 따라 팝니다.")
-
-
-def exit_request_panel(held):
-    """Selling by hand on a runner-owned account: ask the runner, which sells through its protective path."""
-    st.info('이 모의계좌는 자동 실행기 전용이라 직접 주문은 주문 가드가 막습니다(원장이 어긋나면 실행기가 멈추기 때문). '
-            '대신 보유 종목 정리를 실행기에 요청할 수 있습니다.', icon=':material/info:')
-    names = stock_names()
-    label = lambda code: f'{names.get(code, code)} ({code})'
-    with st.container(border=True):
-        st.markdown('**보유 종목 정리 요청**')
-        st.caption('선택한 종목을 실행기가 다음 주기(약 1분 안)에 AI 판단 없이 보호매도 경로로 전량 매도합니다. 실행기가 산 종목만 해당하며, '
-                   '다 팔리면 요청은 자동으로 지워집니다. 실행기가 멈춰 있으면 실행되지 않습니다.')
-        from nh_paper_isolated import request_exits, write_requests
-        root = get_runtime_root() / 'nhplug' / 'shared-etf-paper'
-        requested = sorted(paper_requests(EXIT_REQUESTS))
-        if requested:
-            left, right = st.columns([4, 1], vertical_alignment='center')
-            left.warning('대기 중인 정리 요청: ' + ', '.join(label(c) for c in requested))
-            if right.button('요청 모두 취소', width='stretch', help='아직 팔리지 않은 요청을 지웁니다. 이미 낸 매도 주문은 취소하지 않습니다.'):
-                write_requests(root / EXIT_REQUESTS, {})
-                st.rerun()
-        codes = [r.get('종목코드') for r in held if r.get('종목코드') not in requested]
-        if not held:
-            st.caption('정리할 보유 종목을 보려면 먼저 "잔고·주문 조회"를 누르세요.')
-            return
-        choice = st.multiselect('정리할 종목', codes, format_func=label, placeholder='종목 선택')
-        sure = st.checkbox('선택 종목을 시장 상황과 관계없이 전량 매도하는 데 동의합니다', key='exit_confirm')
-        if st.button('정리 요청 보내기', type='primary', disabled=not (choice and sure), icon=':material/sell:',
-                     help='종목을 고르고 동의란을 체크해야 누를 수 있습니다.'):
-            try:
-                request_exits(root, choice)
-                st.success('정리 요청을 저장했습니다. 실행기 기록과 체결을 확인하세요.')
-                st.rerun()
-            except OSError:
-                st.error('정리 요청을 저장하지 못했습니다.')
 
 
 def account_scope(records, key, default=None):
@@ -4709,59 +4614,6 @@ def live_record_panel(key, record):
     st.caption('같은 계획이 매분 반복되면 처음 한 번만 보입니다. "계획만 기록(관찰)"은 주문을 내지 않은 관찰 모드 계획입니다.')
 
 
-def paper_order_form(read, paper, account, name, symbol):
-    """Limit order by hand: input, review, then a separate submit."""
-    st.markdown('##### 지정가 주문 · 1 입력 → 2 검토 → 3 제출')
-    st.caption('주문 내용을 검토한 뒤 별도로 제출합니다. 예상 금액에는 수수료와 세금이 포함되지 않습니다.')
-    result = st.session_state.get('order_result')
-    if result:
-        (st.success if result['ok'] else st.warning)(result['message'])
-        if result.get('rows'):
-            st.dataframe(result['rows'], hide_index=True)
-    draft = st.session_state.get('draft')
-    if not draft:
-        with st.form('paper_order'):
-            side = st.radio('구분', ['매수', '매도'], horizontal=True)
-            qty = st.number_input('수량 (주)', value=None, step=1, placeholder='수량 입력')  # no min: Korean message below
-            price = st.number_input('지정가 (원)', value=None, step=1, placeholder='가격 입력')
-            review = st.form_submit_button('주문 내용 검토')
-        if review:
-            if qty is None or price is None:
-                st.warning('수량과 지정가를 입력해 주세요.')
-            elif qty < 1 or price < 1:
-                st.warning('수량과 지정가는 1 이상이어야 합니다.')
-            else:
-                st.session_state.draft = {'name': name, 'symbol': symbol, 'side': side, 'qty': int(qty), 'price': int(price)}
-                st.rerun()
-    else:
-        st.warning('모의계좌 주문 내용을 확인해 주세요.')
-        st.write(f"**{draft['name']} ({draft['symbol']}) · {draft['side']}**")
-        st.write(f"{draft['qty']:,}주 × {draft['price']:,}원 = **{draft['qty'] * draft['price']:,}원**")
-        confirm, edit = st.columns(2)
-        if edit.button('다시 입력'):
-            del st.session_state.draft
-            st.rerun()
-        if confirm.button('모의 주문 제출', type='primary'):
-            del st.session_state.draft
-            st.session_state.pop('paper_snapshot', None)
-            st.session_state.order_result = {'ok': False, 'message': '주문 처리 중 중단되었을 수 있습니다. 재전송하지 말고 주문내역을 확인하세요.'}
-            try:
-                number = submit_paper(read, paper, account, draft['symbol'], 'Buy' if draft['side'] == '매수' else 'Sell', draft['qty'], draft['price'])
-                result = {'ok': True, 'message': f'주문 접수번호 {number}. 접수는 체결이 아닙니다. 체결과 잔량을 대조하세요.'}
-                try:
-                    matches = [row for row in orders(paper, account) if isinstance(row, dict)
-                               and str(row.get('itg_orr_no')) == str(number) and row.get('iem_cd') == draft['symbol']]
-                    if len(matches) != 1 or any(key not in matches[0] for key in ('tot_cns_qty', 'ny_cns_qty')):
-                        raise ValueError('접수 주문의 체결 상태 확인 불가')
-                    result['rows'] = display_rows(matches, [('iem_cd', '종목코드'), ('itg_orr_no', '주문번호'), ('tot_cns_qty', '체결수량'), ('ny_cns_qty', '미체결수량')])
-                except Exception:
-                    result['message'] += ' 접수 후 상태 조회에 실패했습니다. 재주문하지 말고 증권사에서 대조하세요.'
-                st.session_state.order_result = result
-            except Exception:
-                st.session_state.order_result = {'ok': False, 'message': '주문을 완료하지 못했습니다. 제출 여부가 불명확하면 재전송하지 말고 증권사 주문내역을 확인하세요.'}
-            st.rerun()
-
-
 def regime_observation_panel(path):
     """7 ETF regime observation (research only)."""
     st.caption('매매 신호가 아니며 실제 주문과 수익성을 뜻하지 않습니다.')
@@ -4906,17 +4758,22 @@ def live_balances_view(read, rows, records, numbers, scope):
         st.caption('조회된 당일 주문이 없습니다.')
 
 
-def live_tab_panel(root, read, configs):
-    """Live accounts: a combined view of every live account and one view per account (executor, mirror, virtual run,
-    limits, balance), then the shared controls and the paper-to-live review."""
-    from accounts import load as load_accounts
+def live_tab_panel(root, read, configs, all_records):
+    """Live accounts: a combined view of every live account, every account's orders (the old 주문·정리 tab, 2026-11-19)
+    and one view per account (executor, mirror, virtual run, limits, orders, balance), then the shared controls and the
+    paper-to-live review."""
     st.subheader('실계좌')
-    records = {k: r for k, r in load_accounts().items() if r['kind'] == 'live'}
+    records = {k: r for k, r in all_records.items() if r['kind'] == 'live'}
     if not records:  # the controls below (buy pause) stay available even then
         st.info('등록된 실계좌가 없습니다. "계좌·자동매매" 탭에서 추가합니다.')
-    views = ['전체 합산', *[r.get('label', k) for k, r in records.items()]]
+    views = ['전체 합산', PREFS.LIVE_ORDERS, *[r.get('label', k) for k, r in records.items()]]
     pick = st.segmented_control('보기', views, default=views[0], key='live_view',
-                                help='전체 합산은 모든 실계좌를 한 화면에, 계좌 이름을 누르면 그 계좌만 자세히 봅니다.') or views[0]
+                                help='전체 합산은 모든 실계좌를 한 화면에, 주문·정리 종합은 모든 계좌(모의 포함)의 보유·체결·정리 요청을, '
+                                     '계좌 이름을 누르면 그 계좌만 자세히 봅니다.') or views[0]
+    if pick == PREFS.LIVE_ORDERS:
+        import overview
+        overview.render_orders(root / 'nhplug', all_records, processes(), stock_names())
+        return
     states, events = processes(), live_shared_events()
     allowed, halted = buy_allowed(root / 'nhplug'), halt_flag_set('nhplug')
     # user 2026-11-17: a live account runs Jev trading (mirror rows below) or 장기투자 (its own card)
@@ -5007,7 +4864,13 @@ def live_tab_panel(root, read, configs):
         st.caption(f"점선은 별도 승인 후에만 열리는 경로입니다. 이 대시보드는 실주문을 내지 않습니다. 승인된 최대 한도: 운용금 {L['capital_krw']:,}원 · "
                    f"하루 손실 {L['daily_loss_krw']:,}원 · 1회 최대 {L['order_qty']:,}주 · 1주 가격 {L['order_price_max_krw']:,}원 · 종목 손절 −{L['stop_pct']:g}%")
     live_events = recent_events(root / 'nhplug/live-follow.jsonl')
-    balance_tab, control_tab, review_tab = st.tabs(['잔고·주문', '자동매매 제어', '모의 → 실계좌 적용 검토'])
+    if pick != views[0]:  # one account: its orders and sell-all request (the old 주문·정리 tab) come first
+        order_tab, balance_tab, control_tab, review_tab = st.tabs(['주문·정리', '잔고·주문', '자동매매 제어', '모의 → 실계좌 적용 검토'])
+        with order_tab:
+            key = selected[0]['key']
+            live_order_panel(read, key, records[key], live_number(read, records, key))
+    else:
+        balance_tab, control_tab, review_tab = st.tabs(['잔고·주문', '자동매매 제어', '모의 → 실계좌 적용 검토'])
     with balance_tab:
         if selected:
             live_balances_view(read, selected, records, live_linked_numbers(read, records), 'all' if pick == views[0] else selected[0]['key'])
@@ -5157,7 +5020,8 @@ def main():
     logo = Path(__file__).with_name('assets') / 'logo.png'
     st.set_page_config(page_title='Omni AI Trading', page_icon=str(logo) if logo.is_file() else None, layout='wide',
                        menu_items={'About': 'Omni AI Trading · NH 나무 PLUG 모의·실계좌 자동매매 관찰 대시보드. '
-                                            '이 화면은 실주문을 내지 않습니다(실계좌 실주문 스위치만 예외, 확인 문구 필요).'})
+                                            '이 화면은 실주문을 내지 않습니다(실계좌 실주문 스위치만 예외, 확인 문구 필요). '
+                                            '모든 정보는 참고 자료이며 투자 권유가 아닙니다. 투자 판단과 손익 책임은 투자자 본인에게 있습니다.'})
     if logo.is_file():
         st.logo(str(logo), size='large')
     prefs_view()
@@ -5172,6 +5036,8 @@ def main():
     with controls.popover('화면 설정', icon=':material/settings:'):
         prefs_form()
     st.caption('모의·실계좌 구분 · 한국시간 · 자동매매는 별도 실행기가 하며 이 화면은 실주문을 내지 않습니다')
+    import disclaimer
+    disclaimer.top_line(st)  # investment disclaimer on every tab (user 2026-11-19)
     try:
         configs = load_agent_config().mcp_servers
         read = MCPServerAdapter('nhplug_readonly', configs['nhplug_readonly'])
@@ -5189,9 +5055,9 @@ def main():
         import sidebar
         states = processes()
         import engine_ops
-        sidebar.render(PREFS.TABS, states, records,
-                       overview.alerts(get_runtime_root() / 'nhplug', states, overview.latest_follow(get_runtime_root() / 'nhplug'),
-                                       datetime.now(KST).strftime('%Y-%m-%d')),
+        alerts = overview.alerts(get_runtime_root() / 'nhplug', states, overview.latest_follow(get_runtime_root() / 'nhplug'),
+                                 datetime.now(KST).strftime('%Y-%m-%d'))
+        sidebar.render(PREFS.TABS, states, records, alerts,
                        engine_ops.LABELS[engine_ops.mode(get_runtime_root() / 'nhplug')])
         @st.fragment(run_every=f'{refresh_s()}s')
         def sidebar_positions():
@@ -5199,7 +5065,7 @@ def main():
 
         sidebar_positions()
         if st.button('가이드 센터', icon=':material/menu_book:', width='stretch',
-                     help='모든 화면의 설명과 매수·매도 전략, 안전 장치, 데이터 흐름을 도식과 함께 봅니다.'):
+                     help='모든 화면의 설명과 매수·매도 전략, 안전장치, 데이터 흐름을 도식과 함께 봅니다.'):
             guide_dialog('etf')
         st.divider()
         picked = st.selectbox('계좌', list(records), key='trading_account',
@@ -5237,14 +5103,13 @@ def main():
         quotes_slot = st.container()  # filled at the end of main(): the tabs no longer wait for a dozen quote calls
         with st.expander(f"관심종목 편집 · {records[picked].get('label', picked)}"):
             watchlist_editor(picked)
-        st.divider()
-        name = st.selectbox('종목', list(SYMBOLS), help='"모의 주문·정리" 탭에서 직접 주문할 종목입니다(실행기 전용 계좌가 아닐 때).')
-        symbol = SYMBOLS[name]
-        if st.session_state.get('draft') and st.session_state.draft['symbol'] != symbol:
-            del st.session_state.draft
-            st.warning('종목이 변경되어 검토 중이던 주문을 취소했습니다. 다시 입력해 주세요.')
-    summary_tab, market_tab, strategy_tab, etf_tab, journal_tab, accounts_tab, compare_tab, longterm_tab, paper_tab, ai_tab, live_tab, overview_tab, api_tab, backup_tab = st.tabs(
-        PREFS.TABS, key='main_tab', default=st.query_params.pop('tab', None) if st.query_params.get('tab') in PREFS.TABS else st.session_state['prefs']['start_tab'], on_change='rerun')  # keyed: a save or any rerun keeps the tab the user is on
+    linked = PREFS.place(st.query_params.pop('tab', None) or '', st.query_params.pop('view', None))  # ?tab=&view= deep links, old names included
+    if linked:
+        st.session_state['main_tab'] = linked[0]
+        if linked[1]:
+            st.session_state[linked[1]] = linked[2]
+    summary_tab, market_tab, strategy_tab, etf_tab, journal_tab, compare_tab, accounts_tab, longterm_tab, live_tab, ops_tab = st.tabs(
+        PREFS.TABS, key='main_tab', default=st.session_state['prefs']['start_tab'], on_change='rerun')  # keyed: a save or any rerun keeps the tab the user is on
     if summary_tab.open:  # only the tab on screen runs (on_change="rerun"); the others cost nothing
         with summary_tab:
             help_row('summary')
@@ -5277,19 +5142,40 @@ def main():
             help_row('compare')
             compare_panel()
     root = get_runtime_root()  # also used by the live tab below
-    if overview_tab.open:
-        with overview_tab:
-            help_row('ops')
-            operations_panel(root)
-    if backup_tab.open:  # 2026-11-17: backup and restore of the runtime data (state_sync)
-        with backup_tab:
-            import backup_view
-            backup_view.render(root)
-    if api_tab.open:
-        with api_tab:
-            help_row('api')
-            import api_status_view
-            api_status_view.render(root)
+    if ops_tab.open:  # 2026-11-19: the four admin screens under one tab
+        if alerts:  # what needs a look shows before picking a screen (the same list as the sidebar)
+            ops_tab.warning(f'주의 항목 {len(alerts)}건 · ' + ' · '.join(alerts[:3]) + (' …' if len(alerts) > 3 else ''), icon=':material/warning:')
+        ops_view = ops_tab.segmented_control('운영 화면', PREFS.OPS_VIEWS, default=PREFS.OPS_VIEWS[0], key='ops_view',
+                                             label_visibility='collapsed') or PREFS.OPS_VIEWS[0]
+        if ops_view == '운영 상태':
+            with ops_tab:
+                help_row('ops')
+                operations_panel(root)
+        elif ops_view == '자동 작업':  # 2026-11-19: launchd services, Claude scheduled tasks and Codex automations together
+            with ops_tab:
+                help_row('schedule')
+                import schedule_view
+                schedule_view.render(root)
+        elif ops_view == 'API 연동':
+            with ops_tab:
+                help_row('api')
+                import api_status_view
+                api_status_view.render(root)
+        elif ops_view == '스킬':
+            with ops_tab:
+                import skills_view
+                st.subheader('스킬')
+                skills_view.render(root)
+        elif ops_view == '리포트 발행':
+            with ops_tab:
+                import report_pages_view
+                report_pages_view.render(root)
+        elif ops_view == '백업·이식':  # 2026-11-17: backup and restore of the runtime data (state_sync)
+            with ops_tab:
+                import backup_view
+                backup_view.render(root)
+        else:
+            ai_records(ops_tab, records, read)
     if etf_tab.open:
         with etf_tab:
             from accounts import resolve as resolve_accounts
@@ -5504,47 +5390,10 @@ def main():
                             except (OSError, ValueError, TypeError, KeyError):
                                 st.error('모의 AI 설정 미확인. 새 실행기는 AI 주문을 보류합니다. 현재 실행 중인 프로세스의 설정 반영 여부를 확인하세요.')
                 etf_status()
-    if paper_tab.open:
-        with paper_tab:
-            help_row('paper')
-            order_key = account_scope({'overview': {'label': '종합', 'engine': ''}, **records}, 'order_tab_account',
-                                      default=next(k for k, r in records.items() if r.get('kind') != 'live'))
-            if order_key == 'overview':
-                import overview
-                overview.render_orders(get_runtime_root() / 'nhplug', records, processes(),
-                                       stock_names())
-            elif records[order_key].get('kind') == 'live':
-                live_order_panel(read, order_key, records[order_key], live_number(read, records, order_key))
-            else:
-                paper_order_panel(read, paper, account, name, symbol)
     if live_tab.open:
         with live_tab:
             help_row('live')
-            live_tab_panel(root, read, configs)
-    if ai_tab.open:
-        with ai_tab:
-            help_row('ai')
-            record_source = st.segmented_control(
-                '기록', ['overview', 'jev', 'longterm', 'vibe', *[k for k, r in records.items() if r.get('kind') == 'live']], default='overview',
-                key='record_source',
-                format_func=lambda k: {'overview': '종합', 'jev': 'Jev 엔진', 'longterm': '장기투자 결정', 'vibe': 'vibe 장중(~11-17, 보관)'}.get(k) or f"{records[k].get('label', k)} 실행",
-                help='엔진을 고르면 그 엔진 원장(메인은 공유 모의계좌, 보조는 가상 체결)의 판단·체결 기록을, 실계좌를 고르면 미러 실행기 기록을 봅니다. 종합은 모두를 한 날짜로 모읍니다.') or 'overview'
-        if record_source == 'overview':
-            with ai_tab:
-                import overview
-                overview.render_records(get_runtime_root() / 'nhplug', records,
-                                        stock_names(),
-                                        strategy_settings()[0], entry_reason_label)
-        elif record_source == 'longterm':
-            with ai_tab:
-                import vibe_longterm_view
-                st.caption('장기투자 엔진의 국면·스토리·계획·주문 기록입니다. 전체 화면은 "장기투자" 탭에 있습니다.')
-                vibe_longterm_view.record(vibe_longterm_view.load(get_runtime_root() / 'nhplug' / 'vibe-longterm')[1])
-        elif record_source in records:
-            with ai_tab:
-                live_record_panel(record_source, records[record_source])
-        else:
-            ai_record_tab(ai_tab, record_source, read)
+            live_tab_panel(root, read, configs, records)
     with quotes_slot:
         market()
 
@@ -5579,6 +5428,31 @@ def selected_trade_history(root, engine):
             st.info('이 종목의 확인 체결 기록이 없습니다.')
     except sqlite3.Error:
         st.warning('이 엔진의 체결 원장을 읽지 못했습니다.')
+
+
+def ai_records(tab, records, read):
+    """운영 → AI·실행 기록: the engines' and the live executors' records (the frozen vibe intraday book left 11-19)."""
+    with tab:
+        help_row('ai')
+        record_source = st.segmented_control(
+            '기록', ['overview', 'jev', 'longterm', *[k for k, r in records.items() if r.get('kind') == 'live']], default='overview',
+            key='record_source',
+            format_func=lambda k: {'overview': '종합', 'jev': 'Jev 엔진', 'longterm': '장기투자 결정'}.get(k) or f"{records[k].get('label', k)} 실행",
+            help='Jev 엔진은 공유 모의계좌 원장의 판단·체결 기록을, 실계좌를 고르면 그 계좌 실행기 기록을 봅니다. 종합은 모두를 한 날짜로 모읍니다.') or 'overview'
+    if record_source == 'overview':
+        with tab:
+            import overview
+            overview.render_records(get_runtime_root() / 'nhplug', records, stock_names(), strategy_settings()[0], entry_reason_label)
+    elif record_source == 'longterm':
+        with tab:
+            import vibe_longterm_view
+            st.caption('장기투자 엔진의 국면·스토리·계획·주문 기록입니다. 전체 화면은 "장기투자" 탭에 있습니다.')
+            vibe_longterm_view.record(vibe_longterm_view.load(get_runtime_root() / 'nhplug' / 'vibe-longterm')[1])
+    elif record_source in records:
+        with tab:
+            live_record_panel(record_source, records[record_source])
+    else:
+        ai_record_tab(tab, record_source, read)
 
 
 def ai_record_tab(ai_tab, engine, read):

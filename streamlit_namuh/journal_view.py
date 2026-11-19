@@ -749,7 +749,7 @@ def _step(stored, delta):
 
 
 KEEP = ('journal_day', 'journal_month', 'journal_quarter', 'journal_half', 'journal_year', 'journal_range')
-UNIT_KINDS = {'월': 'month', '분기': 'quarter', '반기': 'half', '년': 'year'}
+UNIT_KINDS = {'월': 'month', '분기': 'quarter', '반기': 'half', '연': 'year'}
 
 
 def render():

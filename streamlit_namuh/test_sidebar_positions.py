@@ -19,7 +19,7 @@ def test_click_engine_position_opens_trade_history():
         assert not app.exception
         app.button[0].click().run()
         assert not app.exception
-        assert app.session_state['main_tab'] == 'AI·실행 기록'
+        assert app.session_state['main_tab'] == '운영' and app.session_state['ops_view'] == 'AI·실행 기록'
         assert app.session_state['record_source'] == 'jev'
         assert app.session_state['trade_history'] == {'engine': 'jev', 'code': '005930'}
 

@@ -48,13 +48,35 @@ ASSETS = {
 }
 SATS = tuple(k for k, a in ASSETS.items() if a[2] == 'sat')
 CORE = tuple(k for k, a in ASSETS.items() if a[2] == 'core')
-CODE_KEY = {a[0]: k for k, a in ASSETS.items()}  # KRX code -> asset key
+# 저수지(대기 현금) ETF (user 2026-11-19): a book keeps its reservoir in one of these; KOFR stays the history and chart proxy
+RESERVOIRS = {'449170': 'TIGER KOFR금리액티브(합성)', '357870': 'TIGER CD금리투자KIS(합성)', '272580': 'TIGER 단기채권액티브'}
+RESERVOIR_CHOICES = {'auto': '자동 (운용금에 맞춰)', **{c: f'{n} ({c})' for c, n in RESERVOIRS.items()}}
+RESERVOIR_AUTO_KRW = 10_000_000  # 'auto' under this: KOFR's one share (about 11만 원) leaves too much cash idle in a small book
+KOFR = ASSETS['RES'][0]
+RESERVOIR_SMALL = '357870'  # half KOFR's share price, a floating rate like it and the most traded of the three (2026-11-19)
+CODE_KEY = {a[0]: k for k, a in ASSETS.items()} | {c: 'RES' for c in RESERVOIRS}  # KRX code -> asset key
 SLEEVE = 'sleeve'  # nav_latest key: KRW of the 적립식 관심목록 holdings (outside the engine's ETFs), already in 'actual'
 
 
-def code_of(key):
-    """The KRX code of an order key: an engine ETF's key, a 여운봉 매매법 ETF key (yeo_method.EXTRA), or a 관심목록 code as it is."""
+def code_of(key, res=None):
+    """The KRX code of an order key: an engine ETF's key ('RES': the book's reservoir ETF `res`, else KOFR), a 여운봉 매매법
+    ETF key (yeo_method.EXTRA), or a 관심목록 code as it is."""
+    if key == 'RES' and res:
+        return res
     return ASSETS[key][0] if key in ASSETS else yeo_method.EXTRA[key][0] if key in yeo_method.EXTRA else key
+
+
+def reservoir_code(settings, key, capital=None, held=None):
+    """The reservoir ETF of book `key`: one at a time, so a book still holding a reservoir ETF keeps it (a new choice
+    applies once it is sold out), else the book's choice; 'auto' is KOFR from RESERVOIR_AUTO_KRW of money up, else
+    RESERVOIR_SMALL. held: {code: qty} or {code: (qty, avg)}."""
+    for code, v in (held or {}).items():
+        if code in RESERVOIRS and (v[0] if isinstance(v, (tuple, list)) else v) > 0:
+            return code
+    choice = ((settings.get('books') or {}).get(key) or {}).get('reservoir', 'auto')
+    if choice in RESERVOIRS:
+        return choice
+    return KOFR if capital is None or capital >= RESERVOIR_AUTO_KRW else RESERVOIR_SMALL
 
 
 def asset_name(key):
@@ -80,7 +102,7 @@ MODULES = {
                          '재현 안 함(가상 운용으로 검증)', False, False),
     'lynch_story': ('피터 린치', '테마 스토리 점검', 'LLM이 위성 테마마다 유지·주의·훼손과 기울기를 판정한다. 주의는 절반, 훼손은 0, 기울기는 ±25%.',
                     'LLM 판단이라 재현 불가(그림자와 비교)', True, False),
-    'buffett_lowturn': ('워렌 버핏·필립 피셔', '저회전·손절 없음', '손절하지 않고, 저수지를 뺀 매도는 한 달 순자산의 10%까지만 한다.',
+    'buffett_lowturn': ('워런 버핏·필립 피셔', '저회전·손절 없음', '손절하지 않고, 저수지를 뺀 매도는 한 달 순자산의 10%까지만 한다.',
                         '회전이 낮을수록 세후 손실이 작았음', True, False),
 }
 BASE_SET = ('bogle_core', 'dalio_rebalance')
@@ -325,7 +347,8 @@ def clean_book(value):
     given = value.get('modules') if isinstance(value.get('modules'), dict) else None
     return {'strategy': value.get('strategy') if value.get('strategy') in BOOK_STRATEGIES else 'engine',
             'modules': None if given is None else {k: True if m[5] else given.get(k) is True for k, m in MODULES.items()},
-            'yeo': yeo_method.clean(value.get('yeo'))}  # 여운봉 저수지 매매법 setting, kept while another strategy is chosen
+            'yeo': yeo_method.clean(value.get('yeo')),  # 여운봉 저수지 매매법 setting, kept while another strategy is chosen
+            'reservoir': value.get('reservoir') if value.get('reservoir') in RESERVOIR_CHOICES else 'auto'}
 
 
 def book_modules(settings, key, plan):
@@ -1047,14 +1070,14 @@ def broker_for(root, read):
     return VirtualBroker(Path(root) / 'virtual-account.sqlite3', read, cash=CAPITAL, fee=FEE)
 
 
-def send_orders(broker, planned, quotes, held, execute, reserved=0):
+def send_orders(broker, planned, quotes, held, execute, reserved=0, res=None):
     """Whole shares at the bid (sell) or ask (buy), sells first, to the virtual broker when executing; ([rows], error).
     reserved: the 적립식's money (waiting for a drawdown step, carried parts), which a buy never spends. Keys are engine ETF
     keys or 관심목록 codes."""
     sent, error = [], None
     try:
         for k, krw in sorted(planned.items(), key=lambda item: item[1]):  # sells first
-            code, (bid, ask) = code_of(k), quotes[k]
+            code, (bid, ask) = code_of(k, res), quotes[k]
             side, price = ('SELL', bid) if krw < 0 else ('BUY', ask)
             if side == 'SELL':
                 qty = min(int(abs(krw) // price), held.get(code, (0, 0))[0])
@@ -1098,8 +1121,9 @@ def trade(root, read, now, execute=False):
     if not execute and st.get('planned_day') == day:
         return 'already_planned'
     broker = broker_for(root, read)
-    quotes = {k: broker.quote(a[0]) for k, a in ASSETS.items()}  # (bid, ask); raises before any order
     held = broker.holdings()
+    res = reservoir_code(settings, 'actual', CAPITAL, held)
+    quotes = {k: broker.quote(code_of(k, res)) for k in ASSETS}  # (bid, ask); raises before any order
     values = {CODE_KEY[c]: q * quotes[CODE_KEY[c]][0] for c, (q, _) in held.items() if c in CODE_KEY}
     # the 적립식's money (waiting for a drawdown step, carried parts) and its 관심목록 holdings are not the engine's: its NAV
     # is its ETFs and the rest of the cash
@@ -1123,7 +1147,19 @@ def trade(root, read, now, execute=False):
     if execute and not claim(db, f'trade:{day}', now):  # another run sent today's orders (or stopped after sending)
         claimed_elsewhere(db, f'trade:{day}', day, now, lambda s: s.get('traded_day') == day, {'traded_day': day})
         return 'already_traded'
-    sent, error = send_orders(broker, planned, quotes, held, execute, reserved=waiting)
+    moved, error = [], None
+    chosen = reservoir_code(settings, 'actual', CAPITAL)  # the book's choice, whatever it holds
+    if chosen != res and held.get(res, (0, 0))[0] > 0:  # a new 저수지 ETF (2026-11-19): the old one is sold and its money moves
+        notes = [*notes, ('reservoir', f'저수지 ETF 전환: {RESERVOIRS[res]}({res}) {held[res][0]:,}주 전량 매도 → {RESERVOIRS[chosen]}({chosen})')]
+        if execute:
+            moved, error = send_orders(broker, {'RES': -held[res][0] * quotes['RES'][0]}, quotes, held, True, res=res)
+            held = broker.holdings()
+            if not error and held.get(res, (0, 0))[0] == 0:  # sold out: today's reservoir buys and the sale go to the new ETF
+                quotes['RES'] = broker.quote(chosen)
+                planned = {**planned, 'RES': planned.get('RES', 0) + values.get('RES', 0)}
+                res = chosen
+    sent, failed = send_orders(broker, planned, quotes, held, execute, reserved=waiting, res=res)
+    sent, error = moved + sent, error or failed
     if execute and yeo_cfg is not None and (owed := yeo_method.unbought([o for o in sent if 'filled' in o], FEE,
                                                                         yeo_method.step_buys(book.get('yeo'), day))):
         book['yeo_owed'] = owed  # a step's buy that did not fill goes in first tomorrow (the step itself stays used)
@@ -1189,7 +1225,8 @@ def dca(root, read, now, execute=False):
     yeo_cfg = yeo_settings(settings, 'actual')
     want = dca_targets(want, yeo_cfg)  # what the book's strategy buys (2026-11-18 v2): a 여운봉 book its pair, else no KOFR
     broker = broker_for(root, read)
-    quotes = {k: broker.quote(a[0]) for k, a in ASSETS.items()}  # raises before any claim or deposit
+    res = reservoir_code(settings, 'actual', CAPITAL, broker.holdings())
+    quotes = {k: broker.quote(code_of(k, res)) for k in ASSETS}  # raises before any claim or deposit
     for k in want:
         if k not in quotes:  # a 여운봉 매매법 ETF
             quotes[k] = broker.quote(code_of(k))
@@ -1219,7 +1256,8 @@ def dca(root, read, now, execute=False):
                                                   stories=stories)
     # the contribution is counted before anything is sent, so a failure after this point never counts or deposits it twice
     put_state(db, **({'dca:actual': new_state} if execute else {'dca_planned_day': day}))
-    sent, error = send_orders(broker, planned, quotes, held, execute, reserved=longterm_dca.reserved(new_state)) if planned else ([], None)
+    sent, error = (send_orders(broker, planned, quotes, held, execute, reserved=longterm_dca.reserved(new_state), res=res)
+                   if planned else ([], None))
     if execute and sent:  # what did not fill stays the 적립식's for the next check (2026-11-18), not the engine's cash
         new_state, missed = longterm_dca.add_unfilled(new_state, sent)
         if missed:
@@ -1329,14 +1367,17 @@ def close(root, read, now, execute=False, accounts=None):
     sleeve = {c for c in holdings if c not in CODE_KEY} | set(longterm_dca.sleeve(dca_cfg) if dca_cfg else ())
     for name in ('base', 'auto', 'dca_auto'):  # what a shadow holds is priced too
         sleeve |= {c for c, q in (((st.get(f'shadow:{name}') or {}).get('book') or {}).get('qty') or {}).items() if q > 0 and c not in ASSETS}
-    prices = {k: _close_price(read, a[0]) for k, a in ASSETS.items()} | {c: _close_price(read, c) for c in sorted(sleeve)}
+    closes = {}  # code -> today's close, read once even when several books keep the same reservoir ETF
+    close_of = lambda code: closes[code] if code in closes else closes.setdefault(code, _close_price(read, code))  # noqa: E731
+    # by key at KOFR for the paper books (shadows, recipes: they started on it); the virtual account is valued by what it holds
+    prices = {k: close_of(code_of(k)) for k in ASSETS} | {c: close_of(c) for c in sorted(sleeve)}
     contributed = (st.get('dca:actual') or {}).get('contributed_krw', 0)
     updates, latest = {'closed_day': day}, {}
     shadows = [('base', list(BASE_SET), None, None), ('auto', plan['recommended'], None, None)]
     if dca_cfg and dca_cfg['on']:  # 적립 시황 자동 (docs/longterm-master-dca-ideas-plan.md 3-3): shadow only until decided
         shadows.append(('dca_auto', plan['active'], 'auto', yeo_settings(settings, 'actual')))
     for k in {k for *_, yeo in shadows if yeo for k in yeo_method.keys(yeo)} - set(prices):  # a 여운봉 book's own ETFs (0261H0)
-        prices[k] = _close_price(read, code_of(k))
+        prices[k] = close_of(code_of(k))
     for name, modules, profile, yeo in shadows:
         saved = st.get(f'shadow:{name}') or {}
         book = Book(CAPITAL, tax=0.0)  # fees and the replay's slippage, no tax: the shadows compare with each other
@@ -1363,7 +1404,7 @@ def close(root, read, now, execute=False, accounts=None):
         latest[name] = book.value(prices)
     yeo_codes = {code for code, _ in yeo_method.EXTRA.values()}  # 여운봉 매매법 ETFs: the engine's book, not the 적립식 sleeve
     sleeve_value = sum(q * prices[c] for c, (q, _) in holdings.items() if c not in CODE_KEY and c not in yeo_codes)
-    latest['actual'] = broker.cash() + sum(q * prices[CODE_KEY.get(c, c)] for c, (q, _) in holdings.items())
+    latest['actual'] = broker.cash() + sum(q * close_of(c) for c, (q, _) in holdings.items())  # its own reservoir ETF's close
     if accounts is None:
         from accounts import load as load_accounts, longterm_accounts
         accounts = longterm_accounts(load_accounts())
@@ -1380,11 +1421,16 @@ def close(root, read, now, execute=False, accounts=None):
             continue
         for k in yeo_method.keys(yeo) if yeo else ():  # the method's own ETFs (e.g. 0261H0) priced at the close too
             if k not in prices:
-                prices[k] = _close_price(read, code_of(k))
+                prices[k] = close_of(code_of(k))
         for k, q in (((st.get(state_key) or {}).get('book') or {}).get('qty') or {}).items():  # what it still holds
             if q > 0 and k not in prices:
-                prices[k] = _close_price(read, code_of(k))
-        updates[state_key], value = account_shadow(st.get(state_key), capital, modules, book_day_plan, stories, prices, day, yeo, label)
+                prices[k] = close_of(code_of(k))
+        saved = st.get(state_key) or {}  # a paper book keeps the reservoir ETF it started with (one at a time, as a live book)
+        held_res = ((saved.get('book') or {}).get('qty') or {}).get('RES', 0) > 0  # a book from before 11-19 holds KOFR
+        book_res = saved.get('reservoir') or (KOFR if held_res or nav_key.startswith('recipe:') else reservoir_code(settings, nav_key, capital))
+        book_prices = prices | {'RES': close_of(book_res)}
+        updates[state_key], value = account_shadow(saved, capital, modules, book_day_plan, stories, book_prices, day, yeo, label)
+        updates[state_key]['reservoir'] = book_res
         account_rows.append((day, nav_key, value, updates[state_key]['capital']))
     rows = [(day, book, value) for book, value in latest.items()]
     if contributed:  # only once money has been paid in, so readers that list every nav book see nothing new before

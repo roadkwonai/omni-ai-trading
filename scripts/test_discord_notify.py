@@ -336,7 +336,9 @@ def test_live_ids_seen_before_the_fix_are_read_in_the_new_form(tmp_path, monkeyp
     live_home(tmp_path, monkeypatch, LIVE1)
     live_fill(tmp_path, 7)
     guard_links(tmp_path, (7,))
-    (tmp_path / 'discord-notify.json').write_text(json.dumps({'seen': [f'live:live-1:{TODAY}T00:00:00+09:00:7'], 'lt_cursor': 0}))
+    # today's 15:40 summary is marked sent: this test is about the fill id only, whatever the wall clock (11-19 16:3x)
+    (tmp_path / 'discord-notify.json').write_text(json.dumps({'seen': [f'live:live-1:{TODAY}T00:00:00+09:00:7', f'summary:{TODAY}'],
+                                                               'lt_cursor': 0}))
     log, sender = sent_log()
     run(tmp_path, sender)
     assert log == []
@@ -440,3 +442,56 @@ def test_a_live_accounts_own_stop_at_a_loss_says_stop(tmp_path, monkeypatch):
     items = dn.live_items({'live-1': {'kind': 'live', 'engine': 'jev', 'label': '실계좌 1'}}, {}, set())
     sell = [t for _, i, t in items if i.endswith(':2')][0]
     assert sell.startswith('🛑 손절') and '실계좌 손절' in sell
+
+
+# ---------- Telegram · Slack (user 2026-11-19) ----------
+def test_env_builds_every_destination_per_channel():
+    values = {'DISCORD_WEBHOOK_REALTIME': 'https://d/rt', 'SLACK_WEBHOOK_REALTIME': 'https://s/rt',
+              'TELEGRAM_BOT_TOKEN': 'tok', 'TELEGRAM_CHAT_REALTIME': '-100', 'TELEGRAM_CHAT_LONGTERM': '-200'}
+    out = dn.urls_from_env(values)
+    assert out['realtime'] == [('discord', 'https://d/rt'), ('telegram', ('tok', '-100')), ('slack', 'https://s/rt')]
+    assert out['longterm'] == [('telegram', ('tok', '-200'))]
+    assert dn.urls_from_env({'TELEGRAM_CHAT_REALTIME': '-100'})['realtime'] == []  # a chat without the bot token is off
+
+
+def test_render_per_destination():
+    text = '**모의** 매수 [리포트](https://x.io/a?b=1&c=2) 1<2'
+    assert dn.render('discord', text) == text
+    assert dn.render('telegram', text) == '모의 매수 리포트 (https://x.io/a?b=1&c=2) 1<2'
+    assert dn.render('slack', text) == '*모의* 매수 <https://x.io/a?b=1&amp;c=2|리포트> 1&lt;2'
+
+
+def test_each_destination_keeps_its_own_sent_list(monkeypatch):
+    calls = []
+    monkeypatch.setitem(dn.POSTERS, 'slack', lambda url, text, timeout=10: (calls.append(('slack', text)), (True, 0, False))[1])
+    fails = {'n': 0}
+
+    def telegram(address, text, timeout=10):
+        fails['n'] += 1
+        calls.append(('telegram', text))
+        return (False, 0, False) if fails['n'] == 1 else (True, 0, False)
+    monkeypatch.setitem(dn.POSTERS, 'telegram', telegram)
+    discord = lambda url, text, timeout=10: (calls.append(('discord', text)), (True, 0, False))[1]
+    urls = {'realtime': [('discord', 'u'), ('telegram', ('t', 'c')), ('slack', 's')]}
+    state = {'seen': ['old']}
+    dn.deliver([('realtime', 'a', 'A')], state, urls, sender=discord, sleep=lambda s: None)
+    assert state['seen'] == ['old', 'a'] and state['seen_slack'] == ['old', 'a'] and state['seen_telegram'] == ['old']
+    assert dn.done_ids(state, urls) == {'old'}  # Telegram still owes 'a', so collect brings it back
+    calls.clear()
+    dn.deliver([('realtime', 'a', 'A')], state, urls, sender=discord, sleep=lambda s: None)
+    assert calls == [('telegram', 'A')]  # only the destination that missed it
+    assert dn.done_ids(state, urls) == {'old', 'a'}
+
+
+def test_new_destination_does_not_replay_history():
+    state = {'seen': ['x', 'y']}
+    lists = dn.seen_lists(state, {'realtime': [('slack', 's')]})
+    assert lists['slack'] == ['x', 'y'] and state['seen_slack'] == ['x', 'y']
+
+
+def test_long_term_cursor_waits_for_every_destination(monkeypatch):
+    monkeypatch.setitem(dn.POSTERS, 'slack', lambda url, text, timeout=10: (False, 0, False))
+    ok = lambda url, text, timeout=10: (True, 0, False)
+    state = {'seen': [], 'lt_cursor': 10}
+    dn.deliver([('longterm', 'lt:7', 'L')], state, {'longterm': [('discord', 'u'), ('slack', 's')]}, sender=ok, sleep=lambda s: None)
+    assert state['lt_cursor'] == 6 and 'lt:7' in state['seen'] and 'lt:7' not in state['seen_slack']

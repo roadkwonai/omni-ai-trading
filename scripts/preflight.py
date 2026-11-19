@@ -183,10 +183,8 @@ def main():
         log.write(json.dumps(report, ensure_ascii=False) + '\n')
     print(json.dumps(report, ensure_ascii=False, indent=1))
     if not report['ok'] and not args.no_send:
-        from discord_notify import post, urls_from_env
-        url = urls_from_env().get('realtime')
-        if url:
-            post(url, message(report))
+        from discord_notify import send_everywhere, urls_from_env
+        send_everywhere(urls_from_env().get('realtime'), message(report))  # Discord, Telegram, Slack: whichever is set
     return 0 if report['ok'] else 1
 
 

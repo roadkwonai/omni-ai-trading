@@ -353,6 +353,7 @@ def strategy(root, settings, plan, recommended, history):
                    format_func={'modules': '거장 모듈 조합 (② ~ ⑤에서 설정)', 'yeo_method': '여운봉 저수지 매매법 (단독 규칙)'}.get,
                    help=G.HELP['way'] + ' 그림자 장부는 그대로 거장 모듈로 돌아 비교됩니다.')
     st.caption(G.WAY_NOTE)
+    A.reservoir_panel('actual', 'lt_', root, L.CAPITAL, holdings(root)[0])  # 저수지 ETF (2026-11-19): both ways use it
     if way == 'yeo_method':
         cfg = A.yeo_panel('actual', 'lt_', root, book['yeo'])
         if st.button('운용 방식 저장', type='primary', key='lt_save_way', icon=':material/save:',
@@ -834,7 +835,7 @@ def run_panel(root, settings):
                 st.rerun()
         elif c1.button('중지 요청 해제', key='lt_unstop', icon=':material/play_arrow:'):
             stop.unlink(missing_ok=True)
-            st.toast('중지 요청을 지웠습니다. 다음 실행부터 정상으로 돕니다.', icon=':material/check_circle:')
+            st.toast('중지 요청을 지웠습니다. 다음 실행부터 정상으로 돌아갑니다.', icon=':material/check_circle:')
             st.rerun()
     st.caption('비중·밴드·매도 상한·집행 속도는 "전략" 탭의 거장 카드에서, 국면 확정 일수는 "시장" 탭에서 정합니다.')
 

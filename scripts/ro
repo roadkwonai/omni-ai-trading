@@ -28,7 +28,7 @@ task_path() {  # the only folders a task may name: never the engine's databases 
 }
 SCRIPTS=" longterm_report.py longterm_audit.py longterm_cases.py us_ideas.py intraday_audit.py
  oversold_outcomes.py oversold_research.py oversold_cases.py daily_improvement.py trading_journal.py journal_template.py
- premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py jev_explain.py audit_incidents.py "
+ premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py jev_explain.py audit_incidents.py strategy_compare.py "
 SCRIPTS=" $(echo $SCRIPTS) "
 case "${1:-}" in
   vibe-status) cmd=("$py" -c "import engine_ops, pathlib; print(engine_ops.status(pathlib.Path.home() / '.vibe-trading/nhplug')['vibe'])");;

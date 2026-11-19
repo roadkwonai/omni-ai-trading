@@ -134,7 +134,7 @@ def test_a_masters_pick_adds_its_domestic_etf_and_remembers_why(tmp_path, monkey
     at = AppTest.from_function(dca_tab, args=(tmp_path,)).run()
     at.toggle(key='dca_pick_on_actual').set_value(True).run()
     at.multiselect(key='dca_picks_actual').set_value(['NDX']).run()
-    assert at.multiselect(key='dca_master_picks_actual').options == ['AMP · 워렌 버핏 → KODEX 미국S&P500']
+    assert at.multiselect(key='dca_master_picks_actual').options == ['AMP · 워런 버핏 → KODEX 미국S&P500']
     at.multiselect(key='dca_master_picks_actual').set_value(['buffett:AMP']).run()
     at.button(key='dca_save_actual').click().run()
     saved = L.load_settings(tmp_path)['dca']['actual']

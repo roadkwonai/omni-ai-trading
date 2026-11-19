@@ -151,6 +151,13 @@ def test_rate_limit_is_retried_and_other_errors_are_not():
     assert (flaky.calls, waits) == (3, [0.5, 1.0])
     with pytest.raises(LiveOrderBlocked, match='rate limit'):
         _request(Flaky(['IGW42902'] * 5), 'call_api', {}, sleep=lambda s: None)
+    # the same-query limit (IGW42903, 11-19) is retried too: the mirror's minute read and the order's own re-read of the
+    # same history and balance can fall within a second of each other
+    waits = []
+    assert _request(Flaky(['IGW42903 API 호출 거래건수를 초과하였습니다.']), 'call_api', {}, sleep=waits.append)['status'] == 'ok'
+    assert waits == [0.5]
+    with pytest.raises(LiveOrderBlocked, match='rate limit'):
+        _request(Flaky(['IGW42903'] * 5), 'call_api', {}, sleep=lambda s: None)
     other = Flaky(['IGW40043 unauthorized'])
     with pytest.raises(LiveOrderBlocked, match='request failed'):
         _request(other, 'call_api', {}, sleep=lambda s: None)
@@ -163,3 +170,49 @@ def test_the_mirrors_per_minute_read_skips_quotes_and_the_account_list():
     snapshots = collect_snapshots(reader, A, NOW, sleep=lambda _: None, symbol=None)
     assert sorted(snapshots) == ['balance', 'history', 'pnl']
     assert [tool for tool, _ in reader.calls if tool != 'call_api'] == []
+
+
+def test_a_second_page_waits_for_nhs_one_request_a_second():
+    """Same NH limit on a live account (measured 11-19 on paper: a page asked within ~1 s of the previous one is refused
+    with IGW42903, which _request does not retry, so the live cycle would BLOCK once the account lists >10 rows)."""
+    from nh_live_broker import _pages
+    clock = {'t': 0.0}
+    starts = []
+
+    class NH:
+        def call_tool(self, tool, args):
+            now = clock['t']
+            refused = bool(starts) and now - starts[-1] < 1.0
+            starts.append(now)
+            clock['t'] += 0.27
+            if refused:
+                return {'status': 'error', 'error': 'IGW42903 API 호출 거래건수를 초과하였습니다.'}
+            if 'cts' not in args:
+                return {'status': 'ok', 'data': {'rsp_cd': '00218', 'rsp_msg': '계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다.',
+                                                 'Output_1': [{'n': 1}], '_nh_pagination': {'complete': False, 'cts': 'c', 'cts_flag': 'Y'}}}
+            return {'status': 'ok', 'data': {'rsp_cd': '00000', 'rsp_msg': '조회가 완료되었습니다.', 'Output_1': [{'n': 2}],
+                                             '_nh_pagination': {'complete': True}}}
+    sleep = lambda seconds: clock.__setitem__('t', clock['t'] + seconds)
+    data = _pages(NH(), 'krstockInquiryBalance', {}, 'Output_1', clock=lambda: clock['t'], sleep=sleep)
+    assert data['Output_1'] == [{'n': 1}, {'n': 2}] and len(starts) == 2 and starts[1] - starts[0] >= 1.0
+
+
+def test_snapshots_pass_their_sleep_to_the_page_gap():
+    """collect_snapshots(sleep=...) paces continuation pages with the caller's sleep, not a real 1.1 s (review 11-19)."""
+    reader = FakeReader()
+    original = reader.call_tool
+    served = {'n': 0}
+
+    def read(tool, args):
+        if tool == 'call_api' and args.get('operationId') == 'krstockInquiryDailyOrderExecution':
+            served['n'] += 1
+            if served['n'] == 1:
+                return {'status': 'ok', 'data': {'rsp_cd': '00218', 'rsp_msg': '계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다.',
+                                                 'Output_0': [], '_nh_pagination': {'complete': False, 'cts': 'c', 'cts_flag': 'Y'}}}
+            return {'status': 'ok', 'data': {'rsp_cd': '00166', 'rsp_msg': '조회가 완료되었습니다.', 'Output_0': [],
+                                             '_nh_pagination': {'complete': True}}}
+        return original(tool, args)
+    reader.call_tool = read
+    waits = []
+    collect_snapshots(reader, A, NOW, sleep=waits.append, symbol=None)
+    assert any(w > 0.5 for w in waits)  # the page gap went through the given sleep

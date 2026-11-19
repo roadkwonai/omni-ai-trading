@@ -92,11 +92,12 @@ def buy_settings_cycle(fn):
     return wrapped
 
 
-def paper_pages(adapter, operation, fields, block):
+def paper_pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.sleep):
     if (operation, block) not in {('krstockInquiryBalance','Output_1'),
                                   ('krstockInquiryDailyOrderExecution','Output_0')}:
         raise ValueError('only paper balance and order reads may be retried')
-    rows, seen, cursor, flag, first = [], set(), None, None, None
+    from nh_live_broker import PAGE_GAP  # NH's ~1 request a second per query (11-19 IGW42903 on every second page)
+    rows, seen, cursor, flag, first, started = [], set(), None, None, None, None
     accepted = {('00000', '모의투자 마지막 자료입니다'),
                 ('XA102', '모의투자 조회가 완료되었습니다'),
                 ('00000', '조회가 완료되었습니다'),
@@ -107,12 +108,14 @@ def paper_pages(adapter, operation, fields, block):
         params = {'operationId': operation, 'input': fields, 'want_pagination': True}
         if cursor is not None:
             params.update(cts=cursor, cts_flag=flag)
+            sleep(max(0.0, started + PAGE_GAP - clock()))
         for attempt in range(3):
+            started = clock()
             response = adapter.call_tool('call_api', params)
             if response.get('status') == 'ok' and isinstance(response.get('data'), dict):
                 break
             if attempt < 2:
-                time.sleep(2 ** attempt)
+                sleep(2 ** attempt)
         data = response.get('data')
         if response.get('status') != 'ok' or not isinstance(data, dict):
             raise ValueError('paper broker page unavailable')
@@ -1178,11 +1181,64 @@ def volume_check(rows):
     return None
 
 
-def strength_candidate(root, movers, bars, now, owned=(), floors=None):
+SLOT_COOLDOWN_MIN = 3   # a strength / new-listing pick the order path refused rests this long (user 2026-11-19),
+SLOT_COOLDOWN_MAX = 30  # doubling with each refusal after a rest, so a one-off stale signal costs 3 minutes (review 11-19)
+_COOLING = {}  # code -> (when it may be picked again, refusals so far today); a buy clears it
+_PICK = {}     # this cycle's strength / new-listing pick ('pick': (code, source)), set by cycle()
+
+
+def cooling(code, now):
+    entry = _COOLING.get(code)
+    return entry is not None and now < entry[0]
+
+
+def cool_refused_picks(fn):
+    """User 2026-11-19 "매분 막힘은 절대 일어나면 안돼": a strength or new-listing pick the order path then refused for any
+    reason (0 shares, guard, spread, a failed read...) would be picked again next minute, and as a slot's pick it holds
+    Jev's turn every minute (009150, 11-19 13:44~14:46). A pick that did not end in a buy rests; the
+    candidate searches look past it meanwhile, SLOT_COOLDOWN_MIN at first and twice as long after each further refusal."""
+    @wraps(fn)
+    def wrapped(db, read, broker, account, root, *args, **kwargs):
+        _PICK.clear()
+        status = None
+        try:
+            status = fn(db, read, broker, account, root, *args, **kwargs)
+            return status
+        finally:
+            pick = _PICK.pop('pick', None)
+            if pick and status in ('buy', 'would_buy'):
+                _COOLING.pop(pick[0], None)
+            elif pick:
+                code, source = pick
+                strikes = (_COOLING.get(code) or (None, 0))[1] + 1
+                minutes = min(SLOT_COOLDOWN_MAX, SLOT_COOLDOWN_MIN * 2 ** (strikes - 1))
+                until = datetime.now(KST) + timedelta(minutes=minutes)
+                _COOLING[code] = (until, strikes)
+                journal_event(root, 'pick_cooldown', symbol=code, source=source, status=status or 'error', minutes=minutes,
+                              until=until.isoformat(timespec='seconds'))
+    return wrapped
+
+
+def strength_shares(root, code, price, owned=(), closed_today=None):
+    """Shares one watchlist-strength buy of `code` (none held) comes to, in the order path's own arithmetic: the tranche
+    under the single-order limit, position_sizing's factor, then the careful re-entry's cut when `code` closed a round trip
+    today (`closed_today`, reentry_floors) in a regime that makes it careful (review 11-19)."""
+    import position_sizing
+    settings = (_APPLIED_SETTINGS or ({}, None))[0]
+    view = market_view(root)
+    factor, _ = position_sizing.buy_factor(settings, view, stop_symbol_index(root, code), False, 0, SPLIT_SYMBOL_KRW)
+    qty = int(int(min(SHARED_SINGLE_ORDER_KRW, SPLIT_TRANCHE_KRW * size_factor('watchlist_strength'))) // price * factor)
+    if careful_due(code, owned, 'watchlist_strength', closed_today, view, symbol_index(root, code)):
+        qty = int(qty * CAREFUL['size'] / 100)
+    return qty
+
+
+def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=None):
     """(code, facts) of the best watchlist stock among Jev's top STRENGTH_TOP_N picks today (probability >=
     STRENGTH_JEV_MIN) that is up STRENGTH_CHANGE% on its previous close right now and rising on its last minute bars;
     stocks already held are skipped so another strong one can enter, and a stock in `floors` (reentry_floors) only
-    above its last exit price. (None, why) otherwise."""
+    above its last exit price. With `sized(code, price)` (strength_shares), a stock one buy cannot afford a share of is
+    skipped (11-19 009150 at 847,000원 came out 0 shares every minute and held Jev's turn). (None, why) otherwise."""
     try:
         data = json.loads((Path(root) / 'watchlist.json').read_text())
         at = datetime.fromisoformat(data['time'])
@@ -1197,6 +1253,9 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None):
         price, change = details.get('price'), details.get('change_pct')
         rows = bars.get(code) or []
         if code not in ranked or probability < STRENGTH_JEV_MIN or code in owned:
+            continue
+        if cooling(code, now):
+            why = 'pick_cooldown'
             continue
         try:
             previous = price / (1 + change / 100)
@@ -1213,6 +1272,9 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None):
         if RISING_CHECK and not rising:
             why = 'trend_not_rising'
             continue
+        if sized is not None and sized(code, float(rows[0]['stck_prpr'])) < 1:
+            why = 'one_share_over_buy'
+            continue
         if best is None or probability > best[1]['jev_watchlist_confidence']:
             best = (code, {'jev_watchlist_confidence': probability, 'change_pct': round(now_change, 2)})
     return best if best else (None, why)
@@ -1223,7 +1285,8 @@ def strength_shadow(root, movers, bars, owned, symbols, floors, blocked, cycle_i
     path would have picked this minute. Never orders; reviewed after about 10 sessions before any rule change."""
     try:
         from etf_universe import SHORT
-        code, facts = strength_candidate(root, movers, bars, datetime.now(KST), owned, floors) if movers else (None, 'no_movers')
+        code, facts = (strength_candidate(root, movers, bars, datetime.now(KST), owned, floors,
+                                          sized=lambda c, pr: strength_shares(root, c, pr, owned, floors)) if movers else (None, 'no_movers'))
         short_codes = {symbols[name] for name in SHORT if name in symbols}
         fields = ({'symbol': code, 'confidence': facts['jev_watchlist_confidence'], 'change_pct': facts['change_pct']}
                   if code else {'strength_reason': facts})
@@ -1277,7 +1340,8 @@ def slot_entry(read, root, owned, movers, bars, closed_today, short_codes, now, 
         today = entries_today(root, now, 'watchlist_strength')
         blocked = OPPOSITE_GUARD and any(code in short_codes for code in owned)
         if not blocked and held < STRENGTH_SLOT_MAX and today is not None and today < STRENGTH_SLOT_DAILY:
-            code, facts = strength_candidate(root, movers, bars, now, owned, closed_today if REENTRY_GUARD else None)
+            code, facts = strength_candidate(root, movers, bars, now, owned, closed_today if REENTRY_GUARD else None,
+                                             sized=lambda c, pr: strength_shares(root, c, pr, owned, closed_today))
             if code is not None and not entry_block(root, code, owned, 'watchlist_strength', bars.get(code) or [],
                                                     closed_today, code in short_codes, read=read, review=review):
                 return code, 'watchlist_strength', None, facts
@@ -1315,6 +1379,9 @@ def ipo_candidate(read, root, owned, now):
         code = item['code']
         listed = datetime.strptime(item['listed'], '%Y%m%d').date()
         if code in owned or sessions_held(listed, today) >= IPO_DAYS:
+            continue
+        if cooling(code, now):
+            why = 'pick_cooldown'
             continue
         quote = ((read.call_tool('get_stock_price', {'stock_code': code}).get('data') or {}).get('Output_0') or {})
         price, base, opened, high = (quote.get(k) for k in ('stck_prpr', 'stck_prdy_clpr', 'stck_oprc', 'stck_hgpr'))
@@ -2820,6 +2887,7 @@ def settle_before_stop(db, broker, account, root, execute_orders):
     journal_event(root, 'stopped', reason='session or STOP', remaining=positions, reconciliation_required=bool(positions))
 
 
+@cool_refused_picks
 @buy_settings_cycle
 def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
     day = now.astimezone(KST).strftime('%Y%m%d')
@@ -3442,6 +3510,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         if slot is not None:
             code, source, rows, facts = slot
             candidate = code
+            _PICK['pick'] = (code, source)  # rests if the order path refuses it (cool_refused_picks)
             if rows is not None:
                 bars[code], symbols = rows, {**symbols, code: code}
             if source == 'new_listing':
@@ -3453,12 +3522,14 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
     if candidate is None and etf7 and reason in ('jev_wait', 'jev_low_confidence'):
         strength_why = None
         if movers:
-            code, facts = strength_candidate(root, movers, bars, datetime.now(KST), owned,
-                                             reentry_floors(db, root, day) if REENTRY_GUARD else None)
+            closed = reentry_floors(db, root, day)
+            code, facts = strength_candidate(root, movers, bars, datetime.now(KST), owned, closed if REENTRY_GUARD else None,
+                                             sized=lambda c, pr: strength_shares(root, c, pr, owned, closed))
             if code is None:
                 strength_why = facts
             else:
                 candidate, source = code, 'watchlist_strength'
+                _PICK['pick'] = (code, source)
                 journal_event(root, 'watchlist_strength', symbol=code, confidence=facts['jev_watchlist_confidence'],
                               change_pct=facts['change_pct'], cycle_id=cycle_id)
         if candidate is None:  # a recent new listing trading strongly (works in any market regime)
@@ -3469,6 +3540,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                               strength_reason=strength_why, ipo_reason=facts, cycle_id=cycle_id)
                 return 'wait'
             candidate, source = code, 'new_listing'
+            _PICK['pick'] = (code, source)
             bars[code], symbols = rows, {**symbols, code: code}
             journal_event(root, 'new_listing', symbol=code, change_pct=facts['change_pct'], turnover_pct=facts['turnover_pct'],
                           sessions=facts['sessions'], cycle_id=cycle_id)

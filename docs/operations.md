@@ -21,7 +21,7 @@
 
 | 묶음 | 서비스 | 역할 |
 | --- | --- | --- |
-| Jev 실시간 | `shared-etf-paper` | 공유 모의 실행기(`--execute`, 모의 주문). 09:00(개장)부터 매매 |
+| Jev 트레이딩 | `shared-etf-paper` | 공유 모의 실행기(`--execute`, 모의 주문). 09:00(개장)부터 매매 |
 | | `trading-day-start` | 09:00 거래일 확인 뒤 실행기·관찰기 시작 |
 | | `shared-etf-learning`, `shared-etf-regime` | 사후 관측·학습·장 마감 복기, 시황 국면 관측 |
 | | `market-movers`, `premarket`, `preflight` | 순위·관심종목, 장전 자료, 장전 사전 점검 |
@@ -54,7 +54,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.<이름>
 > - plist는 반드시 `~/Library/LaunchAgents`에 두고 등록합니다. 다른 폴더에서 등록한 서비스는 재부팅 뒤 올라오지 않습니다.
 > - `--execute`가 붙은 서비스(`shared-etf-paper`, `live-follow-1`)와 실계좌 관련 서비스는 계좌·보호 설정을 확인하고 사용자 승인을 받은 뒤 등록합니다. `longterm-live-2`에 `--execute`를 넣는 것도 별도 승인입니다.
 
-대시보드 **운영 상태** 탭에서 서비스별 실행 여부와 오류를 한국어 이름으로 봅니다.
+대시보드 **운영 → 운영 상태**에서 서비스별 실행 여부와 오류를 한국어 이름으로 봅니다.
 
 ## 실행기 재시작
 
@@ -80,7 +80,7 @@ flowchart LR
 ```
 
 - 손절가 근처 기준은 `--stop-margin`(기본 0.5%p)입니다.
-- 모든 시도는 `shared-etf-paper/restarts.jsonl`에 이유와 멈춘 시간과 함께 남아 하루 재시작 수를 셀 수 있습니다.
+- 모든 시도는 `shared-etf-paper/restarts.jsonl`에 이유·멈춘 시간과 함께 남아 하루 재시작 수를 셀 수 있습니다.
 - 주문을 내거나 취소하지 않습니다.
 
 <details>
@@ -112,17 +112,17 @@ launchctl kickstart -k gui/$(id -u)/com.vibetrading.shared-etf-dashboard   # 브
 | --- | --- | --- |
 | 공유 모의 실행기 | `~/.vibe-trading/nhplug/shared-etf-paper/STOP` 파일 | 실행기가 스스로 멈춤. 09:00 거래일 시작도 이 파일이 있으면 띄우지 않음 |
 | 장기 엔진 | `~/.vibe-trading/nhplug/vibe-longterm/STOP` 파일 | 그날 실행을 끝냄 |
-| 실주문 전체 | `~/.vibe-trading/live/HALT`(전체) 또는 `live/<브로커>/HALT` | 모든 실주문 직전 확인하는 차단 스위치 |
+| 실주문 전체 | `~/.vibe-trading/live/HALT`(전체) 또는 `live/<브로커>/HALT` | 모든 실주문 직전에 확인하는 차단 스위치 |
 | Jev·장기투자 운영 | 대시보드 **계좌·자동매매 → 운영 엔진** (둘 다·Jev만·장기투자만·끔) | Jev를 끄면 새 진입·추가 매수만 멈추고 보유 손절·익절·정리는 계속. 장기투자를 끄면 다음 확인 때 판단·주문 없이 끝남 |
 | 실계좌 실주문 | 대시보드 계좌별 실주문 스위치(기본 꺼짐, 켤 때 확인 문구) | 꺼져 있으면 미러는 계획만 기록. 자기가 낸 미체결 주문은 취소할 수 있음 |
 
-장전 사전 점검이 STOP·HALT가 켜져 있으면 알립니다. 사람이 일부러 켠 것일 수 있으므로 자동 작업은 지우지 않습니다. 스위치와 한도는 [안전 장치](safety.md)를 보세요.
+STOP·HALT가 켜져 있으면 장전 사전 점검이 알립니다. 사람이 일부러 켠 것일 수 있으므로 자동 작업은 지우지 않습니다. 스위치와 한도는 [안전장치](safety.md)를 보세요.
 
 ## 정리 요청과 수동 매매
 
 AI 판단 없이 바로 팔거나 사려면 대시보드에서 요청합니다. 실행기가 다음 회차(약 1분 안)에 보호 경로·주문 가드를 거쳐 처리합니다.
 
-- 대시보드: **주문·정리** 탭, 또는 **트레이딩 현황 → (모의계좌·실계좌) 즉시 매도** 탭의 '수동 매수·매도'(종목별 수량 매도·추가 매수·전량 매도, 전체 매도, 확인 팝오버)
+- 대시보드: **실계좌 → 주문·정리 종합** 보기(계좌별로는 계좌 화면의 '주문·정리' 탭), 또는 **트레이딩 현황 → (모의계좌·실계좌) 즉시 매도** 탭의 '수동 매수·매도'(종목별 수량 매도·추가 매수·전량 매도, 전체 매도, 확인 팝오버)
 
 | 계좌 | 매도 요청 파일 | 매수 요청 파일 |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ chmod 600 ~/.vibe-trading/nhplug/shared-etf-paper/exit-requests.json
 | 언제 | 어디서 | 무엇을 |
 | --- | --- | --- |
 | 08:20~09:00 | Discord 실시간 채널, `preflight/<날짜>.jsonl` | 장전 사전 점검 실패가 없는지([자동 작업](automation.md#장전-사전-점검)) |
-| 장중 | **운영 상태** | 실행 중 서비스 수, 오류 기록, 가장 많은 대기 사유 |
+| 장중 | **운영 → 운영 상태** | 실행 중 서비스 수, 오류 기록, 가장 많은 대기 사유 |
 | 장중 | **트레이딩 현황** | 증권사 보유와 실행기 원장이 같은지, 미확인 주문이 0인지 |
 | 장중 | `reviews/operations-audit-<날짜>.md` | 매시 장중 감사 발견과 재발 |
 | 장 마감 뒤 | **트레이딩 현황**, Discord 마감 요약 | 장 마감 정리 결과, 이월 종목과 그 이유 |
@@ -176,7 +176,7 @@ chmod 600 ~/.vibe-trading/nhplug/shared-etf-paper/exit-requests.json
 | `trading-backup` (`scripts/backup_trading_data.py`) | 평일 15:50 | `~/.vibe-trading/backups/YYYY-MM-DD/`에 원장 SQLite(온라인 백업 API)와 이벤트·설정 사본. 14일 보관 |
 | `state-sync` (`scripts/state_sync.py export`) | 평일 16:55 | 설정 정리본 `state/settings/`(git, 계좌번호·해시 제거)과 전체 아카이브 `state/backups/`(git 제외, 최근 14개) |
 
-전체 백업·복원·다른 기기로 옮기기는 [이식](portability.md)을 보세요. 대시보드 **백업·이식** 탭에서도 합니다.
+전체 백업·복원·다른 기기로 옮기기는 [이식](portability.md)을 보세요. 대시보드 **운영 → 백업·이식**에서도 합니다.
 
 ## 자주 쓰는 명령
 

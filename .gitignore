@@ -149,6 +149,33 @@ docs/
 !wiki/docs/**
 # Namuh PLUG Vibe Trading user guides live in the root docs/ (README.md links them); nested docs/ stay private
 !/docs/
+# Only the published guides (tools/ci_private_files_gate.py PUBLIC_DOCS) and docs/images/ are tracked in the root docs/;
+# plans, audits and research notes stay local (2026-11-19). Add a guide here and in PUBLIC_DOCS together.
+/docs/*
+!/docs/images/
+!/docs/README.md
+!/docs/ai-agents.md
+!/docs/integrations.md
+!/docs/architecture.md
+!/docs/automation.md
+!/docs/configuration.md
+!/docs/dashboard.md
+!/docs/faq.md
+!/docs/getting-started.md
+!/docs/journal.md
+!/docs/live-accounts.md
+!/docs/longterm-dca.md
+!/docs/longterm.md
+!/docs/notifications.md
+!/docs/nxt.md
+!/docs/operations.md
+!/docs/oversold.md
+!/docs/portability.md
+!/docs/premarket.md
+!/docs/report-pages.md
+!/docs/safety.md
+!/docs/strategy.md
+!/docs/yeo-method.md
 docs/screenshots/agent-run.png
 docs/screenshots/boot.png
 data/minutes/
@@ -249,3 +276,7 @@ state/raw/
 .claude/skills/improve-animations
 .claude/skills/animation-vocabulary
 .claude/skills/emil-design-eng
+
+# Release notes and the version file are public (scripts/release.py, release/README.md)
+!/release/
+!/VERSION

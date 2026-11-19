@@ -63,12 +63,13 @@ def candidates(root, day, events, settings):
     return rows
 
 
-def yahoo_bars(code, day, fetch=None):
-    """[(minute, open, high, low, close)] of `day` for a KRX code from Yahoo 5-minute bars (oversold_cases.yahoo_symbols)."""
+def yahoo_bars(code, day, fetch=None, kosdaq=()):
+    """[(minute, open, high, low, close)] of `day` for a KRX code from Yahoo 5-minute bars (oversold_cases.yahoo_symbols;
+    kosdaq: oversold_cases.kosdaq_codes(), so a KOSDAQ code is asked on .KQ first)."""
     from oversold_cases import yahoo_symbols
     if fetch is None:
         from oversold_research import fetch
-    for symbol in yahoo_symbols(code):
+    for symbol in yahoo_symbols(code, kosdaq):
         bars = [b for b in fetch(symbol, '5m', '5d') if b[0].date().isoformat() == day]
         if bars:
             return bars
@@ -100,10 +101,12 @@ def update(root=ROOT, day=None, research=None, fetch=None):
     day = day or datetime.now(KST).strftime('%Y-%m-%d')
     settings = {**read_settings(root)[0], 'ipo_start': setting('ipo_start')}
     rows, cache = [], {}
+    from oversold_cases import kosdaq_codes
+    kosdaq = kosdaq_codes() if fetch is None else ()  # a real run only: tests pass their own fetch
     for kind, symbol, when, blocked, value in candidates(root, day, _events(root, day), settings):
         if symbol not in cache:
             try:
-                cache[symbol] = yahoo_bars(symbol, day, fetch)
+                cache[symbol] = yahoo_bars(symbol, day, fetch, kosdaq)
             except Exception:
                 cache[symbol] = []
         if not cache[symbol]:

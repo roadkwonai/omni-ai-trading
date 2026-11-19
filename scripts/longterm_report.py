@@ -42,7 +42,7 @@ MASTER_VIEWS = {
               'principle': '성장·물가가 어느 쪽으로 갈지 모른다고 보고, 네 경제 국면에서 위험이 고르게 나뉘게 자산을 섞은 뒤 비율로 되돌린다.',
               'portfolio': '올웨더 30/40/15/7.5/7.5 (주식 30 · 장기 국채 40 · 중기 국채 15 · 금 7.5 · 원자재 7.5)',
               'source': 'Tony Robbins, Money: Master the Game (2014)의 달리오 인터뷰 · Bridgewater, The All Weather Story'},
-    'buffett': {'name': '워렌 버핏', 'modules': ['buffett_lowturn'],
+    'buffett': {'name': '워런 버핏', 'modules': ['buffett_lowturn'],
                 'principle': '좋은 기업(또는 시장 전체)을 적정한 값에 사서 거의 팔지 않는다. 남들이 두려워할 때 욕심을 내고, 시장 예측은 하지 않는다.',
                 'portfolio': '90/10 (S&P500 인덱스 90 · 단기 미국 국채 10)',
                 'source': 'Berkshire Hathaway 2013 주주서한'},
@@ -373,7 +373,7 @@ def view_problems(views, required):
     return issues
 
 
-MASTER_NAMES = {'buffett': '워렌 버핏', 'lynch': '피터 린치', 'fisher': '필립 피셔', 'tenbagger': '텐베거 후보'}
+MASTER_NAMES = {'buffett': '워런 버핏', 'lynch': '피터 린치', 'fisher': '필립 피셔', 'tenbagger': '텐베거 후보'}
 
 
 def ideas_md(ideas, cards, analysis):

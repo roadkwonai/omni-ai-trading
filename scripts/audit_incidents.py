@@ -66,6 +66,21 @@ REGISTRY = {
         'cause': '기존 DB 파일을 SQLite 밖에서 os.open·close해 프로세스 잠금이 풀리고 다른 프로세스가 사용 중인 WAL을 지움(11-19 10:36 원장 색인 손상, quick_check로는 안 보임)',
         'fix': 'agent/src/tools/private_db.private_file(11곳 교체), intraday_audit.database_health(integrity_check)',
         'guard': 'test_a_corrupted_database_fires_even_when_quick_check_would_pass'},
+    'entry.repeat_block': {
+        'title': '같은 종목이 같은 사유로 매 분 주문 단계에서 거절됨', 'since': '2026-11-19',
+        'cause': '강도 후보 선정이 1주 가능 여부를 보지 않아 009150(847,000원)을 매 분 골랐고 주문 단계가 0주로 거절, 슬롯이 그 회차를 차지해 Jev 판단이 밀림(13:44~14:46)',
+        'fix': 'nh_paper_isolated.strength_shares·strength_candidate(sized=), cool_refused_picks(거절된 강도·신규주 후보 SLOT_COOLDOWN_MIN 쉬기), intraday_audit.repeat_blocks',
+        'guard': 'test_the_same_pick_refused_minutes_in_a_row_fires'},  # also test_a_pick_the_order_path_refuses_rests_instead_of_repeating_every_minute
+    'nh.same_query_limit': {
+        'title': 'NH 같은 조회 제한(IGW42903)이 반복됨', 'since': '2026-11-19',
+        'cause': '모의 잔고가 오늘 매매 종목 0주 행까지 12행(쪽당 10행)이 되어 둘째 쪽을 바로 요청 → NH가 같은 조회를 약 1초에 1번만 받아 거절, 재시도로 회차마다 호출 3번·약 1초 지연(11:00~15:10 167건)',
+        'fix': 'nh_live_broker.PAGE_GAP·rate_limited, nh_paper_isolated.paper_pages, nh_live_position_watch.order_pages, intraday_audit.nh_limits',
+        'guard': 'test_nh_same_query_limit_hits_in_the_window_fire'},  # also test_a_second_page_waits_for_nhs_one_request_a_second
+    'nh.app_rate_limit': {
+        'title': 'NH 앱 키 초당 한도(IGW42902)를 한 프로그램이 반복해 넘김', 'since': '2026-11-19',
+        'cause': '순위 계산기가 5분마다 60종목 현재가를 쉬지 않고 조회(약 2.6회/초)해 같은 순간 실행기 분봉과 합쳐 앱 키 초당 5회를 넘김: 자기 조회 157건 실패(순위에서 그 종목이 빠짐), 실행기·실계좌 미러·대시보드 호출 110건도 그 3초 안에 거절',
+        'fix': 'market_movers.SCAN_GAP(조회 시작 간격 0.5초, 초당 2회)·RATE_LIMIT_WAIT(거절되면 1초 뒤 한 번 더), intraday_audit.nh_limits',
+        'guard': 'test_nh_app_rate_limit_hits_in_the_window_fire'},  # also test_the_scan_paces_its_quotes_and_asks_again_after_a_rate_limit
     'learning.error': {
         'title': '학습 관찰기가 실행 중인데 매 회차 실패', 'since': '2026-11-19',
         'cause': '오래 돈 프로세스가 다른 프로세스가 지운 원장 WAL 파일 핸들을 붙잡아 매 회차 sqlite3.DatabaseError(09:03~10:26, 새 프로세스는 정상)',

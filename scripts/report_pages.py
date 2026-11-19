@@ -5,7 +5,7 @@ Simple trade messages (fills, plans, NAV, the 15:40 summary) stay text in discor
 Pipeline per report: source .md (+ .json) → generate (scripts/report_templates, site under ~/.vibe-trading/report-pages/site)
 → publish (git push of the site to the Pages repo) → send (Discord, only after the page answers 200).
 Every step is recorded in nhplug/report-pages.sqlite3 (reports = current state, events = history with the failure reason)
-so the dashboard (API 연동 → 리포트 발행) can list, search, regenerate, republish and resend.
+so the dashboard (운영 → 리포트 발행) can list, search, regenerate, republish and resend.
 
 Pages settings (.env or the legacy ../.envrc; names only, values are never printed or logged):
   REPORT_PAGES_REPO    owner/name of the Pages repository (<owner>/omni-ai-trading; created public on the first push if missing)
@@ -678,7 +678,7 @@ def send(con, report_id, urls, sender=None, live=page_live, require_live=True, n
     row = con.execute('SELECT * FROM reports WHERE id=?', (report_id,)).fetchone()
     if row is None:
         return 'failed'
-    channel_url = urls.get(row['channel'])
+    dests = dn.as_targets(urls.get(row['channel']))
 
     def fail(reason):
         keep = row['send_status'] in ('sent', 'sent_text')  # a manual resend that fails leaves a delivered report delivered
@@ -688,8 +688,8 @@ def send(con, report_id, urls, sender=None, live=page_live, require_live=True, n
         return 'failed'
     if row['gen_status'] != 'ok':
         return fail('HTML 생성 실패 상태라 보낼 수 없음(다시 생성 필요)')
-    if not channel_url:
-        return fail(f"{dn.WEBHOOK_KEYS[row['channel']]} 미설정")
+    if not dests:
+        return fail(f"{CHANNELS[row['channel']]} 발송처 미설정({dn.WEBHOOK_KEYS[row['channel']]} 등)")
     if not row['url']:
         return fail('REPORT_PAGES_REPO 미설정이라 링크가 없음')
     if row['publish_status'] != 'ok':
@@ -701,11 +701,21 @@ def send(con, report_id, urls, sender=None, live=page_live, require_live=True, n
         update(con, report_id, send_status='waiting_live',
                send_error=f'Pages 주소가 {LIVE_WAIT_MIN}분 넘게 열리지 않음(링크가 열리면 보냄)' if late else None)
         return 'waiting'
-    ok, permanent = dn.send_all(channel_url, dn.split_text(message(row)), sender)
-    if not ok:
-        return fail('Discord 거절(4xx: 웹훅 주소 확인)' if permanent else 'Discord 연결 실패 또는 429 계속')
+    # each destination once: one that already took this link (an earlier partial pass) is not sent again
+    done = {d for (d,) in con.execute("SELECT detail FROM events WHERE report_id=? AND action='send' AND ok=1", (report_id,))}
+    problems = []
+    for kind, address in dests:
+        label = f"{CHANNELS[row['channel']]} · {dn.DEST_KO[kind]}"
+        if label in done or (kind == 'discord' and CHANNELS[row['channel']] in done):
+            continue
+        ok, permanent = dn.send_to(kind, address, message(row), sender if kind == 'discord' else None)
+        if ok:
+            event(con, report_id, 'send', True, label)
+        else:
+            problems.append(f"{dn.DEST_KO[kind]} " + ('거절(4xx: 주소·토큰 확인)' if permanent else '연결 실패 또는 429 계속'))
+    if problems:
+        return fail(', '.join(problems))
     update(con, report_id, send_status='sent', send_error=None, sent_at=now_iso(), send_attempts=(row['send_attempts'] or 0) + 1)
-    event(con, report_id, 'send', True, CHANNELS[row['channel']])
     return 'sent'
 
 
@@ -715,12 +725,13 @@ def test_send(urls, con, sender=None):
     out = {}
     for channel in CHANNELS:
         row = con.execute("SELECT * FROM reports WHERE channel=? AND gen_status='ok' ORDER BY key DESC LIMIT 1", (channel,)).fetchone()
-        if not urls.get(channel):
-            out[channel] = 'no webhook'
+        if not dn.as_targets(urls.get(channel)):
+            out[channel] = 'no destination'
             continue
         text = message(row, test=True) if row else f'🧪 리포트 HTML 발송 테스트 · {CHANNELS[channel]} · 아직 만든 리포트가 없습니다.'
-        ok, _ = dn.send_all(urls[channel], dn.split_text(text), sender or dn.post)
-        out[channel] = 'sent' if ok else 'failed'
+        results = dn.send_everywhere(urls[channel], text, sender)
+        ok = all(results.values())
+        out[channel] = ', '.join(f"{dn.DEST_KO[k]} {'sent' if v else 'failed'}" for k, v in results.items())
         if row:
             event(con, row['id'], 'send_test', ok, CHANNELS[channel] + (' 테스트 발송' if ok else ' 테스트 실패'))
     return out
@@ -774,7 +785,7 @@ def requeue(con, urls, now=None):
         error, tries = row['send_error'] or '', row['send_attempts'] or 0
         last = con.execute("SELECT max(time) FROM events WHERE report_id=? AND action='send'", (row['id'],)).fetchone()[0]
         quiet = not last or now - datetime.fromisoformat(last) >= timedelta(minutes=RETRY_SEND_MIN)
-        webhook_back = '미설정' in error and dn.WEBHOOK_KEYS[row['channel']] in error and urls.get(row['channel'])
+        webhook_back = '미설정' in error and dn.as_targets(urls.get(row['channel']))
         if webhook_back or ('연결 실패' in error and tries < RETRY_SEND_MAX and quiet):
             update(con, row['id'], send_status='pending', send_error=None)
             event(con, row['id'], 'requeue', True, '자동 재시도 대기열로 되돌림(' + ('웹훅 설정됨' if webhook_back else f'{tries}회 실패 뒤 {RETRY_SEND_MIN}분') + ')')

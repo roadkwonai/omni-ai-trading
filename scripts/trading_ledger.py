@@ -18,7 +18,7 @@ DATABASE = ROOT / 'trading-ledger.sqlite3'
 SYMBOLS = set(ETF_SYMBOLS.values()) | {'005930', '035420', '035720'}
 CHOICES = {'WAIT', 'HOLD', 'SELL', 'SAMSUNG', 'NAVER', 'KAKAO'} | set(ETF_SYMBOLS)
 EVENT_TYPES = {'started', 'stopped', 'decision', 'market_context', 'jev_shadow', 'jev_error', 'jev_holding_decision', 'error', 'submitted', 'sell_submitted', 'order_status', 'buy_unfilled', 'roundtrip_verified', 'order_limit', 'v2_started', 'v2_stopped', 'v2_error', 'v2_submitted', 'v2_cancel_submitted', 'v2_order_status', 'v2_holding_decision', 'v2_holding_decision_error', 'v2_entry_gate', 'v2_risk_exit', 'v2_risk_exit_error', 'v2_execution_gate', 'v2_news_error', 'manual_exit', 'split_add', 'split_take_profit', 'strategy_settings', 'vibe_exit', 'exit_plan', 'overnight_hold', 'watchlist_strength', 'new_listing', 'direction_switch', 'oversold_scan', 'oversold_signal', 'oversold_v2_gate', 'oversold_v2_signal', 'strength_shadow',
-               'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
+               'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
 
 REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_reentry_no_session', 'careful_reentry_jev_wait',
     'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
@@ -80,7 +80,7 @@ def sanitize(event):
     if event['event'] == 'v2_execution_gate' and isinstance(event.get('guard_detail'), str) and re.fullmatch(r'[A-Za-z][A-Za-z ;,.]{2,119}', event['guard_detail']):
         result['guard_detail'] = event['guard_detail']  # the local order guard's English refusal text, no numbers
     if event.get('trigger') in ('risk', 'take_profit', 'manual', 'vibe', 'model'): result['trigger'] = event['trigger']
-    if event.get('strength_reason') in ('no_strength_candidate', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit'):
+    if event.get('strength_reason') in ('no_strength_candidate', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit', 'one_share_over_buy', 'pick_cooldown'):
         result['strength_reason'] = event['strength_reason']
     if event['event'] == 'strength_shadow':  # observation only: what the strength path would pick when Jev's pick is blocked
         if event.get('blocked') in REASONS:  # the refusal that kept Jev's pick, the same codes as reason
@@ -98,7 +98,7 @@ def sanitize(event):
         if type(event.get('sessions')) is int and 0 <= event['sessions'] <= 10:
             result['sessions'] = event['sessions']
     if event.get('ipo_reason') in ('ipo_daily_limit', 'ipo_off', 'ipo_too_early', 'ipo_already_held', 'no_new_listing', 'listing_unconfirmed', 'ipo_quote_unavailable',
-                                   'ipo_bars_unavailable', 'below_base', 'below_open', 'off_high', 'trend_not_rising', 'volume_not_rising'):
+                                   'ipo_bars_unavailable', 'below_base', 'below_open', 'off_high', 'trend_not_rising', 'volume_not_rising', 'pick_cooldown'):
         result['ipo_reason'] = event['ipo_reason']
     if event.get('bar_problem') in ('quote_error', 'bar_response_invalid', 'bars_missing', 'insufficient_bars', 'stale_bars', 'other'):
         result['bar_problem'] = event['bar_problem']

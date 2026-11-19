@@ -1,4 +1,4 @@
-"""The project's skills and the scheduled jobs that run them (dashboard 'API 연동 → 스킬·자동 작업', 2026-11-17).
+"""The project's skills and the scheduled jobs that run them (dashboard '운영 → 스킬'; the schedules: 운영 → 자동 작업, scripts/schedules.py).
 
 Hand-kept like api_catalog: what each skill does, when it runs (Claude scheduled tasks, Codex automations, a request),
 what it writes and which screen shows it. `outputs` are globs under the runtime root (~/.vibe-trading) so the screen
@@ -50,7 +50,7 @@ SKILLS = [
       '생성·게시·발송 상태와 실패 사유를 기록하고 다시 생성·게시·발송합니다(scripts/report_pages.py, 틀 scripts/report_templates/).',
       ['launchd 디스코드 알림 서비스가 30초마다 새·바뀐 리포트를 자동 처리', '요청: "리포트 HTML 다시 만들어", "리포트 링크 다시 보내", "Pages 배포"'],
       [('리포트 사이트 목록', 'report-pages/site/reports/index.html'), ('리포트 HTML', 'report-pages/site/reports/*/*.html')],
-      'API 연동 → 리포트 발행', '각 작성 스킬이 쓴 리포트 .md·.json',
+      '운영 → 리포트 발행', '각 작성 스킬이 쓴 리포트 .md·.json',
       'Pages 푸시는 REPORT_PAGES_PUSH=on일 때만(사용자 승인). 원본 리포트 내용은 고치지 않음'),
     S('vibe-trading', 'vibe-trading 운영·리서치', '서비스 스킬',
       '이 저장소 전용 운영 규칙입니다. 진행 상황·결과 보고, 시황·차트·수급·뉴스 분석, 분할 매수·매도 판단 지원, 청산 요청, 백테스트·팩터 리서치 도구를 안내합니다. 아래 예약 작업들이 이 규칙을 읽고 씁니다.',

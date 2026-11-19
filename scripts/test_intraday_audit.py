@@ -440,3 +440,55 @@ def test_a_corrupted_database_fires_even_when_quick_check_would_pass(tmp_path):
     assert not {k for k in _keys(nhplug) if k.startswith('db.')}
     (nhplug / 'live-orders.sqlite3').write_bytes(b'SQLite format 3\x00' + b'\x07' * 4000)
     assert 'db.corrupt:live-orders.sqlite3' in _keys(nhplug)
+
+
+def test_the_same_pick_refused_minutes_in_a_row_fires(tmp_path):
+    """11-19 13:44~14:46: 009150 was picked and refused (single_order_limit) every minute; the user called a per-minute
+    stall fatal. Three refusals of the same symbol and reason in consecutive minutes is a finding; a gap breaks the run."""
+    nhplug = _nhplug(tmp_path)
+    events = nhplug / 'shared-etf-paper' / 'events.jsonl'
+    gate = lambda hhmm, symbol='009150': json.dumps({'time': f'{DAY}{hhmm}:12+09:00', 'event': 'v2_execution_gate',
+                                                     'permitted': False, 'reason': 'single_order_limit', 'symbol': symbol})
+    with events.open('a') as f:
+        f.write('\n'.join([gate('10:05'), gate('10:06'), gate('10:10', '000002'), gate('10:14', '000002')]) + '\n')
+    assert not {k for k in _keys(nhplug) if k.startswith('entry.repeat_block')}  # two in a row; a 4-minute gap
+    with events.open('a') as f:
+        f.write(gate('10:07') + '\n')
+    found = _keys(nhplug)
+    assert found['entry.repeat_block:009150:single_order_limit'].startswith('10:05~10:07 3분 연속')
+    assert 'entry.repeat_block:000002:single_order_limit' not in found
+
+
+def test_nh_same_query_limit_hits_in_the_window_fire(tmp_path):
+    """11-19 11:00~15:10: NH refused the runner's second balance page 167 times (IGW42903, ~40 an hour) and no audit
+    noticed; the retry hid it. Ten or more same-query refusals for one caller in the window are a finding."""
+    nhplug = _nhplug(tmp_path)
+    with sqlite3.connect(nhplug / 'api-calls.sqlite3') as db:
+        db.execute('CREATE TABLE failures (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, kind TEXT, status INTEGER, detail TEXT)')
+        hit = lambda m, caller='nh_paper_isolated', code='IGW42903': (f'{DAY}10:{m:02d}:00+09:00', 'nh', 'mcp:krstockInquiryBalance',
+                                                                       caller, 'response', None, f'tool error: rate_limit {code}')
+        db.executemany('INSERT INTO failures VALUES (?,?,?,?,?,?,?)',
+                       [hit(m) for m in range(9)] + [hit(m, 'nh_live_follow') for m in range(3)] + [hit(m, code='IGW42902') for m in range(20)])
+    assert not {k for k in _keys(nhplug) if k.startswith('nh.same_query_limit')}  # 9 same-query hits; the per-app code is another
+    with sqlite3.connect(nhplug / 'api-calls.sqlite3') as db:
+        db.execute('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', hit(9))
+    found = _keys(nhplug)
+    assert found['nh.same_query_limit:nh_paper_isolated'].startswith('IGW42903 10건')
+    assert 'nh.same_query_limit:nh_live_follow' not in found
+
+
+def test_nh_app_rate_limit_hits_in_the_window_fire(tmp_path):
+    """11-19: the movers scan's 60-stock burst every five minutes ran past NH's 5 calls a second per app key: 157 of its
+    own quotes (~26 an hour) and 110 runner, mirror and dashboard calls within 3 s of it were refused (IGW42902)."""
+    nhplug = _nhplug(tmp_path)
+    with sqlite3.connect(nhplug / 'api-calls.sqlite3') as db:
+        db.execute('CREATE TABLE failures (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, kind TEXT, status INTEGER, detail TEXT)')
+        hit = lambda m, caller='market_movers': (f'{DAY}10:{m:02d}:00+09:00', 'nh', 'mcp:get_stock_price', caller, 'response', None,
+                                                 'tool error: rate_limit IGW42902')
+        db.executemany('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', [hit(m) for m in range(19)] + [hit(m, 'dashboard') for m in range(3)])
+    assert not {k for k in _keys(nhplug) if k.startswith('nh.app_rate_limit')}  # 19 in the window: under the line
+    with sqlite3.connect(nhplug / 'api-calls.sqlite3') as db:
+        db.execute('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', hit(19))
+    found = _keys(nhplug)
+    assert found['nh.app_rate_limit:market_movers'].startswith('IGW42902 20건')
+    assert 'nh.app_rate_limit:dashboard' not in found and not {k for k in found if k.startswith('nh.same_query_limit')}

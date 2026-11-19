@@ -68,12 +68,12 @@ def save_state(root, key, state):
     write_json(path, state)
 
 
-def to_orders(planned, held, quotes):
+def to_orders(planned, held, quotes, res=None):
     """Signed KRW per asset (an engine ETF key or a 관심목록 code) → whole-share orders at the bid (sell) or ask (buy, the
-    fee on top), sells first."""
+    fee on top), sells first. res: the account's reservoir ETF (L.reservoir_code)."""
     orders = []
     for k, krw in sorted(planned.items(), key=lambda item: item[1]):
-        code, (bid, ask) = L.code_of(k), quotes[k]
+        code, (bid, ask) = L.code_of(k, res), quotes[k]
         side, price = ('SELL', bid) if krw < 0 else ('BUY', ask)
         qty = min(int(abs(krw) // price), held.get(code, 0)) if side == 'SELL' else int(krw // (price * (1 + L.FEE)))
         if qty > 0:
@@ -132,9 +132,10 @@ def guard_capital(capital, summary, rows):
     return capital - max(0, cost - sum(r['rsdl_qty'] * r['now_pr'] for r in held))
 
 
-def values_of(held, quotes):
-    """KRW per held key: the engine's ETFs, and any other quoted key held (a 여운봉 매매법 ETF)."""
-    out = {k: held.get(a[0], 0) * quotes[k][0] for k, a in L.ASSETS.items()}
+def values_of(held, quotes, res=None):
+    """KRW per held key: the engine's ETFs ('RES': the account's reservoir ETF res), and any other quoted key held (a 여운봉
+    매매법 ETF)."""
+    out = {k: held.get(L.code_of(k, res), 0) * quotes[k][0] for k in L.ASSETS}
     return out | {L.key_of(c): q * quotes[L.key_of(c)][0] for c, q in held.items() if L.key_of(c) in yeo_method.EXTRA and L.key_of(c) in quotes}
 
 
@@ -144,7 +145,7 @@ def dca_want(day_state, plan, yeo=None):
     return L.dca_targets(L.today_want(plan, (day_state.get('info') or {}).get('want')), yeo)
 
 
-def dca_orders(cfg, day_state, now, plan, held, quotes, cash, capital, yeo=None, stories=None):
+def dca_orders(cfg, day_state, now, plan, held, quotes, cash, capital, yeo=None, stories=None, res=None):
     """적립식 for a live account merged into the day's unsent orders: (the new unsent orders, new 적립식 state, notes,
     why nothing of it goes out or None). No deposit is simulated: it spends the account's free cash within its capital,
     less today's unsent buys (not in the broker cash yet), on the engine's target of the day (the chosen 관심목록 codes
@@ -154,7 +155,7 @@ def dca_orders(cfg, day_state, now, plan, held, quotes, cash, capital, yeo=None,
     against the engine's unsent sell) is not recorded: the 적립식 state stays as it was."""
     before = day_state.get('dca') or {}
     unsent = [o for o in day_state.get('orders') or [] if o['status'] in UNSENT]
-    values = values_of(held, quotes)
+    values = values_of(held, quotes, res)
     claimed = sum(o['qty'] * o['price'] for o in unsent if o['side'] == 'BUY')
     room = max(0, min(cash, capital - sum(values.values())) - claimed)
     want = dca_want(day_state, plan, yeo)
@@ -166,7 +167,7 @@ def dca_orders(cfg, day_state, now, plan, held, quotes, cash, capital, yeo=None,
     for k, krw, source in [(o['key'], o['krw'], o['source']) for o in unsent] + [(k, v, 'dca') for k, v in planned.items()]:
         net[k] = net.get(k, 0) + krw
         sources.setdefault(k, set()).update(source.split('+'))
-    orders = to_orders(net, held, quotes)
+    orders = to_orders(net, held, quotes, res)
     for o in orders:
         o['source'] = '+'.join(s for s in COMMITS if s in sources[o['key']])
     if any('dca' in o['source'] for o in orders):
@@ -180,13 +181,13 @@ def dca_orders(cfg, day_state, now, plan, held, quotes, cash, capital, yeo=None,
     return orders, new_state, notes, why if short else None
 
 
-def day_orders(plan, stories, book, held, quotes, cash, capital, day, modules=None, yeo=None):
+def day_orders(plan, stories, book, held, quotes, cash, capital, day, modules=None, yeo=None, res=None):
     """(orders, info, new book state) for one live account: the engine's plan_orders() on this account's money, with the
     account's own master modules (modules, 계좌별 전략 2026-11-18; None = the engine's of the day), or the 여운봉 저수지 매매법
     (yeo: its setting; its own ETFs must be in quotes).
     held {code: qty}; quotes {asset key: (bid, ask)}; the account's long-term NAV is its holdings plus the cash it may
     still use under its capital. Orders are whole shares at the bid (sell) or ask (buy), sells first."""
-    values = values_of(held, quotes)
+    values = values_of(held, quotes, res)
     if yeo is not None:  # its ETFs not held yet still count (zero) so the method sees every key it trades
         values |= {k: 0.0 for k in yeo_method.keys(yeo) if k in quotes and k not in values}
     invested = sum(values.values())
@@ -199,7 +200,7 @@ def day_orders(plan, stories, book, held, quotes, cash, capital, day, modules=No
         want, target, why, notes, planned, new_book = L.yeo_orders(plan, yeo, book, values, nav, free, day)
     else:
         want, target, why, notes, planned, new_book = L.plan_orders(plan, modules, book, stories, values, nav, free, day)
-    orders = to_orders(planned, held, quotes)
+    orders = to_orders(planned, held, quotes, res)
     info = {'nav': round(nav), 'invested': round(invested), 'weights': {k: round(v / nav, 4) for k, v in values.items()},
             'want': want, 'target': target, 'why': L.why_label(why), 'notes': [text for _, text in notes], 'modules': modules}
     return orders, info, new_book
@@ -275,6 +276,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
     # engine's to trade; the guard's capital check counts every holding as well
     outside = sum(r['rsdl_qty'] * next((v for v in (r.get('now_pr'), r.get('phs_pr')) if type(v) in (int, float) and v > 0), 0)
                   for r in rows if r.get('iem_cd') in held and r['iem_cd'] not in L.CODE_KEY and r['iem_cd'] not in {L.code_of(k) for k in yeo_keys})
+    res = L.reservoir_code(L.load_settings(engine_root), key, record['budget']['capital_krw'], held)  # 저수지 ETF (11-19)
     if fresh or dca_due:
         quotes = {}
         def ask_again(code):
@@ -286,8 +288,8 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
                 quote = bid_ask(reader, code)
             return quote
         for k in [*L.ASSETS, *yeo_keys]:
-            if (quote := ask_again(L.code_of(k))) is None:
-                return {'action': 'WAIT', 'reason': f'quote unavailable {L.code_of(k)}', **info}
+            if (quote := ask_again(L.code_of(k, res))) is None:
+                return {'action': 'WAIT', 'reason': f'quote unavailable {L.code_of(k, res)}', **info}
             quotes[k] = quote
         for code in longterm_dca.sleeve(cfg) if dca_due else ():  # a chosen code without a quote is not bought today
             if code not in quotes and (quote := bid_ask(reader, code)) is not None:
@@ -303,8 +305,9 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
         waiting = longterm_dca.reserved(dca)  # the 적립식's money: waiting for a drawdown step, carried parts under one share
         settings = L.load_settings(engine_root)  # 계좌별 전략: this account's master modules; regime, stories and indicators are the engine's
         orders, plan_info, new_book = day_orders(plan, stories, book, held, quotes, cash - waiting,
-                                                 capital - outside - waiting, day, L.book_modules(settings, key, plan), yeo)
+                                                 capital - outside - waiting, day, L.book_modules(settings, key, plan), yeo, res)
         plan_info['strategy'] = '이 계좌 전략: ' + L.book_strategy_label(settings, key)
+        plan_info['reservoir'] = res
         if not execute_orders:
             for order in orders:
                 order['status'] = 'dry_run'
@@ -321,7 +324,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
         return {'action': 'WAIT', 'reason': 'dca: automatic time waits for a price at or under yesterday close', **info}
     if dca_due:  # 적립식, once a day at its time: what is short of money or under one share waits for the next trading day
         merged, new_dca, notes, skipped = dca_orders(cfg, state, now, plan, held, quotes, cash, capital - outside, yeo,
-                                                     (L.read_state(engine_root, ('story',)).get('story') or {}).get('stories'))
+                                                     (L.read_state(engine_root, ('story',)).get('story') or {}).get('stories'), res)
         for order in merged:
             order['status'] = 'planned' if state['execute'] else 'dry_run'
         state['orders'] = [o for o in state['orders'] if o['status'] not in UNSENT] + merged

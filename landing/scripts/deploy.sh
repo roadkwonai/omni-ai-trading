@@ -13,4 +13,5 @@ rsync -a --delete --exclude reports/ --exclude assets/ --exclude .git/ --exclude
 rm -f "$SITE/reports.json"  # the archive data moved to reports/reports.json (2026-11-19)
 printf 'User-agent: *\nDisallow: /reports/\n\nSitemap: https://roadkwonai.github.io/omni-ai-trading/sitemap.xml\n' > "$SITE/robots.txt"
 printf '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://roadkwonai.github.io/omni-ai-trading/</loc></url></urlset>\n' > "$SITE/sitemap.xml"
-cd "$REPO" && PYTHONPATH=agent:scripts .venv/bin/python scripts/report_pages.py --publish
+# report_pages.py --publish pushes only when a report is waiting, so the landing pushes the site itself.
+cd "$REPO" && PYTHONPATH=agent:scripts .venv/bin/python scripts/release.py --push-site

@@ -116,3 +116,32 @@ class KiwoomPreselectTests(unittest.TestCase):
                 quoted, source = mm.targets(universe, logs.append)
         self.assertEqual((source, list(quoted)), ('kiwoom_preselect', picked))
         self.assertEqual(len(logs), 2)
+
+
+def test_the_scan_paces_its_quotes_and_asks_again_after_a_rate_limit():
+    """11-19: 219 of 9,037 quotes failed (IGW42902, NH's 5 calls a second per app key): the 60-stock burst every five
+    minutes also refused 110 of the 144 runner, mirror and dashboard calls refused that day within 3 s of it, and a refused
+    stock silently left the rankings."""
+    clock = [0.0]
+    starts = []
+
+    class Limited(Reader):
+        refused = set()
+
+        def call_tool(self, tool, params):
+            starts.append(clock[0])
+            clock[0] += 0.1  # a call's own time
+            code = params['stock_code']
+            if code == '000002' and code not in self.refused:
+                self.refused.add(code)
+                return {'status': 'error', 'error': 'tool error: rate_limit IGW42902'}
+            return super().call_tool(tool, params)
+
+    def sleep(seconds):
+        clock[0] += seconds
+    quotes = {c: quote(c, 110, 100, 10, 500) for c in ('000001', '000002', '000003')}
+    rows = m.scan(Limited(quotes), {c: {'name': c, 'index': 'KOSPI200'} for c in quotes}, gap=m.SCAN_GAP,
+                  clock=lambda: clock[0], sleep=sleep)
+    assert [r['code'] for r in rows] == ['000001', '000002', '000003']  # the refused stock is asked again, not dropped
+    assert all(b - a >= m.SCAN_GAP - 1e-9 for a, b in zip(starts, starts[1:]))  # never faster than SCAN_GAP
+    assert len(starts) == 4 and m.SCAN_GAP >= 0.5  # 2 a second at most: the rest of NH's 5 is the runners'

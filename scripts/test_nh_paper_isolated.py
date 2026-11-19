@@ -30,6 +30,8 @@ def _full_size_buys(monkeypatch):
     import position_sizing
     monkeypatch.setattr(position_sizing, 'buy_factor', lambda *a, **k: (1.0, {}))
     monkeypatch.setattr(position_sizing, 'regime_trim', lambda *a, **k: 0)
+    p._COOLING.clear()  # a refused pick's rest is process state (user 2026-11-19)
+    p._PICK.clear()
 
 class Fake:
     def __init__(self, name, config):
@@ -1805,6 +1807,7 @@ class MultiSymbolTests(unittest.TestCase):
             self.assertIsNone(slot({'000001': 1, '000002': 1}))            # strength_slot_max (2) held
             with patch.object(p, 'entries_today', return_value=3):
                 self.assertIsNone(slot({}))                                 # strength_slot_daily (3) used
+            self.assertIsNotNone(p.strength_candidate.call_args.kwargs.get('sized'))  # sized as the order path sizes it
 
     def test_new_listing_time_stop(self):
         plan = {'profile': 'ipo', 'opened': NOW.isoformat()}
@@ -1847,6 +1850,101 @@ class MultiSymbolTests(unittest.TestCase):
         self.assertEqual(p.strength_candidate(self.root, movers, {'000001': rows(101, 120)}, NOW), (None, 'strength_change_out_of_range'))
         self.assertEqual(p.strength_candidate(self.root, movers, {'000001': rows(105, 106)}, NOW), (None, 'trend_not_rising'))
         self.assertEqual(p.strength_candidate(self.root, movers, {'000001': rows(105, 103)}, NOW)[0], '000001')
+
+    def test_a_pick_the_order_path_refuses_rests_instead_of_repeating_every_minute(self):
+        # user 2026-11-19: a slot pick refused every minute (009150, 13:44~14:46) is fatal — it holds Jev's turn
+        import json
+        events = []
+        record = lambda root, name, **fields: events.append((name, fields))
+        def cycle_refusing(db, read, broker, account, root, *a, **k):
+            p._PICK['pick'] = ('009150', 'watchlist_strength')
+            return 'wait'
+        def cycle_raising(db, read, broker, account, root, *a, **k):
+            p._PICK['pick'] = ('0153R0', 'new_listing')
+            raise ValueError('quote unavailable')
+        def cycle_buying(db, read, broker, account, root, *a, **k):
+            p._PICK['pick'] = ('000002', 'watchlist_strength')
+            return 'buy'
+        with patch.object(p, 'journal_event', side_effect=record):
+            p.cool_refused_picks(cycle_refusing)(None, None, None, None, self.root)
+            with self.assertRaises(ValueError):
+                p.cool_refused_picks(cycle_raising)(None, None, None, None, self.root)
+            p.cool_refused_picks(cycle_buying)(None, None, None, None, self.root)
+        now = datetime.now(p.KST)
+        self.assertTrue(p.cooling('009150', now) and p.cooling('0153R0', now))
+        self.assertFalse(p.cooling('000002', now))                                  # sent: nothing to rest
+        # review 11-19: one transient refusal (a stale signal, a failed quote) costs the pick only a short rest; a pick
+        # refused again after each rest rests longer and longer (3, 6, 12 ... up to 30 minutes)
+        self.assertFalse(p.cooling('009150', now + timedelta(minutes=3, seconds=5)))
+        with patch.object(p, 'journal_event', side_effect=record):
+            p.cool_refused_picks(cycle_refusing)(None, None, None, None, self.root)
+        later = datetime.now(p.KST)
+        self.assertTrue(p.cooling('009150', later + timedelta(minutes=5)))
+        self.assertFalse(p.cooling('009150', later + timedelta(minutes=6, seconds=5)))
+        for _ in range(5):
+            with patch.object(p, 'journal_event', side_effect=record):
+                p.cool_refused_picks(cycle_refusing)(None, None, None, None, self.root)
+        self.assertFalse(p.cooling('009150', datetime.now(p.KST) + timedelta(minutes=30, seconds=5)))  # capped at 30
+        with patch.object(p, 'journal_event', side_effect=record):
+            p.cool_refused_picks(lambda *a, **k: p._PICK.update(pick=('009150', 'watchlist_strength')) or 'buy')(
+                None, None, None, None, self.root)
+        self.assertFalse(p.cooling('009150', datetime.now(p.KST)))                  # a buy clears its record
+        self.assertEqual([(n, f['symbol'], f['source'], f['minutes']) for n, f in events[:3]],
+                         [('pick_cooldown', '009150', 'watchlist_strength', 3), ('pick_cooldown', '0153R0', 'new_listing', 3),
+                          ('pick_cooldown', '009150', 'watchlist_strength', 6)])
+        with patch.object(p, 'journal_event', side_effect=record):
+            p.cool_refused_picks(cycle_refusing)(None, None, None, None, self.root)
+        now = datetime.now(p.KST)
+        # while it rests the strength path looks past it, so the slot does not take the cycle with it again
+        (self.root / 'watchlist.json').write_text(json.dumps({'time': now.isoformat(), 'probabilities': {'009150': 0.6, '000002': 0.3}}))
+        rows = [{'stck_prpr': '105'}] + [{'stck_prpr': '103'}] * 5
+        movers = {'009150': {'price': 100, 'change_pct': 0.0}, '000002': {'price': 100, 'change_pct': 0.0}}
+        bars = {'009150': rows, '000002': rows}
+        self.assertEqual(p.strength_candidate(self.root, movers, bars, now)[0], '000002')
+        self.assertEqual(p.strength_candidate(self.root, {'009150': movers['009150']}, bars, now), (None, 'pick_cooldown'))
+        import new_listings  # the new-listing search looks past a resting code the same way, before any quote read
+        listing = {'code': '0153R0', 'name': '신규', 'listed': now.strftime('%Y%m%d')}
+        class NoRead:
+            def call_tool(self, *a): raise AssertionError('a resting code is not quoted')
+        with patch.object(new_listings, 'recent', return_value=[listing]), patch.object(p, 'IPO_START', '00:00'), \
+             patch.object(p, 'IPO_DAYS', 2), patch.object(p, 'exit_plans', return_value={}):
+            self.assertEqual(p.ipo_candidate(NoRead(), self.root, {}, now), (None, 'pick_cooldown', None))
+        p._COOLING.clear()
+        self.assertEqual(p.strength_candidate(self.root, movers, bars, now)[0], '009150')
+
+    def test_strength_candidate_skips_a_stock_one_buy_cannot_afford(self):
+        # 11-19 13:44~13:52: 009150 at 847,000원 under a 1,000,000원 tranche × 0.5 (하락장) came out 0 shares every minute,
+        # and as the slot's pick it held Jev's turn; the next strong stock should get the slot instead
+        import json
+        (self.root / 'watchlist.json').write_text(json.dumps({'time': NOW.isoformat(), 'probabilities': {'009150': 0.6, '000002': 0.3}}))
+        rows = lambda price: [{'stck_prpr': str(price)}] + [{'stck_prpr': str(price * 0.98)}] * 5
+        movers = {'009150': {'price': 847000, 'change_pct': 5.0}, '000002': {'price': 10500, 'change_pct': 5.0}}
+        bars = {'009150': rows(847000), '000002': rows(10500)}
+        import position_sizing  # the file's autouse fixture pins buy_factor at 1.0; this test needs a 하락장's 0.5
+        with patch.object(position_sizing, 'buy_factor', return_value=(0.5, {'holding': 1.0, 'market': 0.5})), \
+             patch.object(p, 'stop_symbol_index', return_value='코스피'), \
+             patch.object(p, 'SPLIT_TRANCHE_KRW', 1_000_000), patch.object(p, 'SHARED_SINGLE_ORDER_KRW', 10_000_000):
+            self.assertEqual(p.strength_shares(self.root, '009150', 847000), 0)
+            self.assertEqual(p.strength_shares(self.root, '000002', 10500), 47)   # 1,000,000 // 10,500 = 95, × 0.5
+            sized = lambda code, price: p.strength_shares(self.root, code, price)
+            self.assertEqual(p.strength_candidate(self.root, movers, bars, NOW, sized=sized)[0], '000002')
+            self.assertEqual(p.strength_candidate(self.root, {'009150': movers['009150']}, bars, NOW, sized=sized),
+                             (None, 'one_share_over_buy'))
+            self.assertEqual(p.strength_candidate(self.root, movers, bars, NOW)[0], '009150')  # unsized callers unchanged
+        with patch.object(position_sizing, 'buy_factor', return_value=(1.0, {'holding': 1.0, 'market': 1.0})), \
+             patch.object(p, 'stop_symbol_index', return_value='코스피'), patch.object(p, 'SPLIT_TRANCHE_KRW', 1_000_000), \
+             patch.object(p, 'SHARED_SINGLE_ORDER_KRW', 10_000_000):
+            self.assertEqual(p.strength_shares(self.root, '009150', 847000), 1)  # a rising market buys the full tranche
+            # a careful re-entry (traded today, regime not 상승장) buys half again in the order path: 1 share → 0 (review 11-19)
+            with patch.object(p, 'market_view', return_value={'코스피': {'regime': '횡보장'}}), \
+                 patch.object(p, 'symbol_index', return_value='코스피'), patch.dict(p.CAREFUL, {'on': True, 'size': 50.0}):
+                self.assertEqual(p.strength_shares(self.root, '009150', 847000, closed_today={'009150': 840000}), 0)
+                self.assertEqual(p.strength_shares(self.root, '009150', 847000, owned={'009150': 1},
+                                                   closed_today={'009150': 840000}), 1)  # held: an add, not a re-entry
+                self.assertEqual(p.strength_shares(self.root, '000002', 10500, closed_today={'000002': 10000}), 47)
+            with patch.object(p, 'market_view', return_value={'코스피': {'regime': '상승장'}}), \
+                 patch.object(p, 'symbol_index', return_value='코스피'), patch.dict(p.CAREFUL, {'on': True, 'size': 50.0}):
+                self.assertEqual(p.strength_shares(self.root, '009150', 847000, closed_today={'009150': 840000}), 1)
 
     def test_stale_scanner_series_is_dropped_not_blocking_etf_entries(self):
         movers = {'005930': {'name': '삼성전자', 'reasons': ['급상승']}}
@@ -2914,8 +3012,35 @@ class PaperPagesContinuationTests(unittest.TestCase):
         class Adapter:
             def call_tool(self, name, params):
                 return next(pages)
-        data = p.paper_pages(Adapter(), 'krstockInquiryDailyOrderExecution', {}, 'Output_0')
+        data = p.paper_pages(Adapter(), 'krstockInquiryDailyOrderExecution', {}, 'Output_0', sleep=lambda _: None)
         self.assertEqual(data['Output_0'], [{'n': 1}, {'n': 2}])
+
+    def test_a_second_page_waits_for_nhs_one_request_a_second(self):
+        # 11-19 from 11:00: the balance grew past 10 rows (today's traded stocks stay listed at 0 shares), so it took a
+        # second page; asked at once, NH refused it (IGW42903, measured: ~1 request a second per query), and the retry
+        # after 1 s made every cycle 3 calls and ~1 s late. The second page now waits; two pages cost two calls.
+        clock = {'t': 0.0}
+        class NH:
+            def __init__(self):
+                self.starts = []
+            def call_tool(self, name, params):
+                now = clock['t']
+                refused = bool(self.starts) and now - self.starts[-1] < 1.0
+                self.starts.append(now)
+                clock['t'] += 0.27  # one response
+                if refused:
+                    return {'status': 'error', 'error': {'category': 'rate_limit', 'code': 'IGW42903'}}
+                if 'cts' not in params:
+                    return {'status': 'ok', 'data': {'rsp_cd': 'XA109', 'rsp_msg': '모의투자 조회가 계속 됩니다. 다음 버튼을 누르세요',
+                                                     'Output_1': [{'n': 1}], '_nh_pagination': {'complete': False, 'cts': 'c1', 'cts_flag': 'Y'}}}
+                return {'status': 'ok', 'data': {'rsp_cd': '00000', 'rsp_msg': '모의투자 마지막 자료입니다',
+                                                 'Output_1': [{'n': 2}], '_nh_pagination': {'complete': True}}}
+        nh = NH()
+        sleep = lambda seconds: clock.__setitem__('t', clock['t'] + seconds)
+        data = p.paper_pages(nh, 'krstockInquiryBalance', {}, 'Output_1', clock=lambda: clock['t'], sleep=sleep)
+        self.assertEqual(data['Output_1'], [{'n': 1}, {'n': 2}])
+        self.assertEqual(len(nh.starts), 2)                       # no refused call, no retry
+        self.assertGreaterEqual(nh.starts[1] - nh.starts[0], 1.0)
 
     def test_continuation_code_on_a_complete_page_is_contradictory(self):
         class Adapter:

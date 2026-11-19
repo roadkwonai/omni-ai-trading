@@ -245,12 +245,14 @@ def update_outcomes(day=None, root=ROOT, db=None, fetch=None):
     day = day or datetime.now(KST).strftime('%Y-%m-%d')
     path = Path(db or Path(root) / 'market-research.sqlite3')
     settled, cache = 0, {}
+    from oversold_cases import kosdaq_codes
+    kosdaq = kosdaq_codes() if fetch is None else ()  # a real run only: tests pass their own fetch
     with _db(path) as conn:
         rows = conn.execute('SELECT key, code, first_seen FROM shadow_candidates WHERE day = ?', (day,)).fetchall()
         for key, code, first_seen in rows:
             if code not in cache:
                 try:
-                    cache[code] = yahoo_bars(code, day, fetch)
+                    cache[code] = yahoo_bars(code, day, fetch, kosdaq)
                 except Exception:
                     cache[code] = []
             out = settle(first_seen, cache[code])

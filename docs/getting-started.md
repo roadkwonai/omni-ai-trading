@@ -28,8 +28,12 @@ flowchart LR
 
 ## 1. 준비물
 
+> [!IMPORTANT]
+> 이 서비스는 AI 도구와 함께 쓰는 AI 트레이딩 시스템이라 **AI 도구 유료 이용이 필요합니다.** Jev·OpenAI API도 각 서비스의 이용 조건과 요금을 따릅니다. 투자 판단과 손익 책임은 투자자 본인에게 있습니다([README · 투자 유의사항 및 면책 고지](../README.md#투자-유의사항-및-면책-고지)).
+
 | 항목 | 용도 | 필수 |
 | --- | --- | --- |
+| Claude Code 또는 Codex (유료 요금제) | 설치·운영·리포트 작성을 맡는 AI 코딩 에이전트. Claude Pro·Max 또는 ChatGPT Plus·Pro 같은 구독, 또는 API 사용료 필요 | 예 |
 | Python 3.11 이상 | 실행기·대시보드(`pyproject.toml` `requires-python >=3.11`) | 예 |
 | Node.js 22 이상 | NH 공식 MCP 서버, Archify 도식 | 예 |
 | NH투자증권 나무 PLUG 앱 키 | 시세·잔고·주문. 국내주식 모의계좌(계좌 유형 03) 필요 | 예 |
@@ -37,7 +41,7 @@ flowchart LR
 | OpenAI API 키 | Decisions 빠른 판단, 실계좌 AI 관찰 | 권장 |
 | 키움 REST·토스증권 Open API | 순위 후보 선별, 시황·신규상장 대체 출처(조회 전용) | 선택 |
 | KRX·OpenDART·FRED 키 | 일별 시세, 공시, 장기 엔진 거시 배경 | 선택 |
-| Discord 웹훅 | 체결·리포트 알림 | 선택 |
+| Discord·Telegram·Slack | 체결·리포트 알림(하나 이상, [연동 서비스](integrations.md#알림-채널-두-개)) | 선택 |
 | LLM 설정(`~/.vibe-trading/.env`) | 장기 엔진의 테마 스토리 점검(원본 vibe-trading 에이전트) | 장기 엔진에 필요 |
 
 ## 2. 설치
@@ -71,7 +75,7 @@ chmod 600 .env
 > [!IMPORTANT]
 > `.env`는 `.gitignore`에 들어 있습니다. 값이나 계좌번호를 화면·로그·이슈에 붙여 넣지 마세요. 스크립트는 `scripts/local_env.py`로 이 파일을 **파싱만** 하고 `os.environ`으로 내보내지 않으므로, 증권사 키가 LLM 에이전트 프로세스에 들어가지 않습니다. 에이전트(LLM 공급자·모델) 설정은 `agent/.env.example`을 참고해 `~/.vibe-trading/.env`에 따로 둡니다.
 
-찾는 순서는 환경변수 `VIBE_TRADING_ENV_FILE` → 저장소 `.env` → 상위 폴더 `.envrc`(예전 방식)입니다. 자세한 설명은 [설정 레퍼런스](configuration.md#1-env-키).
+찾는 순서는 환경변수 `VIBE_TRADING_ENV_FILE` → 저장소 `.env` → 상위 폴더 `.envrc`(예전 방식)입니다. 자세한 설명은 [설정 레퍼런스](configuration.md#1-env-키)에 있습니다.
 
 ## 4. NH 공식 MCP 연결
 
@@ -154,9 +158,9 @@ http://127.0.0.1:8501 에서 다음을 봅니다.
 
 1. **계좌·자동매매 → 운영 엔진**: 처음에는 'Jev만' 또는 '모두 끔'으로 두고 시작합니다.
 2. **계좌·자동매매 → 모의계좌 (공유)**: 분할 1회 매수 금액, 종목당 최대, 주문 보호 한도(회당·하루·보유·새 종목·하루 손실).
-3. **운영 상태**: 서비스 등록 상태와 운영 조정값.
+3. **운영 → 운영 상태**: 서비스 등록 상태와 운영 조정값.
 
-인증이 없는 개인용 화면이므로 `127.0.0.1` 밖으로 열지 마세요. 화면 읽는 법은 [대시보드 가이드](dashboard.md).
+인증이 없는 개인용 화면이므로 `127.0.0.1` 밖으로 열지 마세요. 화면 읽는 법은 [대시보드 가이드](dashboard.md)에 있습니다.
 
 ## 6. 서비스 정의 만들기
 
@@ -184,7 +188,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
 | 별도 승인 | `live-follow-1`, `longterm-live-2` | 평일 08:58 / 평일 09:35 | 실계좌 미러, 장기투자 실계좌 |
 
 > [!WARNING]
-> `shared-etf-paper`는 `--execute`로 **모의 주문**을 냅니다. 계좌 한도와 [안전 장치](safety.md)를 먼저 확인하세요. 실계좌 서비스(`live-follow-*`, `longterm-live-*`), 그 `--execute`, 계좌별 실주문 스위치는 사용자 승인 뒤에만 켭니다. 스위치가 꺼져 있으면 실계좌 실행기는 계획만 기록합니다.
+> `shared-etf-paper`는 `--execute`로 **모의 주문**을 냅니다. 계좌 한도와 [안전장치](safety.md)를 먼저 확인하세요. 실계좌 서비스(`live-follow-*`, `longterm-live-*`), 그 `--execute`, 계좌별 실주문 스위치는 사용자 승인 뒤에만 켭니다. 스위치가 꺼져 있으면 실계좌 실행기는 계획만 기록합니다.
 
 서비스 일정 전체와 재시작 절차는 [운영 가이드](operations.md), Claude 예약 작업은 [자동 작업](automation.md)에 있습니다.
 
@@ -206,10 +210,10 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
    ```
 
 2. 평일 09:00에 `trading-day-start`가 휴장·STOP·중복 실행을 확인하고 실행기를 띄웁니다. 30초 뒤 살아 있지 않으면 최대 5번 다시 띄웁니다.
-3. 대시보드 **운영 상태**에 모의 실행기 `실행 중`이 뜨고, **트레이딩 현황**에 Jev 의견과 대기 사유가 쌓이는지 봅니다. 기록은 `~/.vibe-trading/nhplug/shared-etf-paper/events.jsonl`에 남습니다.
+3. 대시보드 **운영 → 운영 상태**에 모의 실행기 `실행 중`이 뜨고, **트레이딩 현황**에 Jev 의견과 대기 사유가 쌓이는지 봅니다. 기록은 `~/.vibe-trading/nhplug/shared-etf-paper/events.jsonl`에 남습니다.
 4. 주문은 개장(09:00)부터 나갑니다. 진입 판단은 완료 분봉 6개가 필요해 09:08 무렵부터입니다.
 
-처음 며칠은 매수가 없어도 정상일 수 있습니다. 진입 조건이 모두 맞아야 사기 때문입니다. 대기 사유는 **운영 상태 → 모의 실행기 하루 요약**과 [FAQ](faq.md#실행기가-매수를-안-합니다)에서 확인합니다.
+처음 며칠은 매수가 없어도 정상일 수 있습니다. 진입 조건이 모두 맞아야 사기 때문입니다. 대기 사유는 **운영 → 운영 상태 → 모의 실행기 하루 요약**과 [FAQ](faq.md#실행기가-매수를-안-합니다)에서 확인합니다.
 
 ## 8. 장기 엔진 dry-run
 
@@ -235,25 +239,22 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/vibe_longterm.py --run
 PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python -m pytest -q scripts streamlit_namuh agent/tests/test_nhplug_*.py
 ```
 
-테스트는 실제 `tunables.json`과 설정 이력 DB 대신 임시 경로를 씁니다(`scripts/conftest.py`). NH 공식 MCP 설치본이 없는 환경에서는 그 설치본이 필요한 패치 테스트가 건너뛰어집니다.
+테스트는 실제 `tunables.json`과 설정 이력 DB 대신 임시 경로를 씁니다(`scripts/conftest.py`). NH 공식 MCP 설치본이 없는 환경에서는 그 설치본이 필요한 패치 테스트는 건너뜁니다.
 
 ## 10. AI에게 설치를 맡길 때
 
-Claude Code나 Codex 같은 코딩 에이전트에게 이 저장소를 열어 두고 아래처럼 맡길 수 있습니다. 키 입력·실주문 관련 단계는 사람이 합니다.
+Claude Code나 Codex에게 이 저장소를 열어 두고 설치를 맡길 수 있습니다. 키 입력과 실주문 관련 단계는 사람이 합니다. 설치 프롬프트, 지침 파일 템플릿, 스킬·MCP·권한·예약 작업 등록, 매일 쓰는 프롬프트 예시는 [AI와 함께 쓰기](ai-agents.md)에 모았습니다.
 
 ```text
 이 저장소는 Omni AI Trading(NH 나무 PLUG 모의·실계좌 자동매매)이다.
-먼저 AGENTS.md와 docs/getting-started.md를 읽고 그 순서대로 설치를 도와줘.
-- 답변은 한국어, 시각은 Asia/Seoul로 쓴다.
-- .env 값과 계좌번호는 출력하지 말고, 키는 내가 직접 넣게 안내만 해.
-- NH 공식 MCP 설치와 scripts/nhplug-*.patch 적용, agent.json 등록, vibe_market_brief.py 연결 확인까지 해 줘.
-- launchd 서비스는 plist를 만들기만 하고, 등록은 대시보드·읽기 전용 서비스부터 내가 승인한 것만 해.
-- shared-etf-paper(--execute 모의 주문), 실계좌 서비스, 실주문 스위치, 장기 엔진 --execute는 켜지 마.
-- 끝나면 있는 것과 없는 것(키 이름, 서비스, 실패한 점검)을 짧게 보고해.
+docs/getting-started.md와 docs/ai-agents.md를 읽고 그 순서대로 설치를 도와줘.
+- .env 값과 계좌번호는 출력하지 말고, 키는 내가 직접 넣게 키 이름만 안내해.
+- launchd 서비스는 plist를 만들어 보여 주기만 하고, 등록은 내가 승인한 것만 해.
+- shared-etf-paper(모의 주문), 실계좌 서비스, 실주문 스위치, 장기 엔진 --execute는 켜지 마.
 ```
 
 다른 기기에서 이어서 할 때는 `ops-bootstrap` 스킬이 같은 일을 합니다.
 
 ## 다음에 읽을 것
 
-[동작 구조](architecture.md) · [대시보드 가이드](dashboard.md) · [설정 레퍼런스](configuration.md) · [매매 전략](strategy.md) · [안전 장치](safety.md) · [운영 가이드](operations.md) · [FAQ](faq.md)
+[AI와 함께 쓰기](ai-agents.md) · [동작 구조](architecture.md) · [대시보드 가이드](dashboard.md) · [설정 레퍼런스](configuration.md) · [매매 전략](strategy.md) · [안전장치](safety.md) · [운영 가이드](operations.md) · [FAQ](faq.md)

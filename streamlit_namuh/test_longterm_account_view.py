@@ -75,7 +75,7 @@ def test_skipped_and_retried_orders_read_in_korean(tmp_path, monkeypatch):
     (tmp_path / 'longterm-live.jsonl').write_text('\n'.join(json.dumps(e) for e in events) + '\n')
     monkeypatch.setattr('engine_roles.ledger_root', lambda r, e: Path(r) / e)
     monkeypatch.setattr(overview.ec, 'cached_journal', lambda *a: [])
-    rows, _ = overview.timeline(tmp_path, '2026-11-18', [], {})
+    rows, _ = overview.timeline(tmp_path, '2026-11-18', {})
     texts = [r['내용'] for r in rows]
     assert texts == ['대기 · 다른 미체결 주문이 있음 · 다시 시도', '건너뜀 · 1주 가격이 계좌 1주 가격 상한보다 높음']
     assert not any(word in ' '.join(texts) for word in ('RETRY', 'SKIP', 'share price'))

@@ -110,7 +110,7 @@ def test_guides_use_the_saved_long_term_numbers(monkeypatch):
     settings = L.load_settings(L.ROOT)
     settings['tuning']['band'] = 0.07
     monkeypatch.setattr(L, 'load_settings', lambda root=None: settings)
-    assert '밴드 ±7%p' in guides.engines_dot(guides.values())
+    assert any('밴드 ±7%p' in b for _, _, b in guides.engine_rows(guides.values()))
     assert 'longterm' in guides.TOPICS and 'longterm' in guides.GUIDES and '밴드 ±7%p' in guides.TOPIC_TEXT['longterm']({})
     assert 'digraph' in guides.DIAGRAMS['longterm_regimes'][1]({}) and 'digraph' in guides.DIAGRAMS['longterm'][1]({})
 

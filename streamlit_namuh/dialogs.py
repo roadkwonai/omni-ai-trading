@@ -159,7 +159,7 @@ def holdings_dialog(items, names):
             st.info('지금 보유한 종목이 없습니다.')
             return
         table_frame(pd.DataFrame(rows).style.map(_tone, subset=['평가손익']))
-        st.caption('모의는 실행기의 최근 잔고(10분 안), 실계좌는 미러 원장 기준입니다. 증권사 잔고는 트레이딩 현황·주문·정리에서 조회합니다.')
+        st.caption('모의는 실행기의 최근 잔고(10분 안), 실계좌는 미러 원장 기준입니다. 증권사 잔고는 트레이딩 현황·실계좌에서 조회합니다.')
     show()
 
 
@@ -184,7 +184,7 @@ def alerts_dialog(watched, warnings, follow):
                                         '계획': L.ACTIONS.get(e.get('action'), e.get('action', '')), '사유': L.reason(e.get('reason')),
                                         '실행': L.EXECUTIONS.get(e.get('execution'), e.get('execution') or '')} for k, e in follow.items()]),
                          hide_index=True, width='stretch')
-        st.caption('장 밖에는 실행기가 "종료"인 것이 정상입니다. 자세한 판단·실행 흐름은 "AI·실행 기록" 탭에서 봅니다.')
+        st.caption('장 밖에는 실행기가 "종료"인 것이 정상입니다. 자세한 판단·실행 흐름은 "운영 → AI·실행 기록"에서 봅니다.')
     show()
 
 

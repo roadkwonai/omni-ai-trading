@@ -5,11 +5,13 @@ force rather than a copy that drifts. Diagrams are Graphviz DOT drawn by Streaml
 """
 from __future__ import annotations
 
+import re
+
 import streamlit as st
-import theme as THEME
 
 # Live account protections (AGENTS.md, user-approved): shown on the 실계좌 tab and in its guide.
 from accounts import BUDGET_LIMITS as _B, LIVE_RULE_LIMITS as _R  # one source: the limits the live guard and mirror enforce
+from settings_view import SIZING_GUIDE  # the same wording as the account form tooltips
 LIVE_LIMITS = {'capital_krw': _B['live']['capital_krw'][1], 'daily_loss_krw': _B['live']['daily_loss_krw'][1],
                'order_qty': _R['max_order_qty'][1], 'order_price_max_krw': _B['live']['order_price_max_krw'][1],
                'stop_pct': _R['stop_loss_pct'][1]}  # ceilings; each account sets its own within them
@@ -129,16 +131,16 @@ def live_dot(v=None):
     L = LIVE_LIMITS
     return _dot(' '.join([
         _node('engine', 'Jev 트레이딩 계좌\\n메인 엔진 판단 (Jev) → 모의 체결 미러'),
-        _node('observe', '관찰 모드 (지금)\\n계좌 한도로 가상 실행만 기록 · 실주문 없음', INFO),
+        _node('observe', '실주문 스위치 꺼짐\\n계좌 한도로 계획·가상 실행만 기록', INFO),
         _node('lt', '장기투자 계좌\\n장기 엔진 아침 판단(08:45) → 그날 계획'),
         _node('ltlive', '장기투자 실행기 (09:40~14:30)\\n계좌 운용금 비례 · 매도 먼저 · 미체결 60초 뒤 취소'),
         _node('ltstop', '장기투자 계좌: 종목 손절 없음\\n하루 손실은 실현 손실+수수료로만 셈', SELL),
         _node('path', '실계좌 보호 경로\\nnh_guarded_live (별도 승인 후에만)'),
-        _node('guard', f"실계좌 가드\\n운용금 {L['capital_krw'] / 1e4:,.0f}만 원 · 하루 손실 {L['daily_loss_krw'] / 1e4:,.0f}만 원\\n"
+        _node('guard', f"실계좌 가드\\n계좌별 운용금 · 하루 손실 {L['daily_loss_krw'] / 1e4:,.0f}만 원\\n"
                        f"매수 1회 최대 {L['order_qty']:,}주 · 1주 가격은 계좌 설정(최대 {L['order_price_max_krw'] // 10_000}만 원) · 미체결 · 미확인 주문 차단", GUARD),
         _node('broker', 'NH 실계좌', BUY),
         _node('stop', f"손절: 하루 손실 {L['daily_loss_krw']:,}원 또는 종목 −{L['stop_pct']:g}% 중 먼저", SELL),
-        'engine -> observe; engine -> path [style=dashed label="승인 시"]; path -> guard -> broker; broker -> stop [style=dashed];',
+        'engine -> observe; engine -> path [style=dashed label="실주문 스위치 켜짐"]; path -> guard -> broker; broker -> stop [style=dashed];',
         'lt -> ltlive; ltlive -> path [style=dashed label="실주문 스위치 + --execute"]; broker -> ltstop [style=dashed];',
     ]))
 
@@ -161,40 +163,36 @@ def data_dot(v=None):
     ], ), rankdir='LR')
 
 
-def engines_dot(v):
+def engine_rows(v):
+    """Jev trading vs 장기투자 item by item, numbers from the saved settings (replaces the 2026-11-17 Graphviz picture,
+    whose text stayed small at any size, 2026-11-19): [(항목, Jev, 장기투자)]."""
     import longterm_flow as LF
     import vibe_longterm as LT
-    lt = LT.load_settings()  # the long-term numbers come from its saved settings, not this text
-    return _dot(' '.join([
-        'subgraph cluster_jev { label="Jev · 1분마다"; fontcolor="#c4b5fd"; color="#a855f7"; style="rounded,dashed";',
-        _node('jin', '입력: 1분봉 차트 이미지 (7 ETF + 관심종목)\n뉴스 · 투자자 · 시장 국면 · 장전 자료 · 지난 성적'),
-        _node('jm', 'Jev 차트 이미지 모델', '#a855f7'),
-        _node('jout', '후보 1개 + 신뢰도 (0~1)\n보유 종목엔 HOLD/SELL'),
-        _node('jbuy', f"매수: 신뢰도 ≥ {v['entry_confidence']:.2f}\n+ 지수 방향·거래량 확인 (또는 관심종목 강도)\n→ 약 {v['tranche'] / 1e4:,.0f}만 원", BUY),
-        _node('jsell', f"매도: SELL ≥ {v['sell_confidence']:.2f}\n또는 국면별 청산 · 손절", SELL),
-        'jin -> jm -> jout; jout -> jbuy; jout -> jsell; }',
-        'subgraph cluster_vibe { label="장기투자 (vibe) · 하루 1회"; fontcolor="#93c5fd"; color="#3b82f6"; style="rounded,dashed";',
-        _node('vin', '입력: 나스닥100 낙폭 · 200일선 · VIX · 환율\\n테마 추세 · 뉴스 · 매매일지 · 장전 자료 · FRED(참고)'),
-        _node('vm', f"국면 판정 (확정 {lt['tuning']['confirm_days']}거래일 · 투매 {LT.CONFIRM_DAYS['panic']})\\n린치 스토리 점검 (LLM)", '#3b82f6'),
-        _node('vout', f"거장 모듈 조합 · 지금 {LT.MODES[lt['mode']]}\\n수동 · 추천 · 자동"),
-        _node('vbuy', f"목표 비중 ({LF._sleeves(lt['weights'])})\\n밴드 ±{lt['tuning']['band'] * 100:.0f}%p · 모듈 변화일 때만 주문 (09:40)", BUY),
-        _node('vsell', f"손절 없음 · 저수지 뺀 매도 월 {lt['tuning']['monthly_sell_share'] * 100:.0f}%까지\\n그림자(기본 · 자동)와 순자산 비교", SELL),
-        'vin -> vm -> vout; vout -> vbuy; vout -> vsell; }',
-        _node('both', f"Jev: 장전 준비 · 09:00 개장부터 주문 시간 확인\\n주문 가드 · 손절 · {v['flatten']} 정리 또는 이월 조건 확인", GUARD),
-        'jbuy -> both [style=dashed];',
-    ]), rankdir='TB')
+    lt = LT.load_settings()
+    t = lt['tuning']
+    return [
+        ('성격', '장중 단타 · 당일 정리 위주(조건을 채우면 이월)', '미국 지수·테마 ETF 장기·스윙 포트폴리오'),
+        ('판단 주기', f"1분마다 · 09:00 개장부터 주문 · {v['flatten']} 정리", '하루 1회 · 08:45 판단 · 09:40 주문 · 15:40 순자산 기록'),
+        ('보는 것', '1분봉 차트 이미지(7 ETF + 관심종목) · 뉴스 · 투자자 · 시장 국면 · 장전 자료 · 지난 성적',
+         '나스닥100 낙폭 · 200일선 · VIX · 환율 · 테마 추세 · 뉴스(스토리 점검) · FRED(참고)'),
+        ('판단', 'Jev 차트 이미지 모델 → 후보 하나와 신뢰도(0~1), 보유 종목엔 HOLD/SELL',
+         f"국면 판정(확정 {t['confirm_days']}거래일 · 투매 {LT.CONFIRM_DAYS['panic']}) → 거장 모듈 조합 · 지금 {LT.MODES[lt['mode']]}"),
+        ('매수', f"신뢰도 ≥ {v['entry_confidence']:.2f} + 지수 방향·거래량 확인(또는 관심종목 강도) · 분할 1회 약 {v['tranche'] / 1e4:,.0f}만 원",
+         f"목표 비중({LF._sleeves(lt['weights'])}) · 밴드 ±{t['band'] * 100:.0f}%p · 모듈 변화일 때만"),
+        ('매도', f"Jev SELL ≥ {v['sell_confidence']:.2f} · 국면별 청산 · 손절 · {v['flatten']} 정리",
+         f"손절 없음 · 리밸런싱 · 스토리 훼손 · 저수지 뺀 월 매도 {t['monthly_sell_share'] * 100:.0f}%까지"),
+        ('계좌', '공유 모의계좌(메인) · Jev 트레이딩 실계좌(미러)',
+         f"가상 계좌 1억 원 · 운용 방식 {LT.book_strategy_label(lt, 'actual')} · 장기투자 실계좌(계좌별 운용 방식)"),
+        ('평가 기준', '투입금 대비 수익률 · 왕복 승률 · 일 손익', '순자산 · 최대 낙폭 · 기본 그림자(기준 비중+달리오) 대비'),
+    ]
 
 
-ENGINE_ROWS = [  # (항목, Jev, 장기투자) — vibe became the long-term engine on 2026-11-17
-    ('성격', '장중 단타 · 당일 정리 위주', '미국 지수·테마 ETF 장기·스윙 포트폴리오'),
-    ('판단 주기', '1분 주기', '하루 1회(08:45 판단 · 09:40 주문 · 15:40 기록)'),
-    ('보는 것', '1분봉 차트 이미지 + 뉴스 · 투자자 · 시장 국면', '나스닥100 낙폭 · 200일선 · VIX · 환율 · 테마 추세 · 뉴스(린치 스토리 점검)'),
-    ('내놓는 것', '후보 하나와 신뢰도(0~1)', '시황 국면 · 추천 거장 모듈 · 목표 비중'),
-    ('매수', '신뢰도 ≥ 진입 기준 + 지수·거래량 확인', '목표 비중을 향해 월 밴드·모듈 변화일 때만(값은 장기투자 → 계좌·실행)'),
-    ('매도', 'SELL 신뢰도 · 국면별 목표 · 손절', '손절 없음 · 리밸런싱 · 스토리 훼손 · 저수지 뺀 월 매도 상한까지'),
-    ('계좌', '공유 모의계좌(메인) · Jev 트레이딩 실계좌(미러)', '별도 가상 계좌 1억 원("가상 체결" 스위치) · 장기투자 실계좌(계좌별 운용 방식, 실주문 스위치)'),
-    ('평가 기준', '왕복 거래 승률 · 일 손익', '순자산 · 최대 낙폭 · 기본 그림자(기준 비중+달리오) 대비'),
-]
+def engines_view(v):
+    """Jev와 장기투자 판단 방식: the two-column comparison cards (guide centre, 성과 비교, 계좌·자동매매)."""
+    import guide_ui as GU
+    GU.style()
+    GU.section('Jev와 장기투자 판단 방식', '값은 지금 저장된 설정입니다. 두 엔진은 서로 주문에 관여하지 않습니다.')
+    GU.compare(engine_rows(v), 'Jev 트레이딩', '장기투자')
 
 
 def strength_dot(v):
@@ -240,30 +238,8 @@ def ipo_dot(v):
         'days -> wait [label="아니오"]; base -> wait [label="아니오"]; open -> wait [label="아니오"]; high -> wait [label="아니오"]; bar -> wait [label="아니오"];',
     ]))
 
-def limits_dot(v):
-    """Every paper-runner restriction by group: green = on, red dashed = switched off, blue = set by a number, grey = always on."""
-    from restrictions import GROUPS, RULES
-    body = []
-    for i, group in enumerate(GROUPS):
-        nodes = []
-        for rule_id, g, name, kind, key, *_ in RULES:
-            if g != group:
-                continue
-            if kind == 'switch':
-                on = bool(v.get(key, 1))
-                style = f'color="{INFO if on else BUY}" penwidth=2' + ('' if on else ' style="rounded,filled,dashed"')
-                label = f"{name}\\n{'켜짐' if on else '꺼짐'}"
-            else:
-                style = f'color="{SELL if kind == "setting" else WAIT}"'
-                label = f"{name}\\n{'설정값' if kind == 'setting' else '항상 적용'}"
-            nodes.append(f'{rule_id} [label="{label}" {style}];')
-        body.append(f'subgraph cluster_{i} {{ label="{group}"; fontcolor="#E2E8F0"; color="#334155"; style="rounded"; {" ".join(nodes)} }}')
-    return _dot(' '.join(body), 'LR')
-
-
 DIAGRAMS = {'entry': ('매수 판단 흐름', entry_dot), 'exit': ('보유 · 매도 흐름', exit_dot), 'regime': ('시장 국면별 대응', regime_dot),
-            'safety': ('모의 주문 안전 장치', safety_dot), 'live': ('실계좌 주문 경로', live_dot), 'data': ('데이터 흐름', data_dot), 'engines': ('Jev와 장기투자 판단 방식', engines_dot), 'strength': ('관심종목 강도 진입 판단', strength_dot), 'ipo': ('신규주 진입 판단', ipo_dot),
-            'limits': ('제한 규칙 한눈에 (초록 켜짐 · 빨강 꺼짐 · 파랑 설정값 · 회색 항상 적용)', limits_dot),
+            'safety': ('모의 주문 안전장치', safety_dot), 'live': ('실계좌 주문 경로', live_dot), 'data': ('데이터 흐름', data_dot), 'strength': ('관심종목 강도 진입 판단', strength_dot), 'ipo': ('신규주 진입 판단', ipo_dot),
             'oversold': ('낙폭과대 알고리즘 전체 FLOW (선별 v2 · 장중 반등 · 데이터)', lambda v: __import__('oversold_flow').flow_dot(v)),
             'longterm': ('장기투자 하루 알고리즘 (지금 설정)', lambda v: _longterm_dot('algorithm')),
             'longterm_regimes': ('장기투자 국면 전이', lambda v: _longterm_dot('regimes'))}
@@ -353,14 +329,14 @@ def ipo_flow(v):
 def live_flow(v=None):
     L = LIVE_LIMITS
     return _wf('실계좌 주문 경로', [('jev', 'Jev 트레이딩 계좌'), ('lt', '장기투자 계좌'), ('guard', '보호 경로', 'exception'), ('broker', '증권사')],
-        [('engine', 'jev', 0, 'Jev 판단', '모의 체결 미러', 'cloud'), ('observe', 'jev', 1, '관찰 모드', '가상 실행만 기록 · 실주문 없음', 'database'),
+        [('engine', 'jev', 0, 'Jev 판단', '모의 체결 미러', 'cloud'), ('observe', 'jev', 1, '실주문 스위치 꺼짐', '계획·가상 실행만 기록', 'database'),
          ('lt', 'lt', 0, '장기 엔진 08:45', '그날 계획', 'security'), ('ltlive', 'lt', 1, '장기투자 실행기', '09:40~14:30 · 매도 먼저'),
          ('ltstop', 'lt', 4, '종목 손절 없음', '하루 손실은 실현 손실+수수료', 'external'),
          ('path', 'guard', 2, '실계좌 보호 경로', 'nh_guarded_live · 별도 승인 후', 'security'),
-         ('guard', 'guard', 3, '실계좌 가드', f"운용금 {L['capital_krw'] / 1e4:,.0f}만 · 하루 손실 {L['daily_loss_krw'] / 1e4:,.0f}만 · 미체결 차단", 'security'),
+         ('guard', 'guard', 3, '실계좌 가드', f"계좌별 운용금 · 하루 손실 {L['daily_loss_krw'] / 1e4:,.0f}만 · 미체결 차단", 'security'),
          ('broker', 'broker', 4, 'NH 실계좌', '', 'external'),
          ('stop', 'broker', 5, '손절', f"하루 손실 {L['daily_loss_krw']:,}원 또는 −{L['stop_pct']:g}% 먼저", 'external')],
-        [('engine', 'observe', None, 'main'), ('engine', 'path', '승인 시', 'branch'), ('lt', 'ltlive', None, 'main'),
+        [('engine', 'observe', None, 'main'), ('engine', 'path', '실주문 스위치 켜짐', 'branch'), ('lt', 'ltlive', None, 'main'),
          ('ltlive', 'path', '실주문 스위치 + --execute', 'branch'), ('path', 'guard', None, 'main'), ('guard', 'broker', None, 'main'),
          ('broker', 'stop', None, 'async'), ('broker', 'ltstop', None, 'async')],
         main=['engine', 'observe'])
@@ -382,6 +358,7 @@ def data_flow(v=None):
 
 
 FLOWS = {'entry': entry_flow, 'exit': exit_flow, 'strength': strength_flow, 'ipo': ipo_flow, 'live': live_flow, 'data': data_flow,
+         'oversold': lambda v: __import__('oversold_flow').flow_spec(v),
          'longterm': lambda v: _longterm_spec('algorithm'), 'longterm_regimes': lambda v: _longterm_spec('regimes')}
 
 
@@ -449,7 +426,7 @@ GUIDES = {
     },
     'live_desk': {
         'title': '트레이딩 현황 (실계좌)', 'purpose': '선택한 실계좌의 실제 잔고·주문과, 메인 엔진이 이 계좌 한도로 했을 가상 매매를 함께 봅니다.',
-        'steps': ['상태 줄의 "엔진 관찰 모드"는 엔진이 실주문을 내지 않는다는 뜻입니다.', '매매 기준 카드는 그 계좌의 한도(1주·1주 가격 상한·하루 손실 2만 원)와 매도 규칙입니다.',
+        'steps': ['상태 줄에서 실주문 스위치(켜짐 = 보호 경로로 실제 주문, 꺼짐 = 계획만 기록)를 먼저 봅니다.', '매매 기준 카드는 그 계좌의 한도(매수 크기·1주 가격 상한·하루 손실 2만 원)와 매도 규칙입니다.',
                   '차트의 보라 원은 가상 매매, 화살표는 증권사에 실제로 체결된 주문입니다.', '아래 탭에서 가상 실행 결과·당일 주문·실행기 기록·계좌 설정을 봅니다.'],
         'terms': {'가상 실행': '엔진 판단을 분봉 종가로 체결됐다고 가정한 기록입니다. 호가·수수료·세금은 반영하지 않습니다.',
                   '국면별 청산': '켜져 있으면 모의 실행기가 그 매수에 정한 청산 계획(방어형 데이터 목표 · 추세형 절반+추적 손절)을 그대로 따르고, 하락장 약세일에는 떨어지는 종목 추가 매수를 막습니다. vibe 매수는 그 시각 시장 상황으로 방어형·추세형을 고릅니다.',
@@ -459,34 +436,30 @@ GUIDES = {
     'accounts': {
         'title': '계좌·자동매매', 'purpose': '계좌마다 자동매매 여부와 금액 한도를 정합니다. 공유 모의계좌는 Jev 트레이딩, 실계좌는 계좌마다 Jev 트레이딩(미러) 또는 장기투자를 고르고, 장기투자 가상 계좌는 장기투자 탭에서 운용합니다.',
         'steps': ['계좌 카드에서 메인 엔진과 자동매매(관찰 기록) 상태를 봅니다.', '금액 칸의 (?)에 허용 범위가 있습니다. 실계좌 한도는 보호 경로 한도를 넘을 수 없습니다.',
-                  '계좌 탭마다 "제한 규칙"에서 그 계좌에 걸린 제한을 모두 봅니다. 모의계좌는 끌 수 있는 규칙을 스위치로 끄고 켭니다.'],
+                  '계좌 탭마다 "제한 규칙"에서 그 계좌에 걸린 제한을 모두 봅니다. 모의계좌는 끌 수 있는 규칙을 스위치로 끄고 켭니다.',
+                  'Jev 트레이딩 실계좌는 "매수 크기 기준"(1주 기준 · 금액 기준)을 고르고, 바로 아래 "이 계좌 예시" 표로 실제로 몇 주를 따라 사는지 확인합니다.'],
+        'sections': [('실계좌 매수 크기 기준 · 1주 기준과 금액 기준', SIZING_GUIDE)],
         'terms': {'메인 엔진': '그 계좌의 매수·매도 판단을 맡는 엔진입니다. 모든 계좌가 Jev입니다(2026-11-17 고정).',
-                  '관찰 모드': '실계좌는 실제 주문을 내지 않고 가상 실행만 기록합니다.',
+                  '관찰 모드': '실주문 스위치가 꺼진 실계좌는 실제 주문 없이 같은 계산으로 계획·가상 실행만 기록합니다. 켜진 계좌는 보호 경로로 실제 주문합니다.',
                   '제한 규칙': '실행기가 매수를 막거나 줄이는 규칙입니다(재진입 제한·연속 손실 쉬기·물타기 금지 등). 끄기 가능 / 다른 설정으로 조절 / 항상 적용으로 나뉩니다.'},
         'diagrams': ['engines', 'limits', 'live', 'data'],
     },
     'compare': {
-        'title': '엔진 비교', 'purpose': 'Jev(장중 단타)와 장기투자(vibe, 미국 ETF)의 기간 성과를 같은 날짜로 나란히 봅니다. 2026-11-17까지의 Jev vs vibe 장중 비교는 보관 화면에서 봅니다.',
-        'steps': ['"Jev · 장기투자 기간 성과"에서 장기투자 시작일 이후 날짜별 손익을 비교합니다.', '두 엔진은 기준이 다릅니다: Jev는 원장 실현손익, 장기투자는 가상 계좌 순자산 평가입니다.',
-                  '"Jev vs vibe 장중(보관)"은 vibe 장중 엔진이 멈춘 11-17까지의 기록이며 Jev 쪽은 계속 갱신됩니다.'],
-        'terms': {'기본 그림자': '기준 비중+달리오만 쓰는 장기투자 비교 기준(60/25/15 월 밴드)입니다.',
-                  'vibe 점수': '(보관) 장중 vibe가 종목마다 매기던 −1~+1 점수입니다. 11-17에 멈췄습니다.'},
-        'diagrams': ['engines', 'data'],
-    },
-    'paper': {
-        'title': '주문·정리', 'purpose': '모의계좌와 실계좌의 잔고·주문을 보고, 보유 종목 정리를 실행기에 요청합니다. 실행기 전용 계좌가 아닌 모의계좌에서만 직접 지정가 주문을 냅니다.',
-        'steps': ['위쪽 "계좌" 버튼에서 모의계좌 또는 실계좌 1·2를 고릅니다.',
-                  '오른쪽 위 "잔고·주문 조회"로 예수금·보유 종목·미체결을 확인합니다.',
-                  '실계좌는 미러 주문 기록(실행기가 보호 경로로 낸 주문)과 실체결 기록(매분 기록한 증권사 체결)을 탭으로 봅니다. 정리 요청은 미러 실행기가 산 수량만 팝니다(관찰 모드면 계획만 기록).',
-                  '"계좌 사용처"가 실행기 전용이면 직접 주문 대신 "보유 종목 정리 요청"을 씁니다. 종목을 고르고 동의란을 체크한 뒤 보냅니다.',
-                  '실행기 전용이 아닌 계좌라면 지정가 주문을 입력 → 검토 → 제출 순서로 냅니다.'],
-        'terms': {'실행기 전용': '주문 가드에 자동 실행기만 주문할 수 있게 등록된 계좌입니다. 직접 주문하면 실행기 원장과 어긋나 실행기가 멈추므로 막혀 있습니다.',
-                  '정리 요청': '실행기가 다음 주기에 AI 판단 없이 보호매도 경로로 전량 매도합니다. 다 팔리면 요청은 자동으로 지워집니다.'},
-        'diagrams': ['safety'],
+        'title': '성과 비교', 'purpose': 'Jev 트레이딩(국내 장중)과 장기투자(미국 지수·테마 ETF)의 전략과 성과를 같은 날짜 위에 놓고 비교합니다. 날짜·장부별 기록은 compare_daily 표에 쌓여 다른 분석에도 씁니다.',
+        'steps': ['위에서 기간(이번 주 · 이번 달 · 전체 · 직접)을 고르고, 필요하면 "그림자 장부"를 켜 장기투자의 비교 기준을 겹쳐 봅니다.',
+                  '카드에서 두 방식의 손익·수익률·최대 낙폭·이긴 날과 두 방식의 상관을 봅니다. 표본이 20일보다 적으면 "판단하기 이름"이 붙습니다.',
+                  '"성과 곡선"은 누적 수익률과 KODEX 200 · 나스닥100, 아래 띠는 그날의 국내·미국 국면입니다.',
+                  '"국면별 성적"에서 어떤 장에서 어느 방식이 나았는지, "두 방식 관계"에서 함께 들었을 때의 흔들림을 봅니다.',
+                  '"방식 한눈에"는 판단 주기·대상·매수·매도·계좌를 줄마다 마주 놓은 비교 카드입니다. "일별 기록"은 CSV로 내려받습니다.'],
+        'terms': {'Jev 수익률': '(실현 + 평가손익 변화 − 수수료·세금 추정) ÷ 그날 최대 투입금입니다. 모의계좌 예수금은 실제로 쓰는 돈보다 훨씬 커서 기준으로 쓰지 않습니다.',
+                  '장기투자 수익률': '(순자산 변화 − 그날 넣은 적립금) ÷ (전날 순자산 + 적립금)입니다. 수수료는 순자산에 이미 들어 있습니다.',
+                  '기본 그림자': '기준 비중+달리오만 쓰는 장기투자 비교 기준입니다. 자동 그림자는 국면 추천 조합입니다.',
+                  '상관': '두 방식 일별 수익률이 같이 움직이는 정도(−1~+1)입니다. 낮을수록 함께 들 때 흔들림이 줄어듭니다.'},
+        'diagrams': ['engines'],
     },
     'ai': {
         'title': 'AI·실행 기록', 'purpose': '날짜별로 Jev 엔진의 판단·실행기 활동·체결과 장기투자 결정을 되짚고, 실계좌는 미러 실행기가 그 판단을 어떻게 실행했는지 봅니다.',
-        'steps': ['위쪽 "기록"에서 종합 · Jev 엔진 · 장기투자 결정 · vibe 장중(보관, ~11-17) · 실계좌 실행을 고릅니다. 종합은 모든 엔진·실계좌의 판단·주문·체결·계획을 한 날짜로 모읍니다. 실계좌는 자체 판단이 없어 따라가는 엔진의 기록이 판단 근거입니다.',
+        'steps': ['운영 탭에서 "AI·실행 기록"을 고른 뒤, 위쪽 "기록"에서 종합 · Jev 엔진 · 장기투자 결정 · 실계좌 실행을 고릅니다. 종합은 모든 엔진·실계좌의 판단·주문·체결·계획을 한 날짜로 모읍니다. 실계좌는 자체 판단이 없어 따라가는 엔진의 기록이 판단 근거입니다.',
                   '기록 날짜와 차트 종목을 고릅니다.', '차트의 색 표식(파랑 Decision · 보라 Jev · 초록 매수 · 빨강 매도)으로 판단과 체결 시점을 봅니다.',
                   'Jev 신뢰도 추이와 실행기 활동(10분 단위)에서 왜 대기했는지 확인합니다.'],
         'terms': {'진입 조건 허용/불허': '그 주기에 매수 조건을 통과했는지입니다. 불허 사유가 함께 표시됩니다.',
@@ -497,20 +470,33 @@ GUIDES = {
         'title': '실계좌', 'purpose': '실계좌 자동매매가 지금 어떤 상태인지, 어떤 보호 한도로 돌아가는지, 실제 잔고·주문이 어떤지를 한 곳에서 봅니다.',
         'steps': ['맨 위 상태 카드 4개로 실행기 · 신규 매수 · 주문 보호 · 마지막 기록을 확인합니다.',
                   '보호 한도 카드는 실주문에 항상 적용되는 한도입니다(운용금 · 하루 손실 · 1회 매수 수량 · 가격 · 손절).',
+                  '"주문·정리 종합" 보기는 모든 계좌(모의 포함)의 보유·오늘 체결·정리 요청·장기투자 주문 계획을 한 번에 보여 줍니다(예전 주문·정리 탭).',
+                  '계좌 이름을 고르면 아래 "주문·정리" 탭에서 그 계좌의 증권사 잔고·주문, 미러 주문·실체결 기록을 보고 전량 정리를 요청합니다. 정리 요청은 미러 실행기가 산 수량만 팝니다.',
                   '"잔고·주문" 탭에서 증권사 조회 결과를 봅니다. 조회하기 전 값은 과거 상태입니다.',
                   '"자동매매 제어" 탭의 중단은 신규 매수만 멈춥니다. 보유분 손절 감시는 계속합니다.'],
-        'terms': {'관찰 모드': '모의 검증 기간이라 실계좌는 실주문 없이 가상 실행만 기록합니다(사용자 결정: 모의 1~2일 뒤 결정).',
+        'terms': {'관찰 모드': '실주문 스위치가 꺼진 실계좌는 실제 주문 없이 같은 계산으로 계획·가상 실행만 기록합니다. 켜진 계좌는 보호 경로로 실제 주문합니다.',
                   '주문 보호(HALT)': '전역 중단 표시입니다. 켜져 있으면 실주문 경로가 막힙니다.',
                   '하루 손실 한도': '실주문 직전에 손익을 다시 조회해 2만 원 손실에 닿으면 그날 신규 매수를 막고 정리합니다. 급변 시 초과 손실이 날 수 있습니다.'},
         'diagrams': ['live'],
     },
     'ops': {
-        'title': '운영 상태', 'purpose': '자동 작업(실행기·학습기·시장 수집 등)이 돌고 있는지, 오늘 실행기가 무엇을 했고 왜 기다렸는지 봅니다.',
+        'title': '운영 → 운영 상태', 'purpose': '운영 탭은 운영 상태 · 자동 작업 · AI·실행 기록 · API 연동 · 스킬 · 리포트 발행 · 백업·이식을 위쪽 버튼으로 고릅니다. 운영 상태는 자동 작업(실행기·학습기·시장 수집 등)이 돌고 있는지, 오늘 실행기가 무엇을 했고 왜 기다렸는지 봅니다.',
         'steps': ['서비스 상태 배지에서 "실행 중"이 아닌 항목을 먼저 봅니다.', '오늘 활동 차트에서 판단 횟수와 대기 사유를 봅니다.',
                   '학습 데이터 누적량은 학습 필터를 쓸 수 있는지(표본 20건 이상) 보여줍니다.'],
         'terms': {'미등록': '자동 작업이 시스템에 등록되지 않은 상태입니다. 재부팅 뒤에도 자동으로 올라오는지 확인하세요.',
                   '대기 사유': 'Jev 신뢰도 부족, 지수 방향 불일치, 분봉 조회 실패 등 그 주기에 사지 않은 이유입니다.'},
         'diagrams': ['safety', 'data'],
+    },
+    'schedule': {
+        'title': '운영 → 자동 작업', 'purpose': '정해진 시각에 도는 모든 작업(launchd 서비스 · Claude 예약 작업 · Codex 자동화)을 한곳에서 시각 순으로 봅니다.',
+        'steps': ['위 카드에서 상시 서비스가 모두 실행 중인지, Claude 예약 작업이 몇 개 켜져 있는지, 다음에 시작할 작업이 무엇인지 봅니다.',
+                  '오른쪽 위 날짜를 바꾸면 그날 시작하는 작업이 시각 막대와 표로 나옵니다. 5분·1시간 간격으로 여러 번 도는 작업은 한 줄로 묶습니다.',
+                  '"전체 목록"에서 구분(launchd · Claude · Codex)을 골라 언제·상태·하는 일·권한 모드를 봅니다.'],
+        'terms': {'상시 서비스': '로그인하면 시작해 계속 도는 launchd 서비스입니다(실행기·관찰기·대시보드·알림).',
+                  '시간 서비스': '정한 시각에 한 번 돌고 끝나는 launchd 서비스입니다. 끝나면 "종료"가 정상입니다.',
+                  'Claude 예약 작업': 'Claude 앱이 정한 시각에 여는 작업입니다. 앱이 닫혀 있으면 다음에 열 때 실행됩니다. 끝난 한 번 작업은 "꺼짐"입니다.',
+                  'Codex 자동화': '같은 일을 Claude 예약 작업으로 옮겨 일시 정지해 둔 Codex 작업입니다. 둘 다 켜면 두 번 돌아갑니다.'},
+        'diagrams': [],
     },
     'api': {
         'title': 'API 연동', 'purpose': '외부 API(NH·키움·토스·네이버·KRX·OpenDART·뉴스·Yahoo·AI)의 연동 상태, 언제 얼마나 호출하는지, 실패 이력과 데이터가 쓰이는 화면을 봅니다.',
@@ -523,7 +509,7 @@ GUIDES = {
     },
 }
 
-TOPICS = {'engines': '엔진 비교', 'longterm': '장기투자', 'entry': '매수 전략', 'strength': '관심종목 진입', 'oversold': '낙폭과대 반등', 'ipo': '신규주 진입', 'exit': '매도 전략', 'regime': '시장 국면', 'limits': '제한 규칙', 'safety': '안전 장치', 'live': '실계좌', 'data': '데이터 흐름'}
+TOPICS = {'engines': 'Jev · 장기투자', 'longterm': '장기투자', 'entry': '매수 전략', 'strength': '관심종목 진입', 'oversold': '낙폭과대 반등', 'ipo': '신규주 진입', 'exit': '매도 전략', 'regime': '시장 국면', 'limits': '제한 규칙', 'safety': '안전장치', 'live': '실계좌', 'data': '데이터 흐름'}
 
 
 def limits_text(v):
@@ -540,6 +526,21 @@ def limits_text(v):
     lines.append('\n실계좌는 엔진 체결 원장을 따라가므로 위 규칙이 미러에도 반영되고, 그 위에 계좌별 보호 한도(운용금·하루 손실·1주 가격 상한·회당 한도·새 종목·손절)가 더 붙습니다. '
                  '실계좌 탭마다 "제한 규칙"에 정리돼 있습니다.')
     return '\n'.join(lines)
+def live_text():
+    """The live accounts as they are now (2026-11-19: the old text still said 관찰 모드 · 인버스 전용 · 운용금 10억)."""
+    from accounts import ENGINE_LABELS, load
+    lives = [r for r in load().values() if r.get('kind') == 'live']
+    now = ' · '.join(f"{r.get('label', '실계좌')} {ENGINE_LABELS.get(r.get('engine'), r.get('engine'))}"
+                     f"({'실주문 켜짐' if r.get('live_orders') else '계획만'})" for r in lives) or '등록된 실계좌 없음'
+    return (f'실계좌는 계좌마다 운용 방식(**Jev 트레이딩** = 모의 체결 미러, **장기투자** = 장기 엔진 계획)을 고르고, **실주문 스위치**가 켜진 계좌만 '
+            f'보호 경로(nh_guarded_live)로 실제 주문을 냅니다. 꺼진 계좌는 같은 계산으로 계획만 기록합니다.\n\n'
+            f'**지금**: {now}.\n\n'
+            f"모든 계좌에 하루 손실 최대 {LIVE_LIMITS['daily_loss_krw']:,}원, 한 번 주문 {LIVE_LIMITS['order_qty']:,}주 이하, "
+            f"1주 가격 상한(계좌별, 최대 {LIVE_LIMITS['order_price_max_krw']:,}원), 하루 새 종목 5개, 미체결·미확인 주문 차단이 걸립니다. "
+            '운용금은 계좌 잔고 안에서 계좌마다 정합니다.\n\n'
+            '**바꾸는 곳**: 계좌·자동매매 → 실계좌 탭(운용 방식·금액 한도·매수 크기·실주문 스위치).')
+
+
 TOPIC_TEXT = {
     'longterm': lambda v: (__import__('longterm_flow').summary(__import__('longterm_flow').state(live={})) + '\n\n'
                            '매일 아침 미국 종가로 **원시 국면**을 정하고, 같은 새 국면이 확정 일수만큼 이어질 때만 **확정 국면**을 바꿉니다. '
@@ -598,8 +599,7 @@ TOPIC_TEXT = {
                            "**바꾸는 곳**: 계좌·자동매매 → 모의계좌 → 매매 기준의 \"낙폭과대 반등 · 빠른 선택\"과 감시 종목. 오늘 발동 기록은 전략 구조 탭의 \"낙폭과대 감시\"."),
     'regime': lambda v: '국면은 지수 종가와 20·60일 이동평균, 20일 수익률로 정한 규칙 기반 분류입니다. 하락장일수록 목표를 낮춰 빨리 익절하고, 롱 진입에는 지수 확인을 더 엄격히 요구합니다.',
     'safety': lambda v: '모의계좌 주문은 자동 실행기 한 곳에서만 나갑니다. 매 주기 증권사와 원장을 대조하고, 주문 가드가 금액·종목 수·미확인 주문을 막습니다. 대시보드는 주문을 내지 않습니다.',
-    'live': lambda v: (f"실계좌는 지금 **관찰 모드**입니다. 엔진 판단을 계좌 한도로 가상 실행해 기록만 합니다. 실주문은 별도 승인 뒤 보호 경로에서만 나가며, 항상 운용금 "
-                       f"{LIVE_LIMITS['capital_krw']:,}원 · 하루 손실 {LIVE_LIMITS['daily_loss_krw']:,}원 · 매수 1회 최대 {LIVE_LIMITS['order_qty']:,}주 · 계좌별 1주 가격 상한(최대 {LIVE_LIMITS['order_price_max_krw']:,}원) 한도를 지킵니다. 실주문 경로는 아직 인버스(114800) 전용입니다."),
+    'live': lambda v: live_text(),
     'data': lambda v: '시세·잔고는 NH 나무 PLUG, 시장 상황은 네이버 금융·Yahoo에서 받습니다. 오늘의 장전 자료는 시각·출처를 확인해 Jev 판단과 장기투자 스토리 점검에 과거 맥락으로 제공하며, 현재 호가나 주문 신호를 대신하지 않습니다. 판단과 주문은 기록·원장으로 모입니다. Jev 신뢰도는 수익 확률이 아닙니다.',
 }
 
@@ -613,9 +613,58 @@ def topic(key, v):
     return md(TOPIC_TEXT[key](v))
 
 
+CALLOUTS = {'근거': ('info', '근거'), '바꾸는 곳': ('ok', '바꾸는 곳'), '도식 전체': ('info', '도식 전체'), '지금': ('warn', '지금')}
+
+
+def topic_view(key, v):
+    """A topic in the guide template (2026-11-19): the first paragraph as the summary card, 근거 · 바꾸는 곳 · 도식 전체 as
+    labelled callouts, the rest as paragraphs, instead of one wall of markdown."""
+    import guide_ui as GU
+    GU.style()
+    if key == 'limits':
+        return limits_view(v)
+    for i, text in enumerate(p for p in TOPIC_TEXT[key](v).split('\n\n') if p.strip()):  # GU escapes; no md()
+        found = re.match(r'\*\*([^*]+)\*\*\s*[:：]\s*', text)
+        if found and found.group(1) in CALLOUTS:
+            tone, label = CALLOUTS[found.group(1)]
+            GU.note(text[found.end():], tone, label)
+        elif i == 0:
+            GU.lead(text)
+        else:
+            GU.para(text)
+
+
+def limits_view(v):
+    """제한 규칙 as status cards by group (2026-11-19: the bullet list was hard to read)."""
+    import guide_ui as GU
+    from restrictions import GROUPS, KIND_LABELS, RULES
+
+    def state(kind, key):
+        if kind == 'switch':
+            return ('on', '켜짐') if v.get(key, 1) else ('off', '꺼짐')
+        return ('fix', KIND_LABELS[kind]) if kind == 'fixed' else ('set', KIND_LABELS[kind])
+    cards = [(g, name, *state(kind, key), what, why) for _, g, name, kind, key, what, why in RULES]
+    counts = {k: sum(1 for c in cards if c[2] == k) for k in GU.BADGES}
+    GU.lead(f'실행기가 매수를 **막거나 줄이는 규칙 {len(cards)}개**입니다. **켜짐·꺼짐**은 계좌·자동매매 → 모의계좌 → 제한 규칙 탭의 스위치로 '
+            '바꾸고 실행기가 다음 주기(약 1분)부터 따릅니다. **설정값**은 매매 기준·금액 한도의 숫자로 넓히고, **항상 적용**은 안전·증권사 규칙이거나 '
+            '별도 승인이 필요한 값입니다.', '제한 규칙 한눈에')
+    GU.legend(counts)
+    for group in GROUPS:
+        items = [c[1:] for c in cards if c[0] == group]
+        if items:
+            GU.section(group, f'{len(items)}개')
+            GU.rules(items)
+    GU.note('실계좌는 엔진 체결 원장을 따라가므로 위 규칙이 미러에도 반영되고, 그 위에 계좌별 보호 한도(운용금·하루 손실·1주 가격 상한·회당 한도·'
+            '새 종목·손절)가 더 붙습니다. 실계좌 탭마다 "제한 규칙"에 정리돼 있습니다.', 'info', '실계좌')
+
+
 def diagram(key, v):
     """A guide diagram: Archify for the step-by-step flows (FLOWS), Graphviz for the rest (comparisons, rule grids)."""
     import guide_ui as GU
+    if key == 'limits':  # 27 boxes shrank to unreadable in one picture (2026-11-19): the rule cards are the overview
+        return limits_view(v)
+    if key == 'engines':  # a comparison reads best as aligned rows, not a picture (2026-11-19)
+        return engines_view(v)
     title, build = DIAGRAMS[key]
     GU.section(title)
     if key in FLOWS:
@@ -624,7 +673,7 @@ def diagram(key, v):
         GU.diagram(build(v))
 
 
-@st.dialog('화면 가이드', width='large')
+@st.dialog('가이드 센터', width='large')
 def guide_dialog(key=None):
     """All guides in one place; opens on the given screen."""
     import dialogs
@@ -644,12 +693,16 @@ def guide_dialog(key=None):
         if guide.get('terms'):
             GU.section('용어')
             GU.table(list(guide['terms'].items()), head=('용어', '뜻'))
+        for title, rows in guide.get('sections', ()):
+            GU.section(title)
+            GU.table(rows, head=('항목', '설명'))
         for name in guide['diagrams']:
             diagram(name, v)
     for tab, name in zip(tabs[1:], TOPICS):
         with tab:
-            st.markdown(topic(name, v))
-            diagram(name, v)
+            topic_view(name, v)
+            if name != 'limits':  # topic_view already drew the rule cards
+                diagram(name, v)
     GU.note('숫자는 지금 저장된 설정과 실행기 값입니다. 가격은 1분마다 확인하므로 체결가가 정확히 기준가라는 보장은 없고, 수수료·세금은 반영하지 않습니다.')
 
 
@@ -658,6 +711,8 @@ def render_text(guide):
     st.markdown(md('**읽는 순서**\n' + '\n'.join(f'{i}. {step}' for i, step in enumerate(guide['steps'], 1))))
     if guide.get('terms'):
         st.markdown(md('**용어**\n' + '\n'.join(f'- **{term}**: {text}' for term, text in guide['terms'].items())))
+    for title, rows in guide.get('sections', ()):
+        st.markdown(md(f'**{title}**\n' + '\n'.join(f'- **{name}**: {text}' for name, text in rows)))
 
 
 def help_row(key):
@@ -668,6 +723,6 @@ def help_row(key):
     with middle.popover('화면 안내', icon=':material/help:', width='stretch', help='이 화면이 보여주는 것과 읽는 법'):
         render_text(guide)
     # outside the popover: a dialog opened from inside it would sit under the still-open popover
-    if right.button('도식 가이드', key=f'guide_open_{key}', icon=':material/schema:', width='stretch',
-                    help='이 화면과 매수·매도 전략, 안전 장치를 도식으로 봅니다.'):
+    if right.button('가이드 센터', key=f'guide_open_{key}', icon=':material/menu_book:', width='stretch',
+                    help='이 화면의 읽는 순서·용어·설명과 매수·매도 전략, 제한 규칙, 안전장치 도식을 한 팝업에서 봅니다.'):
         guide_dialog(key)

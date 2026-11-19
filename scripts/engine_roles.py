@@ -3,8 +3,8 @@
 The main engine (accounts.json paper-shared.engine) trades the shared NH paper account (shared-etf-paper). The other
 engine keeps trading as the secondary on a virtual broker (virtual_paper_broker), with the same runner code, so its
 data keeps accumulating and it can take over as main later:
-  jev  secondary -> jev-virtual  (runner retired 2026-11-17: Jev is always main; old folder only)
-  vibe secondary -> vibe-paper   (intraday vibe stopped 2026-11-17; frozen book for the archive)
+  jev  secondary -> jev-virtual  (runner retired 2026-11-17; folder moved to ~/.vibe-trading/archive/2026-11-vibe-intraday on 11-19)
+  vibe secondary -> vibe-paper   (intraday vibe stopped 2026-11-17; folder moved to the same archive on 11-19)
 Readers (live mirror, the other engine's reference view, dashboards) ask here instead of hard-coding a folder.
 """
 from __future__ import annotations

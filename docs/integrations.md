@@ -1,0 +1,262 @@
+# 연동 서비스
+
+Omni AI Trading이 쓰는 외부 서비스를 한곳에 모았습니다. 서비스마다 무엇에 쓰는지, 꼭 필요한지, 어디서 키를 받는지, `.env`의 어느 키에 넣는지, 제대로 붙었는지 확인하는 법을 적었습니다.
+
+- [한눈에 보기](#한눈에-보기)
+- [키를 넣는 곳과 원칙](#키를-넣는-곳과-원칙)
+- 증권사: [NH 나무 PLUG](#nh-나무-plug) · [키움 REST](#키움-rest) · [토스증권 Open API](#토스증권-open-api)
+- AI 판단: [TypeSafe Jev](#typesafe-jev) · [OpenAI](#openai)
+- 공공·시장 데이터: [KRX 정보데이터](#krx-정보데이터) · [OpenDART](#opendart) · [FRED](#fred) · [키 없이 쓰는 출처](#키-없이-쓰는-출처)
+- 알림: [알림 채널 두 개](#알림-채널-두-개) · [Discord](#discord) · [Telegram](#telegram) · [Slack](#slack) · [발송 확인과 재시작](#발송-확인과-재시작)
+- [리포트 게시: GitHub Pages](#리포트-게시-github-pages)
+- [AI에게 맡기기](#ai에게-맡기기)
+
+> [!IMPORTANT]
+> 키·토큰·웹훅 주소·계좌번호는 비밀번호와 같습니다. 사람이 `.env`에 직접 넣고, 화면·채팅·로그·커밋에 붙여 넣지 마세요. 새어 나갔으면 그 서비스 콘솔에서 바로 다시 발급합니다. 각 서비스의 이용 약관과 요금은 그 서비스의 최신 안내를 따릅니다.
+
+## 한눈에 보기
+
+```mermaid
+flowchart LR
+  subgraph IN["받는 자료"]
+    NH["NH 나무 PLUG<br/>시세·잔고·주문"]
+    KW["키움 · 토스<br/>순위·시황 보조"]
+    PUB["KRX · OpenDART · FRED<br/>시세 통계·공시·거시"]
+    FREE["네이버 · Yahoo · 뉴스 RSS<br/>키 없음"]
+  end
+  subgraph AI["판단"]
+    JEV["TypeSafe Jev<br/>차트·뉴스 판단"]
+    OAI["OpenAI<br/>빠른 판단·관찰"]
+  end
+  subgraph OUT["내보내기"]
+    MSG["Discord · Telegram · Slack<br/>체결·요약·리포트 링크"]
+    GH["GitHub Pages<br/>HTML 리포트"]
+  end
+  IN --> RUN["실행기·장기 엔진"]
+  AI --> RUN
+  RUN --> NH
+  RUN --> MSG
+  RUN --> GH
+```
+
+| 서비스 | 쓰는 곳 | 필요 | `.env` 키 | 비용 |
+| --- | --- | --- | --- | --- |
+| NH 나무 PLUG | 시세, 잔고, 모의·실계좌 주문 | **필수** | `APP_KEY`, `APP_SECRET`, `ACCOUNT_NUMBER`(실계좌만) | NH 안내를 따름 |
+| TypeSafe Jev | 진입·보유 판단(차트 이미지·뉴스) | Jev 매매에 필수 | `JEV_API_KEY` | 서비스 요금을 따름 |
+| OpenAI | Decisions 빠른 판단, 실계좌 AI 관찰 | 권장 | `OPENAI_API_KEY` | API 사용료 |
+| 키움 REST | 순위 후보 선별, 시황 대체, 프로그램매매 | 선택 | `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET` | 키움 안내를 따름 |
+| 토스증권 Open API | 신규상장 목록 대체, 시황 대체, NXT 프리마켓 요약 | 선택 | `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET` | 토스 안내를 따름 |
+| KRX 정보데이터 | 코스피·코스닥 일별 시세 | 선택 | `KRX_API_KEY` | 무료 신청 |
+| OpenDART | 공시, 재무제표, 그림자 후보 공시 | 선택 | `OPENDART_API_KEY` | 무료 신청 |
+| FRED | 장기 엔진 거시 배경(금리차·실질금리·하이일드) | 선택 | `FRED_API_KEY` | 무료 |
+| Discord | 알림·리포트 링크 | 선택 | `DISCORD_WEBHOOK_REALTIME`, `DISCORD_WEBHOOK_LONGTERM` | 무료 |
+| Telegram | 알림·리포트 링크 | 선택 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_REALTIME`, `TELEGRAM_CHAT_LONGTERM` | 무료 |
+| Slack | 알림·리포트 링크 | 선택 | `SLACK_WEBHOOK_REALTIME`, `SLACK_WEBHOOK_LONGTERM` | 무료 플랜 가능 |
+| GitHub Pages | HTML 리포트 게시 | 선택 | `REPORT_PAGES_REPO`, `REPORT_PAGES_PUSH`, `GH_TOKEN` | 공개 저장소 무료 |
+
+선택 서비스의 키가 비어 있으면 그 기능만 빠지고 나머지는 그대로 돌아갑니다. 지금 어떤 서비스가 호출되고 실패·지연되는지는 대시보드 **운영 → API 연동**에서 봅니다(호출 기록은 주소의 비밀 부분과 숫자를 가리고 남깁니다).
+
+## 키를 넣는 곳과 원칙
+
+1. 저장소 루트에서 `.env.example`을 `.env`로 복사하고 권한을 600으로 둡니다(`cp .env.example .env && chmod 600 .env`).
+2. 필요한 키만 채웁니다. 키 이름과 설명은 `.env.example` 주석에 있습니다.
+3. 설정값(한도·매매 기준)은 `.env`가 아니라 대시보드에서 바꿉니다. `.env`에는 비밀값과 경로만 둡니다.
+4. 바꾼 키는 그 키를 읽는 서비스가 다음에 시작할 때 적용됩니다. 알림 서비스는 [발송 확인과 재시작](#발송-확인과-재시작)을 따릅니다.
+
+## NH 나무 PLUG
+
+시세·잔고·주문의 중심입니다. 앱 키 하나로 운영 서버(시세·실계좌 조회)와 모의 서버(모의 주문)를 함께 씁니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [NH 나무 PLUG](https://www.nhplug.com) 개발자 센터 → 앱 등록 → App Key·App Secret. 국내주식 모의투자 계좌(계좌 유형 03)를 함께 신청 |
+| `.env` | `APP_KEY`, `APP_SECRET`. 실계좌를 쓸 때만 `ACCOUNT_NUMBER`(추가 실계좌는 `ACCOUNT_NUMBER_2`…) |
+| 연결 | 공식 MCP 설치·패치·`agent.json` 등록: [시작하기 4절](getting-started.md#4-nh-공식-mcp-연결) |
+| 확인 | `PYTHONPATH=agent:scripts .venv/bin/python scripts/vibe_market_brief.py` (ETF 7종 현재가가 나오면 시세 통로가 열린 것) |
+| 유량 | 앱 키당 초당 약 5회. 실행기·대시보드·장기 엔진이 나눠 씀([FAQ](faq.md#nh-유량-초과가-납니다)) |
+
+## 키움 REST
+
+순위 후보를 빠르게 고르고(코스피200·코스닥150 구성종목의 거래대금·거래량·등락 순위), 네이버 시황이 막힐 때 지수·프로그램매매·테마를 대신 받습니다. 조회 TR 허용 목록만 부르며 주문하지 않습니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [키움 OpenAPI](https://openapi.kiwoom.com) → API 사용 신청 → 앱 키. 호출할 PC의 IP 등록 |
+| `.env` | `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET` |
+| 토큰 | 24시간 토큰을 `~/.vibe-trading/kiwoom/token.json`에 공유 캐시(인증 실패 때만 다시 발급) |
+| 없으면 | 순위 계산이 NH 전체 스캔으로 돌아가고(느려짐), 시황 대체 출처 하나가 빠짐 |
+
+## 토스증권 Open API
+
+KRX KIND 신규상장 목록이 막힐 때 상장일 목록을, 네이버 시황이 막힐 때 지수 일봉·투자자별 매매를 대신 받고, NXT 프리마켓(08:00~08:50) 체결 요약을 만듭니다. 조회 경로 허용 목록만 부릅니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [토스증권 개발자](https://developers.tossinvest.com) 또는 WTS 설정 → Open API. 허용 IP 등록 |
+| `.env` | `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET` |
+| 토큰 | 클라이언트당 1개(다시 발급하면 이전 토큰 폐기)라 모든 프로세스가 `~/.vibe-trading/toss/token.json`을 같이 씀 |
+| 참고 | 토스 투자자 값은 미등록 외국인을 포함해 네이버와 기준이 다름. 외부 AI에는 원본 봉이 아닌 요약값만 보냄 |
+
+## TypeSafe Jev
+
+Jev는 차트 이미지와 최근 90분 뉴스, 시황 요약을 받아 매수·대기·매도 의견과 신뢰도를 내는 외부 판단 모델입니다. Jev 트레이딩 엔진의 진입·보유 판단, 낙폭과대·신중 재진입 검토에 쓰입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [TypeSafe](https://typesafe.ai)에서 API 키 |
+| `.env` | `JEV_API_KEY` |
+| 요청 | 이미지 요청에는 `TypeSafe-Danger-Zone-Images: true` 헤더를 붙임(코드가 처리) |
+| 없으면 | 그 회차 Jev 의견이 없어 Jev 경로가 대기함(`JEV_API_KEY missing`) |
+
+> [!NOTE]
+> Jev의 신뢰도는 수익 확률이 아닙니다. 주문은 승인된 규칙과 주문 한도가 정합니다.
+
+## OpenAI
+
+ETF 모의 실행기의 Decisions(빠른 판단)와 실계좌 AI 관찰기가 씁니다. 장기 엔진의 테마 스토리 점검은 원본 vibe-trading 에이전트의 LLM 설정(`~/.vibe-trading/.env`)을 씁니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [OpenAI Platform](https://platform.openai.com) → API keys |
+| `.env` | `OPENAI_API_KEY` |
+| 비용 | API 사용료가 따로 듭니다(채팅용 ChatGPT 구독과 별개) |
+
+## KRX 정보데이터
+
+코스피·코스닥 일별 시세를 받습니다(`krx_daily` 도구).
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [KRX 정보데이터 OpenAPI](https://openapi.krx.co.kr) → 서비스 이용 신청 |
+| `.env` | `KRX_API_KEY` |
+
+신규상장 목록은 키 없이 [KRX KIND](https://kind.krx.co.kr) 웹 페이지에서 읽습니다(막히면 토스로 대신).
+
+## OpenDART
+
+금융감독원 전자공시의 공시·재무제표를 받습니다. 이슈 종목 그림자 후보(경영권·최대주주 변경·공개매수 공시)와 스윙 가치 점검에 쓰입니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [OpenDART](https://opendart.fss.or.kr) → 인증키 신청 |
+| `.env` | `OPENDART_API_KEY` (쿼리 키는 호출 기록에 남기지 않음) |
+
+## FRED
+
+미국 세인트루이스 연준 FRED에서 10년−2년 금리차, 10년물, 실질금리, 하이일드 스프레드와 30일 발표 일정(CPI·고용·GDP·PCE·PPI)을 받아 장기 엔진의 거시 배경과 시장 온도에 씁니다. 참고 입력이라 국면 판정·주문은 이 값을 읽지 않습니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발급 | [FRED](https://fred.stlouisfed.org) → My Account → API Keys (무료) |
+| `.env` | `FRED_API_KEY` |
+| 함께 쓰는 것 | 연준 FOMC 일정 페이지(키 없음) |
+
+## 키 없이 쓰는 출처
+
+| 출처 | 쓰는 곳 |
+| --- | --- |
+| 네이버 증권 | 지수·수급·테마·종목 정보·애널리스트 리포트, 뉴스 대체 출처 |
+| Google 뉴스·Bing 뉴스 RSS | 시장·종목 헤드라인(3분 공유 캐시, 막히면 다음 출처) |
+| Yahoo Finance | 해외 지수·선물·원자재·환율, 국내 일봉 보조, 장기 엔진 지표 |
+| TradingView 스캐너 | 코스피200 야간선물 |
+| SEC EDGAR | 미국 종목 아이디어(13F·공시) |
+
+키는 없지만 각 사이트의 이용 조건을 따르고, 막히면 대체 출처나 직전 값으로 넘어갑니다.
+
+## 알림 채널 두 개
+
+알림은 채널 두 개로 나뉘고, 채널마다 Discord·Telegram·Slack 중 설정한 곳 **모두**로 같은 내용이 갑니다.
+
+| 채널 | 보내는 것 |
+| --- | --- |
+| 실시간 (`REALTIME`) | Jev 공유 모의·Jev 실계좌 체결(체결마다 즉시), 15:40 계좌별 마감 요약, 장전 사전 점검 실패, 매매일지·장 마감 개선안·낙폭과대 주간 감사·장전 분석 리포트 링크 |
+| 장기투자 (`LONGTERM`) | 장기 엔진의 하루 판단·가상 주문·순자산, 장기투자 실계좌 체결·계획, 장기투자 전략 리포트·복기·감사 링크 |
+
+```mermaid
+flowchart LR
+  REC[("거래 기록·리포트")] --> W["discord-notify<br/>30초마다"]
+  W --> RT{"실시간 채널"}
+  W --> LT{"장기투자 채널"}
+  RT --> D1["Discord"]
+  RT --> T1["Telegram"]
+  RT --> S1["Slack"]
+  LT --> D2["Discord"]
+  LT --> T2["Telegram"]
+  LT --> S2["Slack"]
+```
+
+- 발송처마다 "보낸 목록"을 따로 둡니다. 한 곳이 실패해도 다른 곳에 다시 보내지 않고, 실패한 곳만 다음 회차에 이어서 보냅니다.
+- 새 발송처를 켜면 그때부터 생긴 알림만 갑니다(지난 알림을 몰아서 보내지 않음).
+- 리포트는 GitHub Pages에 게시되고 페이지가 열린 뒤에만 링크로 갑니다. 본문을 텍스트로 보내지 않습니다([리포트 발행](report-pages.md)).
+- 메시지 서식은 발송처에 맞춰 바뀝니다. Discord는 마크다운 그대로, Slack은 mrkdwn(`*굵게*`, `<주소|제목>`)으로, Telegram은 서식 없는 글자로 보냅니다.
+- 내용과 표기 규칙(손절·익절·전량 매도 구분 등)은 [알림](notifications.md)에 있습니다.
+
+## Discord
+
+| 단계 | 할 일 |
+| --- | --- |
+| 1 | 알림을 받을 채널 두 개(예: `#실시간`, `#장기투자`)를 만듭니다 |
+| 2 | 채널 설정 → 연동 → 웹후크 → 새 웹후크 → 웹후크 URL 복사 |
+| 3 | `.env`에 `DISCORD_WEBHOOK_REALTIME`, `DISCORD_WEBHOOK_LONGTERM`을 넣습니다(같은 주소를 둘 다에 넣으면 한 채널로 받음) |
+
+## Telegram
+
+| 단계 | 할 일 |
+| --- | --- |
+| 1 | Telegram에서 [@BotFather](https://t.me/BotFather)에게 `/newbot`을 보내 봇을 만들고 봇 토큰을 받습니다 |
+| 2 | 알림을 받을 그룹(또는 채널)을 만들고 봇을 초대합니다. 채널이면 봇을 관리자로 추가합니다 |
+| 3 | 그 그룹에 아무 메시지나 보낸 뒤, 브라우저에서 `https://api.telegram.org/bot<봇 토큰>/getUpdates`를 열어 `chat` → `id`를 확인합니다(그룹은 보통 `-100`으로 시작). 이 주소에는 토큰이 들어 있으니 공유하지 마세요 |
+| 4 | `.env`에 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_REALTIME`, `TELEGRAM_CHAT_LONGTERM`을 넣습니다. 한 채팅방으로 받으려면 두 채팅 ID를 같게 둡니다 |
+
+토큰이 없으면 채팅 ID가 있어도 Telegram은 꺼진 것으로 봅니다. 한 메시지는 4,000자에서 나눠 보냅니다.
+
+## Slack
+
+| 단계 | 할 일 |
+| --- | --- |
+| 1 | [Slack API](https://api.slack.com/apps) → Create New App → From scratch로 앱을 만듭니다 |
+| 2 | Incoming Webhooks를 켜고 Add New Webhook to Workspace에서 알림 채널을 고릅니다. 채널 두 개를 쓰면 두 번 추가합니다 |
+| 3 | 받은 Webhook URL을 `.env`의 `SLACK_WEBHOOK_REALTIME`, `SLACK_WEBHOOK_LONGTERM`에 넣습니다 |
+
+## 발송 확인과 재시작
+
+알림 서비스는 시작할 때 `.env`를 읽습니다. 발송처를 더하거나 바꾼 뒤에는 연결을 확인하고 서비스를 다시 시작합니다.
+
+```bash
+PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/discord_notify.py --test        # 발송처마다 연결 확인 메시지 1건
+PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python scripts/report_pages.py --test-send     # 채널마다 최신 리포트로 테스트
+launchctl kickstart -k gui/$(id -u)/com.vibetrading.discord-notify                               # 알림 서비스 다시 시작
+```
+
+`--test`는 채널·발송처마다 `sent` 또는 `failed`를 보여 줍니다. `failed`면 주소·토큰·채팅 ID와 봇 초대 여부를 확인합니다. 발송 결과와 실패 사유는 대시보드 **운영 → 리포트 발행**과 호출 기록에 남습니다.
+
+## 리포트 게시: GitHub Pages
+
+리포트(장전 분석·매매일지·개선안·장기 전략 등)를 HTML로 만들어 GitHub Pages에 올리고, 알림에는 링크를 보냅니다.
+
+| 항목 | 내용 |
+| --- | --- |
+| `.env` | `REPORT_PAGES_REPO=<owner>/<repo>`, `REPORT_PAGES_PUSH=on`, `GH_TOKEN`(또는 상위 폴더 `.envrc`) |
+| 선택 | `REPORT_PAGES_URL`(사용자 도메인), `REPORT_PAGES_BRANCH`(기본 `gh-pages`) |
+| 주의 | 무료 계정의 Pages는 공개 저장소에서만 돌아갑니다. 리포트는 검색 엔진에 올리지 않지만 주소를 아는 사람은 볼 수 있습니다 |
+| 자세히 | [리포트 발행](report-pages.md) |
+
+## AI에게 맡기기
+
+```text
+docs/integrations.md를 읽고 지금 .env에서 비어 있는 키를 서비스별로 이름만 표로 보여 줘(값은 출력하지 마).
+필수인 것과 선택인 것을 나누고, 빈 선택 서비스가 빠지면 무엇이 안 되는지도 적어 줘.
+```
+
+```text
+Telegram으로도 알림을 받고 싶어. docs/integrations.md의 Telegram 절차를 단계별로 안내해 주고,
+내가 .env에 키를 넣었다고 하면 discord_notify.py --test로 확인한 뒤 discord-notify 재시작이 필요한지 알려 줘.
+```
+
+```text
+API 연동 화면 기준으로 오늘 실패하거나 지연된 외부 서비스가 있는지 보고, 원인과 확인할 곳을 정리해 줘.
+```
+
+## 다음에 읽을 것
+
+[시작하기](getting-started.md) · [알림](notifications.md) · [리포트 발행](report-pages.md) · [설정 레퍼런스](configuration.md) · [AI와 함께 쓰기](ai-agents.md)

@@ -103,7 +103,7 @@ def test_token_expiry_reads_only_the_expiry_and_flags_expired(tmp_path):
     assert v.token_status(v.cat.BY_KEY['naver'], tmp_path, now) is None
 
 
-def test_skills_section_lists_jobs_and_skill_results(tmp_path):
+def test_skills_section_lists_skill_results(tmp_path):
     import os
     os.environ['SKILLS_VIEW_RUNTIME'] = str(tmp_path)
     reviews = tmp_path / 'nhplug/shared-etf-paper/reviews'
@@ -117,11 +117,9 @@ def test_skills_section_lists_jobs_and_skill_results(tmp_path):
         skills_view.render(Path(os.environ['SKILLS_VIEW_RUNTIME']))
     at = AppTest.from_function(app, default_timeout=60).run()
     assert not at.exception
-    jobs, skills = at.dataframe[0].value, at.dataframe[1].value
-    assert '매매일지 작성' in set(jobs['작업']) and list(jobs.columns) == ['시각', '작업', '작업 ID', '상태', '쓰는 스킬', '결과', '일정(cron·한 번)']
-    assert len(jobs) == len(__import__('skill_catalog').jobs())  # every backed-up task, not a hand-kept subset
+    skills = at.dataframe[0].value  # the schedules moved to 운영 → 자동 작업 (2026-11-19)
     assert skills.loc[skills['스킬'].str.contains('trading-journal-writer'), '최근 결과'].iloc[0].startswith('journal-2026-11-17.md')
-    detail = at.dataframe[2].value  # the first skill (trading-journal-writer) is selected
+    detail = at.dataframe[1].value  # the first skill (trading-journal-writer) is selected
     assert detail.loc[detail['결과'] == '하루 매매관점 리포트', '최근 파일'].iloc[0] == 'journal-2026-11-17.md'
 
 

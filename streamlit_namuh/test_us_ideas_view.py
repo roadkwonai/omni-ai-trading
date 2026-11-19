@@ -74,7 +74,7 @@ def test_names_are_picked_by_master_and_found_by_search(tmp_path):
         db.executemany('INSERT INTO universe VALUES (?,?,?,?,?,?)', [(day, 'AAPL', '1', 'Apple Inc.', 'IVV', 6.0),
                                                                       (day, 'AMP', '2', 'Ameriprise Financial, Inc.', 'IVV', 0.1)])
         db.execute('INSERT INTO managers13f VALUES (?,?,?)', ('2026Q3', 'Berkshire Hathaway', json.dumps(
-            {'master': '워렌 버핏', 'firm': '버크셔 해서웨이', 'positions': [{'issuer': 'APPLE INC'}, {'issuer': 'NOT LISTED CORP'}]})))
+            {'master': '워런 버핏', 'firm': '버크셔 해서웨이', 'positions': [{'issuer': 'APPLE INC'}, {'issuer': 'NOT LISTED CORP'}]})))
 
     def view(root):
         import us_ideas_view
@@ -105,7 +105,7 @@ def seed_detail(root, thesis=True):
         db.execute('INSERT INTO universe VALUES (?,?,?,?,?,?)', (day, 'AAA', '0000000123', 'Alpha Corp', 'IWO', 0.1))
         db.execute('INSERT INTO facts VALUES (?,?,?)', (day, 'AAA', json.dumps(facts())))
         db.execute('INSERT INTO managers13f VALUES (?,?,?)', ('2026Q3', 'Berkshire Hathaway', json.dumps(
-            {'master': '워렌 버핏', 'firm': '버크셔 해서웨이', 'positions': [{'issuer': 'ALPHA CORP', 'shares': 1000.0, 'value_usd': 5e6, 'weight_pct': 1.5}],
+            {'master': '워런 버핏', 'firm': '버크셔 해서웨이', 'positions': [{'issuer': 'ALPHA CORP', 'shares': 1000.0, 'value_usd': 5e6, 'weight_pct': 1.5}],
              'changes': [{'action': 'increased', 'issuer': 'ALPHA CORP', 'shares_change_pct': 12.5}]})))
         if thesis:
             db.execute('INSERT INTO theses VALUES (?,?,?,?)', ('2026-W47', 'AAA', 'tenbagger', json.dumps(
@@ -153,7 +153,7 @@ def test_a_picked_name_shows_info_news_and_the_masters_thinking(tmp_path, monkey
     assert '시가총액' in set(info['지표']) and info['기준'].str.contains('근사').any() and info['출처'].str.contains('SEC').any()
     assert 'Services-Prepackaged Software' in text and '[10-Q 2026-11-05](https://www.sec.gov/' in text
     holders = next(df.value for df in at.dataframe if '보유 주식' in df.value.columns)
-    assert holders.iloc[0]['거장'].startswith('워렌 버핏') and '+12.5%' in holders.iloc[0]['분기 변화']
+    assert holders.iloc[0]['거장'].startswith('워런 버핏') and '+12.5%' in holders.iloc[0]['분기 변화']
     assert 'Alpha beats estimates' in text and 'https://news.example/a' in text and '지시가 아닙니다' in text
     assert '구독 매출이 빠르게 는다.' in text and '2분기 연속 매출 감소' in text and '2026-W47' in text
     assert any('2026-W47' in e.label for e in at.expander)  # the weekly report that names it
@@ -187,7 +187,7 @@ def test_news_keeps_only_articles_about_the_name(monkeypatch):
     assert [n['url'] for n in got] == ['u1', 'u3', 'u4']  # named in the title (a whole word), or the ticker is the first tag
 
 
-THIRTEEN_F = {'master': '워렌 버핏', 'firm': '버크셔 해서웨이', 'positions': [
+THIRTEEN_F = {'master': '워런 버핏', 'firm': '버크셔 해서웨이', 'positions': [
     {'issuer': 'LENNAR CORP', 'cusip': '526057104', 'title_of_class': 'CL A', 'put_call': None, 'weight_pct': 0.7},
     {'issuer': 'ISHARES TR', 'cusip': '464287200', 'title_of_class': 'CORE S&P500 ETF', 'put_call': None, 'weight_pct': 9.2},
     {'issuer': 'APPLE INC', 'cusip': '037833100', 'title_of_class': 'COM', 'put_call': None, 'weight_pct': 25.0}],
