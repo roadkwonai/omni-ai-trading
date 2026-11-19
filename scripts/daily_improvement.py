@@ -255,6 +255,17 @@ def blocked_outcomes(root, day, days=10):
         return {}
 
 
+def ipo_shadow_summary(root, day, days=10):
+    """신규주 그림자 기록 (user 2026-11-19, ipo_shadow.py): per variant (지금 규칙 / A. VWAP 기준가 / C. A + 눌림 재매수) the
+    listing-days, replayed trades, summed % and win rate over the last `days` recorded days. A replay on Yahoo 1-minute bars,
+    not fills; compare the variants only after 10+ listing-days."""
+    import ipo_shadow
+    try:
+        return ipo_shadow.summary(Path(root) / 'market-research.sqlite3', day, days)
+    except sqlite3.Error:
+        return {}
+
+
 def _calibrated(bands):
     """True when the hit rate rises with the band (bands of 20+ calls only), False when it does not, None if too few."""
     order = [name for _, name in BUCKETS][::-1]
@@ -377,6 +388,7 @@ def build(day, days=10):
         'signal_calibration': (calibration := signal_calibration(root, day, days)),
         'add_sizing': add_sizing(rows, day, days, settings, events, calibration),
         'blocked_outcomes': blocked_outcomes(root, day, days),
+        'ipo_shadow': ipo_shadow_summary(root, day, days),
         'vibe_legacy_settled_excluded': unverified_calls(root, day),
         'vibe_settlements_note': '게시 시각 미확인 기존 vibe 정산 제외. 30분 방향성은 실제 체결 성과가 아닙니다.',
         'vibe_entry_study': vibe_entry_study(RUNTIME, day),

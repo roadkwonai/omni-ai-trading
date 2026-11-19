@@ -28,7 +28,7 @@ task_path() {  # the only folders a task may name: never the engine's databases 
 }
 SCRIPTS=" longterm_report.py longterm_audit.py longterm_cases.py us_ideas.py intraday_audit.py
  oversold_outcomes.py oversold_research.py oversold_cases.py daily_improvement.py trading_journal.py journal_template.py
- premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py jev_explain.py audit_incidents.py strategy_compare.py "
+ premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py jev_explain.py audit_incidents.py strategy_compare.py ipo_shadow.py "
 SCRIPTS=" $(echo $SCRIPTS) "
 case "${1:-}" in
   vibe-status) cmd=("$py" -c "import engine_ops, pathlib; print(engine_ops.status(pathlib.Path.home() / '.vibe-trading/nhplug')['vibe'])");;
@@ -68,6 +68,7 @@ for row in con.execute(q):
   *.py)
     case "$SCRIPTS" in *" $1 "*) ;; *) echo "ro: not allowed: $1" >&2; exit 2;; esac
     [ "$1" = market_movers.py ] && { case " $* " in *" --once "*) ;; *) echo "ro: market_movers.py needs --once" >&2; exit 2;; esac; }
+    [ "$1" = ipo_shadow.py ] && { case " $* " in *" --summary "*) ;; *) echo "ro: ipo_shadow.py needs --summary" >&2; exit 2;; esac; }
     for a in "${@:2}"; do  # --reports, --incidents-db, launchd --out, --root, --db ... (also --opt=PATH and abbreviations)
       case "$a" in *..*|*/*) task_path "${a#--*=}" || { echo "ro: $a: paths only under .scratch/ or the report folders" >&2; exit 2; };; esac
     done

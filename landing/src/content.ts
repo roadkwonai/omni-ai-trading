@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.1' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.2' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 
@@ -17,14 +17,13 @@ export const AI_PAID = "이 서비스는 AI 도구와 함께 쓰는 AI 트레이
 
 export const NAV = [
   { href: '#why', label: '왜 AI인가' },
-  { href: '#highlights', label: '핵심 특징' },
+  { href: '#ai', label: 'AI로 운영' },
   { href: '#art', label: '투자 기법' },
   { href: '#jev', label: 'Jev' },
   { href: '#longterm', label: '장기투자' },
   { href: '#styles', label: '내 스타일' },
-  { href: '#ai', label: 'AI 운영' },
   { href: '#daily', label: '리포트' },
-  { href: '#integrations', label: '연동' },
+  { href: '#stack', label: '기반 기술' },
   { href: '#safety', label: '안전' },
   { href: '#start', label: '시작' },
 ]
@@ -123,6 +122,39 @@ export const CALIBRATION = [
   { band: '0.6~0.7', hit: 72 },
   { band: '0.7~0.8', hit: 56 },
   { band: '0.8 이상', hit: 38 },
+]
+
+// AI 도구에서 쓰는 법 (#ai). Times are the scheduled tasks and launchd jobs in docs/automation.md.
+export const USE_STEPS = [
+  { icon: 'Download', title: '설치는 AI 에이전트가 해 줍니다', body: 'Claude Code나 Codex를 열고 설치 프롬프트를 붙여 넣으면, 에이전트가 **저장소·가상환경·NH MCP·스킬 연결까지** 알아서 설치합니다. 키를 넣거나 주문과 관련된 단계에서는 멈추고 확인을 받습니다.' },
+  { icon: 'ChatsCircle', title: '운영은 대화로 합니다', body: '"오늘 왜 안 샀어?", "손절을 1.5%로 바꾸면 뭐가 달라져?"처럼 물으면 **기록을 읽고 근거와 함께** 답합니다. 설정은 사용자가 승인한 것만 바뀝니다.' },
+  { icon: 'CalendarCheck', title: '반복 업무는 예약 작업이 맡습니다', body: '사람이 자리를 비워도 **예약 작업 15개**가 장전 점검과 분석, 장중 감사, 장 마감 개선안, 매매일지와 장기투자 리포트를 씁니다.' },
+]
+export const SCHEDULE_CHIPS = ['08:25 장전 점검', '08:31 장전 상세 분석', '08:50 장기투자 전략 리포트', '매시 20분 장중 감사', '16:15 장 마감 개선안', '16:40 매매일지', '16:45 장기투자 복기']
+export const AI_SKILLS = ['장전 분석', '장중 감사', '매매일지 작성', '장기투자 전략 리포트', 'HTML 리포트 발행', '대시보드 화면 확인', '다른 Mac으로 옮기기', '시황 트레이딩 점검', '운영 규칙·시황 조회']
+
+// 기반 기술 (#stack). What Omni takes from each, in plain words (docs/architecture.md 원본 Vibe-Trading과 이 확장의 경계).
+export const UPSTREAM = {
+  name: 'HKUDS Vibe-Trading',
+  href: 'https://github.com/HKUDS/Vibe-Trading',
+  license: 'MIT 오픈소스',
+  about: '홍콩대학교 데이터 지능 연구실(HKUDS)이 만든 개인 트레이딩 에이전트입니다. 금융 질문을 받아 **리서치 리포트, 백테스트, 모의 포트폴리오**를 만들어 주며, 시장·공시 리서치, 알파 벤치마크, 멀티 에이전트 리서치 팀, MCP 서버 기능을 갖췄습니다.',
+  uses: [
+    { title: 'MCP 연결 구조', body: 'NH 증권 서버와 리서치 도구를 같은 방식으로 연결해 호출합니다.' },
+    { title: 'HALT 긴급 정지', body: '실계좌 거래를 한 번에 멈추는 원본의 안전장치를 그대로 씁니다.' },
+    { title: '리서치 에이전트', body: '장기투자 테마 점검과 미국 종목 아이디어 조사에 읽기 전용으로 씁니다.' },
+    { title: '기록·설정 폴더 규칙', body: '기록·설정 폴더(~/.vibe-trading) 구조와 테스트 체계를 이어받았습니다.' },
+  ],
+}
+export const STACK = [
+  { icon: 'Robot', name: 'Claude Code · Codex', role: 'AI 코딩 에이전트', body: '설치와 운영, 분석, 리포트 작성을 맡습니다. 프로젝트 스킬과 예약 작업으로 매일 정해진 일을 합니다.', href: 'ai-agents.md' },
+  { icon: 'PlugsConnected', name: 'MCP', role: 'AI 도구 연결 표준', body: 'NH 공식 nhplug-mcp(MIT, 패치 적용)와 vibe-trading MCP로 시세·주문·리서치 도구를 연결합니다.', href: 'architecture.md' },
+  { icon: 'Bank', name: 'NH 나무 PLUG OpenAPI', role: '증권사', body: '시세 조회, 잔고 확인, 모의·실계좌 주문을 맡습니다. 키움·토스 Open API는 순위와 시황을 보조로 가져올 때만 씁니다.', href: 'integrations.md' },
+  { icon: 'Lightning', name: 'TypeSafe Jev · OpenAI', role: '판단 모델', body: 'Jev는 1분 차트와 뉴스를 보고 매매 후보와 신뢰도를 내고, OpenAI는 빠른 판단과 관찰을 맡습니다.', href: 'integrations.md' },
+  { icon: 'Monitor', name: 'Python · Streamlit', role: '실행기와 대시보드', body: '1분마다 돌아가는 실행기와 로컬 대시보드(10개 탭)를 만듭니다. 자동 테스트 1,998개로 동작을 검증합니다.', href: 'dashboard.md' },
+  { icon: 'Stack', name: 'SQLite · JSON', role: '기록과 설정', body: '서버 없이 내 컴퓨터의 파일에 저장합니다. 판단·체결·매매일지는 SQLite에, 관점과 설정은 JSON에 둡니다.', href: 'architecture.md' },
+  { icon: 'ArrowsClockwise', name: 'macOS launchd', role: '자동 실행', body: '장중 실행기, 장전 자료 수집, 알림, 백업을 정해진 시각에 실행하고, 멈추면 다시 실행합니다.', href: 'automation.md' },
+  { icon: 'BellRinging', name: 'GitHub Pages · 메신저', role: '리포트와 알림', body: '리포트는 HTML 페이지로 게시하고, 체결과 링크는 Discord·Telegram·Slack으로 보냅니다.', href: 'notifications.md' },
 ]
 
 export const JEV_INPUTS = [

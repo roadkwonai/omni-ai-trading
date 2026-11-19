@@ -44,19 +44,19 @@ gantt
 | --- | --- | --- | --- |
 | 로그인 시 | launchd | `shared-etf-dashboard`, `discord-notify`, `shared-etf-learning`, `shared-etf-regime`, `shared-etf-paper`, `nxt-virtual` | 대시보드, 알림 감시, 관찰기, 실행기(장 밖에서는 기다림) |
 | 금 07:00·07:30 | launchd | `us-ideas` | 미국 종목 아이디어: 07:30 주간 스크린, 07:00 분기 갱신(2·5·8·11월 셋째 금요일만) |
-| 07:40~09:10 | launchd | `premarket` | 장전 브리프 수집(07:40, 08:00~08:55 매 5분, 09:00, 09:10). NXT 프리마켓 체결 요약 포함 |
+| 07:40\~09:10 | launchd | `premarket` | 장전 브리프 수집(07:40, 08:00\~08:55 매 5분, 09:00, 09:10). NXT 프리마켓 체결 요약 포함 |
 | 07:55 | launchd | `nxt-virtual` | NXT 종가매매 가상 아침 청산 |
 | 08:20 | launchd | `preflight` | 장전 사전 점검 1차 |
 | 08:25 | Claude | `trading-preflight` | 점검 실패 보완 뒤 다시 점검 |
 | 08:31 | Claude | `premarket-analysis-daily` | 장전 상세 분석 리포트 |
-| 08:40 | launchd | `vibe-longterm` | 장기 엔진 시작(08:45 판단, 09:40~14:30 가상 체결·적립식, 15:40 마감) |
+| 08:40 | launchd | `vibe-longterm` | 장기 엔진 시작(08:45 판단, 09:40\~14:30 가상 체결·적립식, 15:40 마감) |
 | 08:50 | launchd | `market-movers` | 순위·관심종목 계산(09:00 개장을 기다렸다가 15:05까지) |
 | 08:50 | Claude | `longterm-strategy-daily` | 장기투자 일일 전략 리포트 |
 | 08:53 | launchd | `preflight` | 장전 사전 점검 2차 |
 | 08:58 | launchd | `live-follow-1` | 실계좌 1 미러 실행기 |
 | 09:00 | launchd | `trading-day-start` | 거래일 확인 뒤 실행기·관찰기 시작 |
-| 09:20~15:20 매시 20분 | Claude | `intraday-audit-hourly` | 장중 매매·차단 감사 |
-| 09:35 | launchd | `longterm-live-2` | 실계좌 2 장기투자 실행기(09:40~14:30 주문 창, 14:40까지 미체결 정리) |
+| 09:20\~15:20 매시 20분 | Claude | `intraday-audit-hourly` | 장중 매매·차단 감사 |
+| 09:35 | launchd | `longterm-live-2` | 실계좌 2 장기투자 실행기(09:40\~14:30 주문 창, 14:40까지 미체결 정리) |
 | 11:30·13:30·14:30 | Claude | `trading-intraday-report` | 장중 진행 보고(대화) |
 | 15:35 | launchd | `nxt-virtual` | NXT 종가매매 가상 저녁 판단 |
 | 15:40 | launchd | `discord-notify` | 마감 요약 발송(늘 도는 감시 서비스) |
@@ -85,7 +85,7 @@ gantt
 | `shared-etf-dashboard` | 대시보드 | `streamlit run streamlit_namuh/app.py` (127.0.0.1:8501, 새 탭 안 염) | 로그인 시 | `shared-etf-paper` (`streamlit.log`) |
 | `discord-notify` | 디스코드 알림 | `discord_notify.py --watch` (30초마다) | 로그인 시 | `shared-etf-paper` |
 | `nxt-virtual` | NXT 가상 실행기 | `nxt_virtual.py` (주문 없음) | 로그인 시 · 평일 07:55 · 15:35 | `nxt-virtual` |
-| `premarket` | 장전 자료 수집 | `premarket.py --once` | 평일 07:40, 08:00~08:55 매 5분, 09:00, 09:10 | `shared-etf-paper` |
+| `premarket` | 장전 자료 수집 | `premarket.py --once` | 평일 07:40, 08:00\~08:55 매 5분, 09:00, 09:10 | `shared-etf-paper` |
 | `preflight` | 장전 사전 점검 | `preflight.py` | 평일 08:20 · 08:53 | `shared-etf-paper` |
 | `vibe-longterm` | 장기투자 실행기 | `vibe_longterm.py --run` | 평일 08:40 | `vibe-longterm` |
 | `market-movers` | 순위·관심종목 계산기 | `market_movers.py` | 평일 08:50 | `shared-etf-paper` |
@@ -111,7 +111,7 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 | `trading-preflight` | 평일 08:25 (`25 8 * * 1-5`) | vibe-trading | 점검 보완 보고(대화) |
 | `premarket-analysis-daily` | 평일 08:31 | premarket-analysis | `reviews/premarket-DAY.md` |
 | `longterm-strategy-daily` | 평일 08:50 | longterm-strategy-writer | `vibe-longterm/reports/strategy-DAY.md·json` (장기투자 꺼짐이면 쓰지 않음) |
-| `intraday-audit-hourly` | 평일 09~15시 20분 (`20 9-15 * * 1-5`) | intraday-audit | `reviews/operations-audit-DAY.md` |
+| `intraday-audit-hourly` | 평일 09\~15시 20분 (`20 9-15 * * 1-5`) | intraday-audit | `reviews/operations-audit-DAY.md` |
 | `trading-intraday-report` | 평일 11:30·13:30·14:30 | vibe-trading | 대화 보고 |
 | `trading-close-report` | 평일 15:45 | vibe-trading | 대화 보고 |
 | `trading-daily-improvement` | 평일 16:15 | vibe-trading | `reviews/improvement-DAY.md` |
@@ -197,7 +197,7 @@ flowchart LR
 - 다시 띄우기는 서비스마다 5번까지입니다(NH 계좌 목록 일시 오류로 시작 직후 멈춘 11-18 사례).
 - 휴장 표를 읽지 못하면 기록에 남기고 시작합니다. 실행기는 실시간 시세 없이는 매매하지 못합니다.
 - 끝나지 않은 주문은 기록만 하고 막지 않습니다. 실행기 첫 회차가 증권사와 대조하고, 풀릴 때까지 새 주문을 내지 않습니다.
-- 주문은 개장(09:00)부터입니다. 손절 주문도 09:00부터 실행됩니다(2026-11-19 사용자 결정. 예전에는 09:00~09:09에 관찰만 함).
+- 주문은 개장(09:00)부터입니다. 손절 주문도 09:00부터 실행됩니다(2026-11-19 사용자 결정. 예전에는 09:00\~09:09에 관찰만 함).
 
 ## 장중 감사
 

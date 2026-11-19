@@ -8,6 +8,11 @@ os.environ.setdefault('VIBE_TRADING_OVERSOLD_CASES', os.path.join(tempfile.mkdte
 os.environ.setdefault('VIBE_TRADING_NEWS_CACHE', os.path.join(tempfile.mkdtemp(prefix='news-cache-'), 'news.json'))
 os.environ.setdefault('VIBE_TRADING_STOCK_NEWS_CACHE', os.path.join(tempfile.mkdtemp(prefix='stock-news-'), 'stock-news.json'))
 os.environ.setdefault('VIBE_TRADING_SETTINGS_HISTORY', os.path.join(tempfile.mkdtemp(prefix='settings-history-'), 'h.sqlite3'))
+# agent/tests/conftest.py points HOME at a sandbox for the whole process when a run also collects agent/tests, so
+# strategy_map's ~/.claude/skills/archify was looked up there and every Archify test failed or skipped (r5). The
+# account's own home (pwd, not HOME) keeps the installed Archify; the diagrams are still written to temp folders.
+import pwd  # noqa: E402
+os.environ.setdefault('ARCHIFY_BIN', os.path.join(pwd.getpwuid(os.getuid()).pw_dir, '.claude/skills/archify/bin/archify.mjs'))
 
 import pytest
 from pathlib import Path
@@ -26,9 +31,9 @@ def _isolated_research_store(tmp_path_factory):
 
 @pytest.fixture(autouse=True)
 def _ordinary_exchange_clock(monkeypatch):
-    """Tests use ordinary 09:00~15:30 days; a test of a special-hours day (수능) sets session_times.SHIFTED_DAYS itself."""
-    import session_times
-    monkeypatch.setattr(session_times, 'SHIFTED_DAYS', {})
+    """Tests use ordinary 09:00~15:30 days; a test of a special-hours day (수능) sets nhplug_calendar.SHIFTED_DAYS itself."""
+    import src.tools.nhplug_calendar as calendar  # the one table session_times and the guards read
+    monkeypatch.setattr(calendar, 'SHIFTED_DAYS', {})
 
 
 @pytest.fixture(autouse=True)

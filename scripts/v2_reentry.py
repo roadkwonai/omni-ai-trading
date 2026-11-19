@@ -85,9 +85,10 @@ def open_for(entry, now, settings, sessions_held):
         return False
     clock = now.strftime('%H:%M')
     last = held >= int(entry['hold_days']) - 1
-    from session_times import order_start
-    return (held < int(entry['hold_days']) and order_start(now.date()) <= clock < hhmm(settings['oversold_v2_until_hhmm'])
-            and not (last and now.time() >= time(14, 0)))
+    from session_times import order_start, shifted
+    day = now.date()
+    return (held < int(entry['hold_days']) and order_start(day) <= clock < shifted(hhmm(settings['oversold_v2_until_hhmm']), day)
+            and not (last and clock >= shifted('14:00', day)))
 
 
 def bottom(root, code, rows, now, settings):

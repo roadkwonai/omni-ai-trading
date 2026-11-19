@@ -250,7 +250,10 @@ class NHOrderGuard:
                     raise NHOrderBlocked('Paper buying is halted')
                 if fields.get('nmn_pr_tp_cd') != '01':
                     raise NHOrderBlocked('Swing policy permits limit buys only')
-                if not nxt_test and (now.weekday() >= 5 or not '09:00' <= now.strftime('%H:%M') < '15:00'):
+                from datetime import time as clock
+                from src.tools.nhplug_calendar import shifted_time  # 수능 day: 10:00~16:00 (user 2026-11-19)
+                if not nxt_test and (now.weekday() >= 5 or not shifted_time(clock(9), now.date()) <= now.time().replace(tzinfo=None)
+                                     < shifted_time(clock(15), now.date())):
                     raise NHOrderBlocked('Outside the permitted paper trading window')
                 try:
                     price = Decimal(str(fields.get('orr_pr')))

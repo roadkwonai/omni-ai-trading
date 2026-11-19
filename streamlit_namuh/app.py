@@ -802,7 +802,14 @@ def movers_panel(movers, now):
                       '거래대금': f"{rows.get(c, {}).get('value_mil', 0) / 100:,.0f}억",
                       'Jev 후보': '●' if c in candidates else ''} for c in movers['rankings'].get(key, [])[:10]]
             st.dataframe(table, hide_index=True)
-    st.caption('● 표시 종목(각 순위 상위 3개, 최대 10개)이 7개 ETF와 함께 Jev 종목 후보로 들어갑니다. '
+    picks = [p for p in movers.get('theme_picks') or [] if isinstance(p, dict) and p.get('code')]
+    if picks:
+        st.markdown('**주도 테마 동반주**')
+        st.dataframe([{'종목': rows.get(p['code'], {}).get('name', p['code']), '테마 묶음': p.get('group') or '—',
+                       '현재가': f"{rows.get(p['code'], {}).get('price', 0):,}", '등락': f"{rows.get(p['code'], {}).get('change_pct', 0):+.2f}%",
+                       '거래대금': f"{rows.get(p['code'], {}).get('value_mil', 0) / 100:,.0f}억"} for p in picks], hide_index=True)
+    st.caption('● 표시 종목(각 순위 상위 3개, 최대 10개)과 주도 테마 동반주(강한 테마 묶음마다 1종목, 최대 2개)가 '
+               '7개 ETF와 함께 Jev 종목 후보로 들어갑니다. 동반주는 실계좌 미러가 따라 사지 않습니다. '
                '등락률은 전일 종가 대비 직접 계산, "인기"는 거래대금 상위로 대신합니다. 지수 구성종목 밖 종목은 포함되지 않습니다.')
 
 

@@ -619,7 +619,7 @@ def test_the_order_window_follows_the_exchange_clock_on_a_late_open_day():
     """수능 day 2026-11-19 opens at 10:00: no plan on pre-open quotes at 09:45."""
     from datetime import datetime
     import longterm_live
-    import session_times; session_times.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
+    import src.tools.nhplug_calendar as calendar; calendar.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
     at = datetime(2026, 11, 19, 9, 45, tzinfo=longterm_live.KST)
     out = longterm_live.cycle(None, 'x', None, {}, 'live-2', now=at, execute_orders=False, may_cancel=False, root='/nonexistent')
     assert out == {'action': 'WAIT', 'reason': 'before 10:40'}

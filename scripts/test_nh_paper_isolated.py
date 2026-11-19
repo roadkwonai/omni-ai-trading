@@ -3295,3 +3295,33 @@ def test_entry_reads_reuse_the_opening_prior_bars_of_the_same_cycle():
     p.minute_bars(Reader(), '069500', cache, prior=True)
     p.minute_bars(Reader(), '069500', cache)
     assert calls == ['0']
+
+
+def test_each_new_listing_keeps_its_own_verdict_and_base_and_a_price_verdict_reads_no_bars(tmp_path):
+    """11-18: 에이엘로봇 (newest, offer 17,600) was quoted every cycle but the record kept only the last listing's
+    reason, so its own verdict was lost; and a listing below its base still cost a minute-bar read."""
+    import new_listings
+    now = datetime(2026, 11, 18, 10, 0, tzinfo=p.KST)
+    listings = [{'code': '471800', 'name': '에이엘로봇', 'listed': '20261118'}, {'code': '493260', 'name': '옵토닉스', 'listed': '20261117'}]
+    quotes = {'471800': {'stck_prpr': 15000, 'stck_prdy_clpr': 17600, 'stck_oprc': 15100, 'stck_hgpr': 15500},
+              '493260': {'stck_prpr': 100, 'stck_prdy_clpr': 90, 'stck_oprc': 95, 'stck_hgpr': 120}}
+    bar_reads = []
+
+    class Read:
+        def call_tool(self, tool, params):
+            code = params['stock_code']
+            listed = next(item['listed'] for item in listings if item['code'] == code)
+            return {'data': {'Output_0': {'iem_cd': code, 'stck_lstn_date': listed, **quotes[code]}}}
+    with patch.object(new_listings, 'recent', return_value=listings), patch.object(p, 'IPO_START', '00:00'), \
+         patch.object(p, 'IPO_DAYS', 2), patch.object(p, 'exit_plans', return_value={}), \
+         patch.object(p, 'minute_bars', side_effect=lambda read, code: bar_reads.append(code) or {'data': {}}):
+        assert p.ipo_candidate(Read(), tmp_path, {}, now) == (None, 'off_high', None)
+        p.ipo_candidate(Read(), tmp_path, {}, now)  # same verdicts next cycle: not journaled again
+        quotes['471800'].update(stck_prpr=17700, stck_oprc=15100, stck_hgpr=19000)  # above its offer, 6.8% off the high
+        p.ipo_candidate(Read(), tmp_path, {}, now)
+    seen = [e for e in map(json.loads, (tmp_path / 'events.jsonl').read_text().splitlines()) if e['event'] == 'ipo_seen']
+    # every path that scans listings records them (the slot path too, 11-19 review): each listing's own verdict and base,
+    # once per change of verdict a day
+    assert [(e['symbol'], e['why'], e['price'], e['base']) for e in seen] == [
+        ('471800', 'below_base', 15000, 17600), ('493260', 'off_high', 100, 90), ('471800', 'off_high', 17700, 17600)]
+    assert bar_reads == []  # all settled by the quote alone

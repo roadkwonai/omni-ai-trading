@@ -94,18 +94,18 @@ flowchart LR
 
 | 항목 | 키 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| 분할 1회 매수 금액 | `budget.first_buy_krw` | 1,000,000원 | 10만 ~ 1억 (회당 매수 한도 이하) |
-| 종목당 최대 | `budget.per_symbol_krw` | 3,000,000원 | 10만 ~ 50억 (보유 금액 한도 이하) |
+| 분할 1회 매수 금액 | `budget.first_buy_krw` | 1,000,000원 | 10만 \~ 1억 (회당 매수 한도 이하) |
+| 종목당 최대 | `budget.per_symbol_krw` | 3,000,000원 | 10만 \~ 50억 (보유 금액 한도 이하) |
 
 **주문 보호 한도**(`limits`, 계좌·자동매매 → 모의계좌 → 금액·주문 보호 한도). 주문 가드(`nhplug_order_guard.paper_limits`)·손실 정지(`nhplug_loss`)·실행기 주문 크기가 같은 값을 씁니다.
 
 | 항목 | 키 | 기본 | 범위 (`PAPER_LIMITS`) | 뜻 |
 | --- | --- | --- | --- | --- |
-| 회당 매수 한도 | `order_max_krw` | 3,000,000원 | 10만 ~ 1억 | 매수 주문 1건(지정가 × 수량) |
-| 하루 매수 한도 | `daily_buy_krw` | 6,000,000원 | 100만 ~ 10억 | 그날 매수 주문 금액 합(판 금액은 빼지 않음) |
-| 보유 금액 한도 | `held_max_krw` | 21,000,000원 | 100만 ~ 50억 | 지금 보유 매입금액(미체결 매수 포함) + 새 매수 |
-| 하루 새 종목 수 | `daily_new_symbols` | 5 | 1 ~ 50 | 그날 처음 사는 종목 수(그날 산 종목의 재매수는 세지 않음) |
-| 하루 손실 한도 | `daily_loss_krw` | 300,000원 | 1만 ~ 1억 | 닿으면 신규 매수 중단(보유분 청산은 계속) |
+| 회당 매수 한도 | `order_max_krw` | 3,000,000원 | 10만 \~ 1억 | 매수 주문 1건(지정가 × 수량) |
+| 하루 매수 한도 | `daily_buy_krw` | 6,000,000원 | 100만 \~ 10억 | 그날 매수 주문 금액 합(판 금액은 빼지 않음) |
+| 보유 금액 한도 | `held_max_krw` | 21,000,000원 | 100만 \~ 50억 | 지금 보유 매입금액(미체결 매수 포함) + 새 매수 |
+| 하루 새 종목 수 | `daily_new_symbols` | 5 | 1 \~ 50 | 그날 처음 사는 종목 수(그날 산 종목의 재매수는 세지 않음) |
+| 하루 손실 한도 | `daily_loss_krw` | 300,000원 | 1만 \~ 1억 | 닿으면 신규 매수 중단(보유분 청산은 계속) |
 
 회당 한도 ≤ 하루 한도, 분할 1회 금액 ≤ 회당 한도, 종목당 최대 ≤ 보유 금액 한도여야 저장됩니다. 1회 주문 최대 수량·총 보유 최대 수량은 `tunables.json`(`paper_max_order_qty` 100주, `paper_max_total_qty` 1,000주, 0은 제한 없음)에 있고 같은 화면에서 바꿉니다.
 
@@ -114,11 +114,11 @@ flowchart LR
 | 항목 | 키 | 기본 | 범위 |
 | --- | --- | --- | --- |
 | 운용 방식 | `engine` | — | `jev`(Jev 트레이딩 미러) · `longterm`(장기투자) |
-| 운용금 | `budget.capital_krw` | 1,000,000원 | 1만 ~ 계좌 잔고(총자산). 코드 상한 10억은 오타 방지용 |
-| 1주 가격 상한(매수) | `budget.order_price_max_krw` | 10,000원(설정 없는 계좌) | 1,000 ~ 2,000,000 |
-| 하루 손실 한도 | `budget.daily_loss_krw` | 20,000원 | 1,000 ~ 20,000 (계좌별) |
-| 회당 매수 한도 | `limits.order_max_krw` | 1,000,000원 | 1만 ~ 운용금 |
-| 하루 새 종목 수 | `limits.daily_new_symbols` | 5 | 1 ~ 5 |
+| 운용금 | `budget.capital_krw` | 1,000,000원 | 1만 \~ 계좌 잔고(총자산). 코드 상한 10억은 오타 방지용 |
+| 1주 가격 상한(매수) | `budget.order_price_max_krw` | 10,000원(설정 없는 계좌) | 1,000 \~ 2,000,000 |
+| 하루 손실 한도 | `budget.daily_loss_krw` | 20,000원 | 1,000 \~ 20,000 (계좌별) |
+| 회당 매수 한도 | `limits.order_max_krw` | 1,000,000원 | 1만 \~ 운용금 |
+| 하루 새 종목 수 | `limits.daily_new_symbols` | 5 | 1 \~ 5 |
 | 실주문 스위치 | `live_orders` | 꺼짐 | 켜려면 확인 문구 |
 | 원금 | `principal_krw` | 없음 | 종합 현황 → 원금 설정 |
 
@@ -127,12 +127,12 @@ flowchart LR
 | 항목 | 키 | 기본 | 범위 (`LIVE_RULE_LIMITS`) | 뜻 |
 | --- | --- | --- | --- | --- |
 | 매수 크기 기준 | `sizing` | `share`(1주 기준) | `share` · `amount` | 금액 기준은 모의 체결 금액을 운용금 비율로 줄여 삼 |
-| 분할 1회 금액 | `tranche_krw` | 100,000원 | 1만 ~ 운용금 | 금액 기준에서 체결 1건당 상한 |
-| 1회 매수 최대 수량 | `max_order_qty` | 100주 | 1 ~ 1,000 | 1주 기준에서만 씀 |
-| 가격 추격 한도 | `chase_pct` | 1.0% | 0.1 ~ 5 | 매도호가가 모의 체결가 + 이 % 안이면 따라 삼 |
+| 분할 1회 금액 | `tranche_krw` | 100,000원 | 1만 \~ 운용금 | 금액 기준에서 체결 1건당 상한 |
+| 1회 매수 최대 수량 | `max_order_qty` | 100주 | 1 \~ 1,000 | 1주 기준에서만 씀 |
+| 가격 추격 한도 | `chase_pct` | 1.0% | 0.1 \~ 5 | 매도호가가 모의 체결가 + 이 % 안이면 따라 삼 |
 | 근거가 있으면 추격 | `evidence_chase` | 켬 | 켬·끔 | 한도를 넘어도 엔진이 최근 다시 고르고 1차 익절가 아래면 삼 |
-| 손절 % | `stop_loss_pct` | 2.0% | 0.5 ~ 2 | 실계좌 평균가 기준, 모의 손절과 좁은 쪽 |
-| 추가 매수 최대 횟수 | `max_adds` | 100(엔진 그대로) | 0 ~ 100 | 첫 매수 뒤 따라 살 모의 추가 매수 횟수 |
+| 손절 % | `stop_loss_pct` | 2.0% | 0.5 \~ 2 | 실계좌 평균가 기준, 모의 손절과 좁은 쪽 |
+| 추가 매수 최대 횟수 | `max_adds` | 100(엔진 그대로) | 0 \~ 100 | 첫 매수 뒤 따라 살 모의 추가 매수 횟수 |
 | 모의 따르기 | `follow_paper` | 켬 | 켬·끔 | 켜면 가상 실행 카드가 모의 매매 기준을 씀. `take_profit_pct`·`sell_confidence`·`flatten`·`regime_exits`·`overnight`는 꺼졌을 때만 쓰는 예전 규칙 |
 
 장기투자 계좌는 미러 규칙 대신 **장기 전용 보호**를 씁니다. 종목 손절 2%를 쓰지 않고, 하루 손실 래치를 오늘 실현 손실 + 수수료로만 셉니다(`accounts.live_loss_realized_only`). 계좌 전략·적립식은 `vibe-longterm/settings.json`의 `books.<계좌 키>`·`dca.<계좌 키>`에 저장됩니다.
@@ -146,13 +146,13 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `entry_confidence` | Jev 매수 신뢰도 | 0.5 | 0.3~0.95 |
-| `sell_confidence` | Jev 매도 신뢰도 | 0.7 | 0.3~0.95 |
-| `entry_volume_ratio` | 진입 거래량 배수 (최근 5분 ÷ 그 전 5분, 0=확인 안 함) | 1.2 | 0~3 |
-| `partial_sell_conf` | 엔진 일부 매도 시작 신뢰도 | 0.55 | 0.5~0.95 |
-| `partial_sell_pct` | 엔진 일부 매도 비율 % | 33 | 10~90 |
-| `entry_cutoff_hhmm` | 신규 매수 마감 시각 | 1430 | 1000~1500 |
-| `flatten_hhmm` | 장 마감 정리 시각 | 1440 | 1400~1505 |
+| `entry_confidence` | Jev 매수 신뢰도 | 0.5 | 0.3\~0.95 |
+| `sell_confidence` | Jev 매도 신뢰도 | 0.7 | 0.3\~0.95 |
+| `entry_volume_ratio` | 진입 거래량 배수 (최근 5분 ÷ 그 전 5분, 0=확인 안 함) | 1.2 | 0\~3 |
+| `partial_sell_conf` | 엔진 일부 매도 시작 신뢰도 | 0.55 | 0.5\~0.95 |
+| `partial_sell_pct` | 엔진 일부 매도 비율 % | 33 | 10\~90 |
+| `entry_cutoff_hhmm` | 신규 매수 마감 시각 | 1430 | 1000\~1500 |
+| `flatten_hhmm` | 장 마감 정리 시각 | 1440 | 1400\~1505 |
 
 </details>
 
@@ -161,13 +161,13 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `take_profit_half_pct` | 방어형 1차 익절 % (데이터 목표 없을 때·절반) | 1 | 0.2~10 |
-| `take_profit_all_pct` | 방어형 2차 익절 % (데이터 목표 없을 때·나머지) | 2 | 0.3~20 |
-| `stop_loss_pct` | 손절 % | 2 | 0.5~10 |
-| `trend_half_pct` | 추세형 1차 익절 % | 2 | 0.5~15 |
-| `trend_trail_pct` | 추세형 고점 대비 추적 손절 % | 1.5 | 0.5~10 |
-| `weak_half_pct` | 약세장: 절반 익절 % (늦어도) | 1 | 0.3~5 |
-| `weak_all_pct` | 약세장: 전량 익절 % (늦어도) | 2 | 0.5~10 |
+| `take_profit_half_pct` | 방어형 1차 익절 % (데이터 목표 없을 때·절반) | 1 | 0.2\~10 |
+| `take_profit_all_pct` | 방어형 2차 익절 % (데이터 목표 없을 때·나머지) | 2 | 0.3\~20 |
+| `stop_loss_pct` | 손절 % | 2 | 0.5\~10 |
+| `trend_half_pct` | 추세형 1차 익절 % | 2 | 0.5\~15 |
+| `trend_trail_pct` | 추세형 고점 대비 추적 손절 % | 1.5 | 0.5\~10 |
+| `weak_half_pct` | 약세장: 절반 익절 % (늦어도) | 1 | 0.3\~5 |
+| `weak_all_pct` | 약세장: 전량 익절 % (늦어도) | 2 | 0.5\~10 |
 
 </details>
 
@@ -176,17 +176,17 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `add_step_pct` | 추가 매수 간격 % | 0.7 | 0.2~5 |
-| `scale_signal_add_on` | 새 매수 판단으로 보유 종목 추가 매수 | 1 | 0~1 |
-| `scale_step_add_on` | 가격 단계 도달 시 보유 종목 추가 매수 | 1 | 0~1 |
-| `scale_profit_rebuy_on` | 일부 익절 후 재매수 | 1 | 0~1 |
-| `scale_interval_min` | 가격 단계 추가 매수 최소 간격(분) | 5 | 1~60 |
-| `scale_max_adds` | 종목당 추가 매수 최대 횟수(첫 매수 제외) | 2 | 0~100 |
-| `add_conf_sizing_on` | 추가 매수는 직전보다 나은 조건일 때만 (1=켬) | 1 | 0~1 |
-| `add_size_pct` | 추가 매수 크기 (새 판단·가격 단계, 분할 1회 대비 %) | 50 | 10~100 |
-| `size_holding_on` | 매수 비중: 보유가 종목당 한도 절반을 넘으면 줄이기 (1=켬) | 1 | 0~1 |
-| `size_market_on` | 매수 비중: 시황 방향 배율 (같음 100%·횡보 75%·반대 50%, 1=켬) | 1 | 0~1 |
-| `regime_trim_on` | 시황 역전 시 보유 절반 매도 (포지션당 1번, 1=켬) | 1 | 0~1 |
+| `add_step_pct` | 추가 매수 간격 % | 0.7 | 0.2\~5 |
+| `scale_signal_add_on` | 새 매수 판단으로 보유 종목 추가 매수 | 1 | 0\~1 |
+| `scale_step_add_on` | 가격 단계 도달 시 보유 종목 추가 매수 | 1 | 0\~1 |
+| `scale_profit_rebuy_on` | 일부 익절 후 재매수 | 1 | 0\~1 |
+| `scale_interval_min` | 가격 단계 추가 매수 최소 간격(분) | 5 | 1\~60 |
+| `scale_max_adds` | 종목당 추가 매수 최대 횟수(첫 매수 제외) | 2 | 0\~100 |
+| `add_conf_sizing_on` | 추가 매수는 직전보다 나은 조건일 때만 (1=켬) | 1 | 0\~1 |
+| `add_size_pct` | 추가 매수 크기 (새 판단·가격 단계, 분할 1회 대비 %) | 50 | 10\~100 |
+| `size_holding_on` | 매수 비중: 보유가 종목당 한도 절반을 넘으면 줄이기 (1=켬) | 1 | 0\~1 |
+| `size_market_on` | 매수 비중: 시황 방향 배율 (같음 100%·횡보 75%·반대 50%, 1=켬) | 1 | 0\~1 |
+| `regime_trim_on` | 시황 역전 시 보유 절반 매도 (포지션당 1번, 1=켬) | 1 | 0\~1 |
 
 </details>
 
@@ -195,8 +195,8 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `overnight_max_manwon` | 장 마감 보유 한도 (만원) | 300 | 0~500,000 |
-| `swing_max_days` | 스윙 최대 보유일 (거래일) | 5 | 1~10 |
+| `overnight_max_manwon` | 장 마감 보유 한도 (만원) | 300 | 0\~500,000 |
+| `swing_max_days` | 스윙 최대 보유일 (거래일) | 5 | 1\~10 |
 
 </details>
 
@@ -205,13 +205,13 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `strength_top_n` | 관심종목 강도 진입: Jev 순위 상위 N위 (0=끔) | 3 | 0~10 |
-| `strength_min_prob` | 관심종목 강도 진입: Jev 확률 최소 | 0.15 | 0.05~0.6 |
-| `strength_change_min` | 관심종목 강도 진입: 전일 대비 최소 상승 % | 2 | 0~10 |
-| `strength_change_max` | 관심종목 강도 진입: 전일 대비 최대 상승 % | 25 | 5~29 |
-| `strength_slot_on` | 관심종목 강도 독립 슬롯 (Jev 선택과 별도) | 0 | 0~1 |
-| `strength_slot_max` | 강도 슬롯 동시 보유 종목 수 | 2 | 1~5 |
-| `strength_slot_daily` | 강도 슬롯 하루 매수 횟수 | 3 | 1~10 |
+| `strength_top_n` | 관심종목 강도 진입: Jev 순위 상위 N위 (0=끔) | 3 | 0\~10 |
+| `strength_min_prob` | 관심종목 강도 진입: Jev 확률 최소 | 0.15 | 0.05\~0.6 |
+| `strength_change_min` | 관심종목 강도 진입: 전일 대비 최소 상승 % | 2 | 0\~10 |
+| `strength_change_max` | 관심종목 강도 진입: 전일 대비 최대 상승 % | 25 | 5\~29 |
+| `strength_slot_on` | 관심종목 강도 독립 슬롯 (Jev 선택과 별도) | 0 | 0\~1 |
+| `strength_slot_max` | 강도 슬롯 동시 보유 종목 수 | 2 | 1\~5 |
+| `strength_slot_daily` | 강도 슬롯 하루 매수 횟수 | 3 | 1\~10 |
 
 </details>
 
@@ -220,17 +220,17 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `ipo_days` | 신규주: 상장 후 거래일 수 (0=끔) | 2 | 0~5 |
-| `ipo_size_pct` | 신규주: 분할 1회 매수 금액 대비 % | 50 | 10~100 |
-| `ipo_near_high_pct` | 신규주: 당일 고가 대비 허용 % 이내 | 3 | 0.5~15 |
-| `ipo_stop_pct` | 신규주: 손절 % | 3 | 1~10 |
-| `ipo_half_pct` | 신규주: 절반 익절 % | 3 | 1~30 |
-| `ipo_trail_pct` | 신규주: 고점 대비 추적 손절 % | 2 | 0.5~15 |
-| `ipo_add_guard` | 신규주 추가 매수 금지 | 1 | 0~1 |
-| `ipo_max_positions` | 신규주 동시 보유 종목 수 | 1 | 1~3 |
-| `ipo_slot_on` | 신규주 독립 슬롯 (Jev 선택·인버스 보유와 별도) | 1 | 0~1 |
-| `ipo_daily_max` | 신규주 하루 매수 횟수 | 2 | 1~10 |
-| `ipo_time_stop_min` | 신규주 시간 손절 분 (0=끔) | 60 | 0~390 |
+| `ipo_days` | 신규주: 상장 후 거래일 수 (0=끔) | 2 | 0\~5 |
+| `ipo_size_pct` | 신규주: 분할 1회 매수 금액 대비 % | 50 | 10\~100 |
+| `ipo_near_high_pct` | 신규주: 당일 고가 대비 허용 % 이내 | 3 | 0.5\~15 |
+| `ipo_stop_pct` | 신규주: 손절 % | 3 | 1\~10 |
+| `ipo_half_pct` | 신규주: 절반 익절 % | 3 | 1\~30 |
+| `ipo_trail_pct` | 신규주: 고점 대비 추적 손절 % | 2 | 0.5\~15 |
+| `ipo_add_guard` | 신규주 추가 매수 금지 | 1 | 0\~1 |
+| `ipo_max_positions` | 신규주 동시 보유 종목 수 | 1 | 1\~3 |
+| `ipo_slot_on` | 신규주 독립 슬롯 (Jev 선택·인버스 보유와 별도) | 1 | 0\~1 |
+| `ipo_daily_max` | 신규주 하루 매수 횟수 | 2 | 1\~10 |
+| `ipo_time_stop_min` | 신규주 시간 손절 분 (0=끔) | 60 | 0\~390 |
 
 </details>
 
@@ -239,19 +239,19 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `direction_switch` | 방향 전환 (1=켬, 0=끔) | 1 | 0~1 |
-| `reentry_guard` | 같은 날 재진입 제한 | 1 | 0~1 |
-| `reentry_allow` | 같은 날 재진입 허용 | 1 | 0~1 |
-| `careful_reentry_on` | 신중 재진입 (불리한 국면의 같은 날 재진입) | 1 | 0~1 |
-| `careful_reentry_vwap_pct` | 신중 재진입: VWAP 대비 최대 % | 2 | 0.5~10 |
-| `careful_reentry_range_pct` | 신중 재진입: 오늘 범위 위치 상한 % | 85 | 50~100 |
-| `careful_reentry_conf` | 신중 재진입: Jev 재검토 매수 신뢰도 | 0.6 | 0.3~0.95 |
-| `careful_reentry_size_pct` | 신중 재진입: 매수 크기 (평소 대비 %) | 50 | 10~100 |
-| `losing_streak_guard` | 연속 손실 쉬기 | 1 | 0~1 |
-| `averaging_down_guard` | 약세장 물타기 금지 | 1 | 0~1 |
-| `opposite_guard` | 반대 방향 동시 보유 차단 | 1 | 0~1 |
-| `direction_confirm` | 지수 방향 확인 (Jev 경로) | 1 | 0~1 |
-| `rising_check` | 최근 분봉 상승 확인 | 1 | 0~1 |
+| `direction_switch` | 방향 전환 (1=켬, 0=끔) | 1 | 0\~1 |
+| `reentry_guard` | 같은 날 재진입 제한 | 1 | 0\~1 |
+| `reentry_allow` | 같은 날 재진입 허용 | 1 | 0\~1 |
+| `careful_reentry_on` | 신중 재진입 (불리한 국면의 같은 날 재진입) | 1 | 0\~1 |
+| `careful_reentry_vwap_pct` | 신중 재진입: VWAP 대비 최대 % | 2 | 0.5\~10 |
+| `careful_reentry_range_pct` | 신중 재진입: 오늘 범위 위치 상한 % | 85 | 50\~100 |
+| `careful_reentry_conf` | 신중 재진입: Jev 재검토 매수 신뢰도 | 0.6 | 0.3\~0.95 |
+| `careful_reentry_size_pct` | 신중 재진입: 매수 크기 (평소 대비 %) | 50 | 10\~100 |
+| `losing_streak_guard` | 연속 손실 쉬기 | 1 | 0\~1 |
+| `averaging_down_guard` | 약세장 물타기 금지 | 1 | 0\~1 |
+| `opposite_guard` | 반대 방향 동시 보유 차단 | 1 | 0\~1 |
+| `direction_confirm` | 지수 방향 확인 (Jev 경로) | 1 | 0\~1 |
+| `rising_check` | 최근 분봉 상승 확인 | 1 | 0\~1 |
 
 </details>
 
@@ -260,22 +260,22 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `oversold_on` | 낙폭과대 반등 매매 | 1 | 0~1 |
-| `oversold_stock_drop_pct` | 낙폭과대: 개별주 낙폭 % (전일 대비 저가) | 6 | 1~30 |
-| `oversold_etf_drop_pct` | 낙폭과대: ETF 낙폭 % | 6 | 0.5~15 |
-| `oversold_lev_on` | 낙폭과대: 2배 ETF 포함 | 0 | 0~1 |
-| `oversold_lev_drop_pct` | 낙폭과대: 2배 ETF 낙폭 % | 8 | 1~30 |
-| `oversold_atr_mult` | 낙폭과대: 평소 변동폭(ATR) 배수 | 1.5 | 0~5 |
-| `oversold_calm_min` | 낙폭과대: 저가 갱신 없는 분 | 20 | 1~25 |
-| `oversold_rebound_pct` | 낙폭과대: 저가 대비 반등 % | 0.3 | 0~5 |
-| `oversold_size_pct` | 낙폭과대: 매수 크기 (분할 1회 대비 %) | 100 | 50~1000 |
-| `oversold_tp_pct` | 낙폭과대: 익절 % | 1.5 | 0.3~15 |
-| `oversold_recover_pct` | 낙폭과대: 익절 (낙폭 회복 %, 둘 중 낮은 값) | 100 | 20~100 |
-| `oversold_stop_pct` | 낙폭과대: 손절 (당일 저가 아래 %) | 0.5 | 0.1~5 |
-| `oversold_market_drop_pct` | 낙폭과대: 시장 저가 하락 % 이상일 때만 (0=조건 없음) | 3 | 0~15 |
-| `oversold_hold_days` | 낙폭과대: 최대 보유 거래일 (0=당일) | 1 | 0~3 |
-| `oversold_jev_min` | 낙폭과대: Jev 매수 신뢰도 | 0.5 | 0~0.95 |
-| `oversold_vibe_min` | 낙폭과대: vibe 점수 (보관, 읽는 실행기 없음) | 0.2 | -1~1 |
+| `oversold_on` | 낙폭과대 반등 매매 | 1 | 0\~1 |
+| `oversold_stock_drop_pct` | 낙폭과대: 개별주 낙폭 % (전일 대비 저가) | 6 | 1\~30 |
+| `oversold_etf_drop_pct` | 낙폭과대: ETF 낙폭 % | 6 | 0.5\~15 |
+| `oversold_lev_on` | 낙폭과대: 2배 ETF 포함 | 0 | 0\~1 |
+| `oversold_lev_drop_pct` | 낙폭과대: 2배 ETF 낙폭 % | 8 | 1\~30 |
+| `oversold_atr_mult` | 낙폭과대: 평소 변동폭(ATR) 배수 | 1.5 | 0\~5 |
+| `oversold_calm_min` | 낙폭과대: 저가 갱신 없는 분 | 20 | 1\~25 |
+| `oversold_rebound_pct` | 낙폭과대: 저가 대비 반등 % | 0.3 | 0\~5 |
+| `oversold_size_pct` | 낙폭과대: 매수 크기 (분할 1회 대비 %) | 100 | 50\~1000 |
+| `oversold_tp_pct` | 낙폭과대: 익절 % | 1.5 | 0.3\~15 |
+| `oversold_recover_pct` | 낙폭과대: 익절 (낙폭 회복 %, 둘 중 낮은 값) | 100 | 20\~100 |
+| `oversold_stop_pct` | 낙폭과대: 손절 (당일 저가 아래 %) | 0.5 | 0.1\~5 |
+| `oversold_market_drop_pct` | 낙폭과대: 시장 저가 하락 % 이상일 때만 (0=조건 없음) | 3 | 0\~15 |
+| `oversold_hold_days` | 낙폭과대: 최대 보유 거래일 (0=당일) | 1 | 0\~3 |
+| `oversold_jev_min` | 낙폭과대: Jev 매수 신뢰도 | 0.5 | 0\~0.95 |
+| `oversold_vibe_min` | 낙폭과대: vibe 점수 (보관, 읽는 실행기 없음) | 0.2 | -1\~1 |
 
 </details>
 
@@ -284,26 +284,26 @@ flowchart LR
 
 | 키 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- |
-| `oversold_v2_on` | 낙폭과대 선별 v2 매매 | 1 | 0~1 |
-| `oversold_v2_from_hhmm` | 선별 v2: 매수 시작 시각 | 1430 | 900~1510 |
-| `oversold_v2_until_hhmm` | 선별 v2: 매수 마감 시각 | 1455 | 930~1515 |
-| `oversold_v2_index_drop_pct` | 선별 v2: 지수 폭락 % (저가) | 8 | 3~20 |
-| `oversold_v2_capit_drop_pct` | 선별 v2: 투매 지수 낙폭 % | 5 | 2~15 |
-| `oversold_v2_prior5_pct` | 선별 v2: 투매 직전 5일 지수 하락 % | 5 | 0~20 |
-| `oversold_v2_rel_max_pct` | 선별 v2: 시장보다 더 빠진 한도 %p | 4 | 0.5~15 |
-| `oversold_v2_add_on` | 선별 v2: 다음 날 2차 매수 (1=켬) | 1 | 0~1 |
-| `oversold_v2_half_tp_pct` | 선별 v2: 절반 익절 % | 8 | 2~30 |
-| `oversold_v2_tp_pct` | 선별 v2: 나머지 익절 % | 15 | 3~45 |
-| `oversold_v2_hold_days` | 선별 v2: 보유 거래일 | 3 | 1~10 |
-| `oversold_v2_stop_pct` | 선별 v2: 손절 (평균 매입가 대비 %) | 2 | 1~25 |
-| `oversold_v2_reentry_max` | 선별 v2: 손절 뒤 저점 재매수 횟수 (0=끔) | 2 | 0~3 |
-| `oversold_v2_reentry_hold_min` | 선별 v2: 재매수 전 저점 유지 분 | 20 | 5~60 |
-| `oversold_v2_reentry_bounce_pct` | 선별 v2: 재매수 저점 반등 % | 1 | 0.2~3 |
-| `oversold_v2_size_pct` | 선별 v2: 매수 크기 (1·2차 합계, 분할 1회 대비 %) | 100 | 10~1000 |
-| `oversold_v2_veto_conf` | 선별 v2: 리서치 거부 (Jev WAIT 신뢰도) | 0.7 | 0.5~1 |
-| `oversold_v2_vibe_veto` | 선별 v2: 리서치 거부 (vibe 점수 이하) (보관, 읽는 실행기 없음) | -0.3 | -1~0 |
-| `oversold_v2_boost_pct` | 선별 v2: 리서치 강한 동의 시 크기 % | 100 | 100~200 |
-| `oversold_v2_max_new` | 선별 v2: 하루 매수 종목 수 | 3 | 1~6 |
+| `oversold_v2_on` | 낙폭과대 선별 v2 매매 | 1 | 0\~1 |
+| `oversold_v2_from_hhmm` | 선별 v2: 매수 시작 시각 | 1430 | 900\~1510 |
+| `oversold_v2_until_hhmm` | 선별 v2: 매수 마감 시각 | 1455 | 930\~1515 |
+| `oversold_v2_index_drop_pct` | 선별 v2: 지수 폭락 % (저가) | 8 | 3\~20 |
+| `oversold_v2_capit_drop_pct` | 선별 v2: 투매 지수 낙폭 % | 5 | 2\~15 |
+| `oversold_v2_prior5_pct` | 선별 v2: 투매 직전 5일 지수 하락 % | 5 | 0\~20 |
+| `oversold_v2_rel_max_pct` | 선별 v2: 시장보다 더 빠진 한도 %p | 4 | 0.5\~15 |
+| `oversold_v2_add_on` | 선별 v2: 다음 날 2차 매수 (1=켬) | 1 | 0\~1 |
+| `oversold_v2_half_tp_pct` | 선별 v2: 절반 익절 % | 8 | 2\~30 |
+| `oversold_v2_tp_pct` | 선별 v2: 나머지 익절 % | 15 | 3\~45 |
+| `oversold_v2_hold_days` | 선별 v2: 보유 거래일 | 3 | 1\~10 |
+| `oversold_v2_stop_pct` | 선별 v2: 손절 (평균 매입가 대비 %) | 2 | 1\~25 |
+| `oversold_v2_reentry_max` | 선별 v2: 손절 뒤 저점 재매수 횟수 (0=끔) | 2 | 0\~3 |
+| `oversold_v2_reentry_hold_min` | 선별 v2: 재매수 전 저점 유지 분 | 20 | 5\~60 |
+| `oversold_v2_reentry_bounce_pct` | 선별 v2: 재매수 저점 반등 % | 1 | 0.2\~3 |
+| `oversold_v2_size_pct` | 선별 v2: 매수 크기 (1·2차 합계, 분할 1회 대비 %) | 100 | 10\~1000 |
+| `oversold_v2_veto_conf` | 선별 v2: 리서치 거부 (Jev WAIT 신뢰도) | 0.7 | 0.5\~1 |
+| `oversold_v2_vibe_veto` | 선별 v2: 리서치 거부 (vibe 점수 이하) (보관, 읽는 실행기 없음) | -0.3 | -1\~0 |
+| `oversold_v2_boost_pct` | 선별 v2: 리서치 강한 동의 시 크기 % | 100 | 100\~200 |
+| `oversold_v2_max_new` | 선별 v2: 하루 매수 종목 수 | 3 | 1\~6 |
 
 </details>
 
@@ -317,9 +317,9 @@ flowchart LR
 
 | 프리셋 | 관심종목 강도 (N · 확률 · 등락%) | 신규주 (일수 · 비중 · 고가거리 · 손절/절반/추적) | 거래량 |
 | --- | --- | --- | --- |
-| 보수적 / 엄격 | 1 · 0.30 · 3~20 | 1일 · 30% · 2% · 2/3/1.5 | 1.5배 |
-| 기본 | 3 · 0.15 · 2~25 | 2일 · 50% · 3% · 3/3/2 | 1.2배 |
-| 적극적 / 완화 | 5 · 0.10 · 1~29 | 3일 · 70% · 5% · 4/5/3 | 1.0배 |
+| 보수적 / 엄격 | 1 · 0.30 · 3\~20 | 1일 · 30% · 2% · 2/3/1.5 | 1.5배 |
+| 기본 | 3 · 0.15 · 2\~25 | 2일 · 50% · 3% · 3/3/2 | 1.2배 |
+| 적극적 / 완화 | 5 · 0.10 · 1\~29 | 3일 · 70% · 5% · 4/5/3 | 1.0배 |
 | 끄기 | 경로 끔 | 경로 끔 | 확인 안 함 |
 
 낙폭과대 프리셋은 보수적(낙폭 개별주 8%·ETF 7%, ATR 2배 등)·기본·적극적(4%·3%, 2배 ETF 포함 등)·끄기(장중 반등과 선별 v2 모두 끔)입니다.
@@ -341,29 +341,29 @@ flowchart LR
 
 | 키 | 묶음 | 뜻 | 기본 | 범위 |
 | --- | --- | --- | --- | --- |
-| `session_open` | 장 시간 | 실행기 장 시작 | 09:00 | 09:00~10:00 |
-| `last_order` | 장 시간 | 마지막 주문 상한 | 15:18 | 15:00~15:18 |
-| `flatten_lead_min` | 장 시간 | 정리 뒤 더 도는 분 | 20 | 10~40 |
-| `paper_max_order_qty` | 공유 모의 실행기 | 1회 주문 최대 수량(주) | 100 | 0~1,000,000 |
-| `paper_max_total_qty` | 공유 모의 실행기 | 총 보유 최대 수량(주) | 1000 | 0~1,000,000 |
-| `read_failure_limit` | 공유 모의 실행기 | 조회 실패 정지 횟수 | 5 | 1~20 |
-| `losing_streak` | 공유 모의 실행기 | 연속 손실 쉬기: 횟수 | 3 | 2~10 |
-| `losing_cooldown_min` | 공유 모의 실행기 | 연속 손실 쉬기: 분 | 30 | 5~240 |
-| `ipo_start` | 공유 모의 실행기 | 신규주 보기 시작 | 09:20 | 09:10~14:00 |
-| `ipo_max_scan` | 공유 모의 실행기 | 신규주 시세 조회 수 | 3 | 1~10 |
-| `vibe_interval_min` | vibe-trading (보관) | 판단 주기(분) | 15 | 5~60 |
-| `vibe_buy_score` | vibe-trading (보관) | 매수 점수 | 0.5 | 0.1~1.0 |
-| `vibe_sell_score` | vibe-trading (보관) | 매도 점수 | -0.3 | -1.0~0.0 |
-| `vibe_full_score_krw` | vibe-trading (보관) | 점수 1.0 매수 금액(원) | 3,000,000 | 100,000~100,000,000 |
-| `vibe_strength_score` | vibe-trading (보관) | 강도 경로 최소 점수 | 0.2 | 0.0~1.0 |
-| `vibe_strength_krw` | vibe-trading (보관) | 강도 경로 매수 금액(원) | 1,000,000 | 100,000~100,000,000 |
-| `vibe_chase_vwap_pct` | vibe-trading (보관) | 추격 필터: VWAP 위 상한(%) | 2.0 | 0.5~10.0 |
-| `vibe_chase_range_pct` | vibe-trading (보관) | 추격 필터: 구간 위치 상한(%) | 85 | 50~100 |
-| `live_session_end` | 실계좌 미러 | 미러 종료 시각 | 15:20 | 15:00~15:20 |
-| `quote_cache_s` | 대시보드 | 시세 재사용(초) | 15 | 0~120 |
-| `chart_cache_s` | 대시보드 | 차트 재사용(초) | 30 | 0~300 |
-| `account_list_cache_s` | 대시보드 | 계좌 목록 재사용(초) | 60 | 0~600 |
-| `process_cache_s` | 대시보드 | 실행기 상태 재사용(초) | 5 | 0~60 |
+| `session_open` | 장 시간 | 실행기 장 시작 | 09:00 | 09:00\~10:00 |
+| `last_order` | 장 시간 | 마지막 주문 상한 | 15:18 | 15:00\~15:18 |
+| `flatten_lead_min` | 장 시간 | 정리 뒤 더 도는 분 | 20 | 10\~40 |
+| `paper_max_order_qty` | 공유 모의 실행기 | 1회 주문 최대 수량(주) | 100 | 0\~1,000,000 |
+| `paper_max_total_qty` | 공유 모의 실행기 | 총 보유 최대 수량(주) | 1000 | 0\~1,000,000 |
+| `read_failure_limit` | 공유 모의 실행기 | 조회 실패 정지 횟수 | 5 | 1\~20 |
+| `losing_streak` | 공유 모의 실행기 | 연속 손실 쉬기: 횟수 | 3 | 2\~10 |
+| `losing_cooldown_min` | 공유 모의 실행기 | 연속 손실 쉬기: 분 | 30 | 5\~240 |
+| `ipo_start` | 공유 모의 실행기 | 신규주 보기 시작 | 09:20 | 09:10\~14:00 |
+| `ipo_max_scan` | 공유 모의 실행기 | 신규주 시세 조회 수 | 3 | 1\~10 |
+| `vibe_interval_min` | vibe-trading (보관) | 판단 주기(분) | 15 | 5\~60 |
+| `vibe_buy_score` | vibe-trading (보관) | 매수 점수 | 0.5 | 0.1\~1.0 |
+| `vibe_sell_score` | vibe-trading (보관) | 매도 점수 | -0.3 | -1.0\~0.0 |
+| `vibe_full_score_krw` | vibe-trading (보관) | 점수 1.0 매수 금액(원) | 3,000,000 | 100,000\~100,000,000 |
+| `vibe_strength_score` | vibe-trading (보관) | 강도 경로 최소 점수 | 0.2 | 0.0\~1.0 |
+| `vibe_strength_krw` | vibe-trading (보관) | 강도 경로 매수 금액(원) | 1,000,000 | 100,000\~100,000,000 |
+| `vibe_chase_vwap_pct` | vibe-trading (보관) | 추격 필터: VWAP 위 상한(%) | 2.0 | 0.5\~10.0 |
+| `vibe_chase_range_pct` | vibe-trading (보관) | 추격 필터: 구간 위치 상한(%) | 85 | 50\~100 |
+| `live_session_end` | 실계좌 미러 | 미러 종료 시각 | 15:20 | 15:00\~15:20 |
+| `quote_cache_s` | 대시보드 | 시세 재사용(초) | 15 | 0\~120 |
+| `chart_cache_s` | 대시보드 | 차트 재사용(초) | 30 | 0\~300 |
+| `account_list_cache_s` | 대시보드 | 계좌 목록 재사용(초) | 60 | 0\~600 |
+| `process_cache_s` | 대시보드 | 실행기 상태 재사용(초) | 5 | 0\~60 |
 
 </details>
 
@@ -378,7 +378,7 @@ flowchart LR
 | `auto_live` | 끔 | 자동 모드의 추천 조합을 가상 계좌에 실제 적용(확인 문구 `자동 실제 적용`) | 같은 곳 |
 | `execute` | 끔 | 가상 체결(확인 문구 `장기투자 가상 체결`). 끄면 계획만 기록 | 장기투자 → 계좌·실행 → 실행 |
 | `modules` | 기준 비중·달리오·린치·버핏 켬 | 거장 모듈 8개 켜고 끄기 | 전략 ③ |
-| `weights` | 나스닥100 30 · S&P500 30 · 반도체 10 · 양자 8 · 우주 7 · 저수지 15 (%) | 기준 비중. 종목마다 0~60%, 합계 100%, 위성 합계 30% 이하 | 전략 ③ 기준 비중 카드 |
+| `weights` | 나스닥100 30 · S&P500 30 · 반도체 10 · 양자 8 · 우주 7 · 저수지 15 (%) | 기준 비중. 종목마다 0\~60%, 합계 100%, 위성 합계 30% 이하 | 전략 ③ 기준 비중 카드 |
 | `tuning` | 아래 표 | 밴드·확정 일수·매도·매수 상한·초기 투입 주 수 | 전략 ③④, 시장 → 시황·국면 |
 | `params` | 재현 기준값 | 거장별 수치(린치·윌리엄스·막스·저수지 분할) | 전략 ③ 카드의 '수치 조정' |
 | `dca.<장부>` | 꺼짐 | 장부별 적립식(`actual` = 가상 계좌, 또는 실계좌 키) | 전략 → 적립식 |
@@ -386,11 +386,11 @@ flowchart LR
 
 | `tuning` 키 | 기본 | 범위 | 뜻 |
 | --- | --- | --- | --- |
-| `band` | 0.05 | 0.03 ~ 0.10 | 리밸런싱 밴드(목표 대비 ±) |
-| `confirm_days` | 10 | 5 ~ 20 | 국면 확정 일수(투매는 2거래일 고정) |
-| `monthly_sell_share` | 0.10 | 0.05 ~ 0.20 | 저수지 뺀 월 매도 상한(순자산 대비) |
-| `daily_buy_share` | 0.25 | 0.10 ~ 0.50 | 하루 매수 상한(순자산 대비) |
-| `deploy_weeks` | 0 | 0 ~ 26 | 초기 투입 주 수(0이면 하루 상한) |
+| `band` | 0.05 | 0.03 \~ 0.10 | 리밸런싱 밴드(목표 대비 ±) |
+| `confirm_days` | 10 | 5 \~ 20 | 국면 확정 일수(투매는 2거래일 고정) |
+| `monthly_sell_share` | 0.10 | 0.05 \~ 0.20 | 저수지 뺀 월 매도 상한(순자산 대비) |
+| `daily_buy_share` | 0.25 | 0.10 \~ 0.50 | 하루 매수 상한(순자산 대비) |
+| `deploy_weeks` | 0 | 0 \~ 26 | 초기 투입 주 수(0이면 하루 상한) |
 
 > [!NOTE]
 > `books.<장부>`에는 `strategy`·`modules`·`yeo`만 있습니다. 장부별 기준 비중·운용 수치(`books.<키>.numbers`)는 2026-11-19 사용자 결정으로 지웠고, 모든 장부가 최상위 `weights`·`tuning`을 씁니다.
@@ -401,7 +401,7 @@ flowchart LR
 
 | 파일 | 내용 | 기본 |
 | --- | --- | --- |
-| `dashboard-prefs.json` | `theme`(system·dark·light), `font_scale`(70~120), `status_blink`, `start_tab`, `refresh_s`(15·30·60·120), `quotes_auto`, `money_unit` | 시스템 · 100 · 켬 · 종합 현황 · 30 · 끔 · 만원 |
+| `dashboard-prefs.json` | `theme`(system·dark·light), `font_scale`(70\~120), `status_blink`, `start_tab`, `refresh_s`(15·30·60·120), `quotes_auto`, `money_unit` | 시스템 · 100 · 켬 · 종합 현황 · 30 · 끔 · 만원 |
 | `shared-etf-paper/ai-modes.json` | `jev`, `decision` 사용 여부. 요청은 `ai-modes.pending.json`에 먼저 쓰고 실행기가 주문 없는 주기 경계에서 옮김. 파일이 없거나 깨지면 실행기는 AI 주문을 보류 | 둘 다 켬 |
 | `shared-etf-paper/watchlist-manual.json` | 관심종목 수동 추가(`add`)·제외(`remove`), 날이 바뀌어도 유지 | 비어 있음 |
 | `vibe-longterm/longterm-watchlist.json` | 적립식 관심목록 슬리브. 엔진은 리밸런싱·매도하지 않음 | 비어 있음 |

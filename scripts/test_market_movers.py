@@ -145,3 +145,88 @@ def test_the_scan_paces_its_quotes_and_asks_again_after_a_rate_limit():
     assert [r['code'] for r in rows] == ['000001', '000002', '000003']  # the refused stock is asked again, not dropped
     assert all(b - a >= m.SCAN_GAP - 1e-9 for a, b in zip(starts, starts[1:]))  # never faster than SCAN_GAP
     assert len(starts) == 4 and m.SCAN_GAP >= 0.5  # 2 a second at most: the rest of NH's 5 is the runners'
+
+
+# 주도 테마 동반주 (user 2026-11-19, docs/theme-slot-plan-2026-11-19.md)
+GROUPS = [{'group': '엔터·게임', 'change_pct': 5.0}, {'group': '화장품·소비', 'change_pct': 2.3}, {'group': '가상자산', 'change_pct': 1.6},
+          {'group': '로봇', 'change_pct': 2.0}]
+MEMBERS = {'엔터·게임': ['035760'], '화장품·소비': ['090430', '051900', '008770', '999999'], '가상자산': ['111111', '222222'],
+           '로봇': ['108490']}
+FIGURES = {'035760': (24.0, 400e8), '090430': (6.0, 300e8), '051900': (4.0, 220e8), '008770': (10.0, 250e8), '999999': (9.0, 900e8),
+           '111111': (30.0, 99e8), '222222': (1.0, 80e8), '108490': (6.0, 600e8)}
+UNIVERSE = {c: {'name': c, 'index': 'KOSPI200'} for c in ('035760', '090430', '051900', '008770', '111111', '222222', '108490')}
+asked = []
+
+
+def figures(codes, groups):
+    asked.append(list(codes))
+    return {c: FIGURES[c] for c in codes}
+
+
+def quoted(codes):
+    return [{'code': c, 'name': c, 'index': 'KOSPI200', 'price': 1000, 'change_pct': 5.0, 'volume': 10, 'value_mil': 1} for c in codes]
+
+
+def test_a_theme_slot_adds_the_busiest_riser_of_each_strong_group_not_yet_among_the_candidates():
+    asked.clear()
+    candidates = {'035760': {'code': '035760'}}  # 엔터·게임 is already seen through CJ ENM
+    picks = m.theme_picks(GROUPS, UNIVERSE, candidates, MEMBERS.get, figures, quoted)
+    # 화장품·소비: 090430 has the most trading value of its universe risers (999999 is outside the universe);
+    # 가상자산: 111111 is up 30%, past the 25% cap, 222222 under +2%: no pick; only the top three groups are looked at
+    assert [(p['code'], p['theme_group']) for p in picks] == [('090430', '화장품·소비')]
+    assert picks[0]['reasons'] == ['주도 테마 동반주 (화장품·소비)'] and picks[0]['price'] == 1000  # NH figures
+    assert len(asked) == 1 and set(asked[0]) == {'090430', '051900', '008770', '111111', '222222'}  # one figures call
+
+
+def test_at_most_two_slots_and_a_falling_group_or_a_failed_lookup_gives_none():
+    groups = [{'group': '화장품·소비', 'change_pct': 2.3}, {'group': '로봇', 'change_pct': 1.0}, {'group': '엔터·게임', 'change_pct': -0.5}]
+    assert [p['code'] for p in m.theme_picks(groups, UNIVERSE, {}, MEMBERS.get, figures, quoted)] == ['090430', '108490']
+
+    def broken(*a):
+        raise OSError('down')
+    assert m.theme_picks(groups, UNIVERSE, {}, broken, figures, quoted) == []
+    assert m.theme_picks(groups, UNIVERSE, {}, MEMBERS.get, broken, quoted) == []
+    assert m.theme_picks(groups, UNIVERSE, {}, MEMBERS.get, figures, lambda codes: []) == []  # NH quote failed
+
+
+def test_theme_figures_fall_back_to_naver_when_kiwoom_fails(monkeypatch):
+    import theme_data
+    monkeypatch.setattr(theme_data, 'kiwoom_quotes', lambda codes: (_ for _ in ()).throw(OSError('kiwoom')))
+    monkeypatch.setattr(theme_data, 'naver_members', lambda group, universe: ({'090430': {'change_pct': 6.0, 'value_krw': 3e10}}, 9))
+    assert m.theme_figures(UNIVERSE)(['090430'], ['화장품·소비']) == {'090430': (6.0, 3e10)}
+    monkeypatch.setattr(theme_data, 'kiwoom_quotes', lambda codes: ({'090430': {'change_pct': 7.0, 'value_krw': 4e10}}, 1))
+    assert m.theme_figures(UNIVERSE)(['090430'], ['화장품·소비']) == {'090430': (7.0, 4e10)}
+
+
+def test_theme_picks_are_kept_by_day_with_their_first_time(tmp_path):
+    path = tmp_path / 'theme-picks.json'
+    first, later = datetime(2026, 11, 19, 10, 16, 40, tzinfo=ZoneInfo('Asia/Seoul')), datetime(2026, 11, 19, 10, 21, 5, tzinfo=ZoneInfo('Asia/Seoul'))
+    m.note_theme_picks(path, first, [{'code': '090430', 'theme_group': '화장품·소비'}])
+    m.note_theme_picks(path, later, [{'code': '090430', 'theme_group': '화장품·소비'}, {'code': '008770', 'theme_group': '화장품·소비'}])
+    import json
+    data = json.loads(path.read_text())
+    assert data['2026-11-19'] == {'090430': {'group': '화장품·소비', 'first': '2026-11-19T10:16:40+09:00'},
+                                  '008770': {'group': '화장품·소비', 'first': '2026-11-19T10:21:05+09:00'}}  # to the second
+
+
+def test_theme_quotes_keep_the_scan_pace():
+    """11-19 review: the theme slot's NH quotes went out right after the paced scan (shared key, 5 calls a second)."""
+    slept = []
+    quote = m.theme_quote(Reader({'090430': quote_row('090430')}), {'090430': {'name': 'x', 'index': 'KOSPI200'}}, sleep=slept.append)
+    assert quote(['090430'])[0]['code'] == '090430' and slept == [m.SCAN_GAP]
+
+
+def quote_row(code):
+    return quote(code, 1000, 950, 10, 500)
+
+
+def test_a_failed_quote_of_the_busiest_riser_tries_the_next_one():
+    # r5: one failed NH quote left the whole group's slot empty for the round
+    groups = [{'group': '화장품·소비', 'change_pct': 2.3}]
+    tried = []
+
+    def flaky(codes):
+        tried.extend(codes)
+        return [] if codes == ['090430'] else quoted(codes)
+    picks = m.theme_picks(groups, UNIVERSE, {}, MEMBERS.get, figures, flaky)
+    assert tried[0] == '090430' and len(picks) == 1 and picks[0]['code'] != '090430'

@@ -4,6 +4,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 | 릴리스 | 날짜 | 노트 |
 | --- | --- | --- |
+| v0.1.2 · 주도 테마 동반주와 수능일 시각 보정 | 2026-11-20 | [2026-11-20-v0.1.2-theme-companions.md](2026-11-20-v0.1.2-theme-companions.md) |
 | v0.1.1 · 투자 철학 소개와 알림 설정 안내 | 2026-11-19 | [2026-11-19-v0.1.1-investment-story.md](2026-11-19-v0.1.1-investment-story.md) |
 | v0.1.0 · 첫 공개 릴리스 | 2026-11-19 | [2026-11-19-v0.1.0-first-public-release.md](2026-11-19-v0.1.0-first-public-release.md) |
 
@@ -12,7 +13,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 | 항목 | 규칙 |
 | --- | --- |
 | 버전 번호 | [Semantic Versioning](https://semver.org/lang/ko/) `주.부.수`. 저장소 루트 [`VERSION`](../VERSION) 한 곳이 기준입니다 |
-| 1.0 전 | 매매 규칙·설정 형식이 바뀌면 부 번호(0.**2**.0), 결함 수정·문서만이면 수 번호(0.1.**1**)를 올립니다 |
+| 어떤 번호를 올릴지 | **사용자가 고릅니다.** AI는 변경 내용을 보고 추천 번호와 이유를 함께 보여 주되, 사용자가 고르기 전에는 `VERSION`을 확정하거나 발행하지 않습니다. 매매 규칙이 바뀌었다고 부 번호를 자동으로 올리지 않습니다(사용자 결정 2026-11-20) |
 | 노트 파일 | `release/YYYY-MM-DD-v<버전>-<제목>.md`. 날짜는 릴리스한 날(Asia/Seoul), 제목은 영문 소문자와 하이픈입니다 |
 | 노트 첫 줄 | `# Omni AI Trading v<버전> — <한 줄 제목>`. 이 줄이 GitHub Release 이름이 되고, 나머지가 본문이 됩니다 |
 | 태그 | `v<버전>`. 공개 저장소 `main`의 릴리스 커밋에 annotated tag로 붙습니다 |
@@ -24,7 +25,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 로컬 저장소는 원본 Vibe-Trading의 얕은 복제이고 운영 파일도 함께 들고 있습니다. 그래서 로컬 브랜치를 그대로 올리지 않고, `scripts/release.py`가 HEAD에서 공개용 스냅숏을 만들어 공개 저장소 `main` 위에 커밋합니다. 작업 트리와 로컬 브랜치는 건드리지 않습니다.
 
-1. `VERSION`을 새 버전으로 바꾸고, README 배지와 `landing/src/content.ts`의 `VERSION`을 맞춥니다.
+1. 추천 번호와 이유를 사용자에게 보여 주고, 사용자가 고른 번호로 `VERSION`을 바꿉니다. README 배지와 `landing/src/content.ts`의 `VERSION`도 맞춥니다.
 2. `release/YYYY-MM-DD-v<버전>-<제목>.md`를 쓰고 위 표에 한 줄을 더합니다.
 3. 점검합니다.
 
@@ -39,7 +40,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
    PYTHONPATH=agent:scripts .venv/bin/python scripts/release.py --dry-run
    ```
 
-6. 사용자 확인을 받은 뒤 발행합니다. 공개 `main` 푸시 → `v<버전>` 태그 → GitHub Release 만들기(이미 있으면 노트 갱신) 순서입니다.
+6. 사용자가 버전과 발행을 확인한 뒤 발행합니다. 공개 `main` 푸시 → `v<버전>` 태그 → GitHub Release 만들기(이미 있으면 노트 갱신) 순서입니다.
 
    ```bash
    PYTHONPATH=agent:scripts .venv/bin/python scripts/release.py --publish

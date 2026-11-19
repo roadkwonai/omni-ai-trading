@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -65,7 +65,7 @@ def ledger_shadow(path, day, events, capital=None, price_cap=None, shares_for=No
         if stop_pct is not None and prices:  # a day without recorded closes cannot stop (and skips the journal read)
             basis = stop_percent_for_positions(Path(path), root, dict.fromkeys({r[1] for r in rows}, 1), stop_pct)
             stops = {code: entry['pct'] for code, entry in basis.items()}
-        flatten = session_clock(root)['flatten']
+        flatten = session_clock(root, date.fromisoformat(day))['flatten']  # that day's clock (수능 day: 1 hour later)
         hand = manual_state(root, record)
         timeline += [(hand['since'][code], 2, code, 'hand', offset) for code, offset in hand['offsets'].items() if code in hand['since']]
         if (now or datetime.now(KST)).astimezone(KST).strftime('%Y-%m-%dT%H:%M') >= f'{day}T{flatten}':

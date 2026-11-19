@@ -26,7 +26,9 @@ ALLOWED = {'ka90005': '/api/dostk/mrkcond',  # 프로그램매매추이 시간�
            'ka10030': '/api/dostk/rkinfo',  # 당일거래량상위
            'ka10027': '/api/dostk/rkinfo',  # 전일대비등락률상위
            'ka20001': '/api/dostk/sect',  # 업종현재가 (Naver fallback)
-           'ka90001': '/api/dostk/thme'}  # 테마그룹별 (Naver fallback); add read-only TRs here only
+           'ka90001': '/api/dostk/thme',  # 테마그룹별 (Naver fallback)
+           'ka90002': '/api/dostk/thme',  # 테마구성종목 (api_bench theme_members)
+           'ka10095': '/api/dostk/stkinfo'}  # 관심종목정보: up to 100 codes a call (theme slot figures, 2026-11-19); read-only TRs only
 AUTH_FAILED = 3
 BARS_DIR = Path.home() / '.vibe-trading/kiwoom/minute'
 GAP = 0.25  # seconds between requests: the TRs allow 5 per second

@@ -18,6 +18,7 @@ def run(*args, env=None):
     ('etf_regime_observer.py', '--watch'), ('market_movers.py',), ('--out', '/tmp/x', 'longterm_audit.py', '--status'),
     ('--out', '.scratch/../x', 'longterm_audit.py', '--status'), ('pytest', '/tmp/test_x.py'), ('bash',), ('../ro',),
     ('longterm_evidence.py', '2026-11-18'),  # reconstruct() writes evidence rows into the engine database
+    ('ipo_shadow.py', '--day', '2026-11-19'),  # update() rewrites the shadow rows; only --summary reads
     ('longterm_report.py', '--day', '2026-11-18', '--fill', '/tmp/x.json', '--reports', '/tmp/r'),  # reports only into its folders
 ])
 def test_refuses(args):

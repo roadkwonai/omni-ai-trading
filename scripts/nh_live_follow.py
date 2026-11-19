@@ -45,29 +45,36 @@ PENDING_CANCEL_SECONDS = 60   # an acknowledged order still open after this is c
 SESSION_END = setting('live_session_end')  # can only move earlier
 
 
-def session_clock(root=None):
+def session_clock(root=None, day=None):
     """The shared paper runner's new-buy cutoff and flatten time (session_times, dashboard settings) under the runtime
-    nhplug folder `root` (default: this runtime's); the defaults when unreadable."""
+    nhplug folder `root` (default: this runtime's) on `day`'s exchange clock (default today); the defaults when
+    unreadable."""
     import session_times
     if root is None:
         from src.config.paths import get_runtime_root
         root = get_runtime_root() / 'nhplug'
     try:
-        return session_times.load(Path(root) / 'shared-etf-paper')
+        return session_times.load(Path(root) / 'shared-etf-paper', day)
     except (OSError, ValueError, KeyError, TypeError):
-        return session_times.times()
+        return session_times.times(None, day)
 
 
 def v2_late_buys(source):
     """(codes, 'HH:MM'): the paper's 선별 v2 positions and the end of its v2 buy window. Its buys (14:30~14:55 by
     default) fall after the new-buy cutoff, and the live mirror follows them the same day (user 2026-11-18)."""
     from nh_paper_isolated import exit_plans, is_v2
-    from session_times import hhmm
+    from session_times import hhmm, shifted, today
     import strategy_settings
     settings = strategy_settings.read_settings(source.parent)[0]
     if not settings.get('oversold_v2_on'):
         return frozenset(), None
-    return frozenset(c for c, plan in exit_plans(source.parent).items() if is_v2(plan)), hhmm(settings['oversold_v2_until_hhmm'])
+    return frozenset(c for c, plan in exit_plans(source.parent).items() if is_v2(plan)), shifted(hhmm(settings['oversold_v2_until_hhmm']), today())
+
+
+def session_over(now):
+    """At or past the mirror's end (live_session_end, 15:20) on the day's exchange clock (16:20 on 수능 day)."""
+    from session_times import shifted
+    return now.weekday() >= 5 or now.strftime('%H:%M') >= shifted(SESSION_END, now.date())
 
 
 def buy_window_end(root=None):
@@ -274,13 +281,31 @@ def pinned(size, record, root=None, source=None, max_adds=None):
         except (OSError, ValueError, KeyError, TypeError, ArithmeticError):
             pins = {}
 
+    picks = {}
+    if source is not None:  # 주도 테마 동반주 picks of the ranking service (market_movers.THEME_PICKS)
+        try:
+            picks = json.loads((Path(source).parent / 'theme-picks.json').read_text())
+        except (OSError, ValueError):
+            picks = {}
+    themed = {}  # symbol -> its open paper position started on a theme pick
+
     def units(price, qty=1, fill=None, nth=1):
         """`nth`: this buy's number since the paper position opened (1 = the first buy)."""
+        symbol = None
+        if fill is not None:
+            _, symbol, *_, stamp = fill.split('|')
+            if nth == 1:  # user 2026-11-19: a position the paper opened on a theme pick is not followed yet
+                pick = (picks.get(stamp[:10]) or {}).get(symbol) if isinstance(picks, dict) else None
+                try:  # to the second: a pick noted at 10:16:40 does not claim a position opened at 10:16:05
+                    themed[symbol] = isinstance(pick, dict) and datetime.fromisoformat(stamp) >= datetime.fromisoformat(pick['first'])
+                except (KeyError, TypeError, ValueError):
+                    themed[symbol] = False
         if fill is not None and fill in pins:
             return pins[fill]
         # the account's own add cap (user 2026-11-17): paper adds past it map to no live shares; pinned like any size,
         # so lowering the cap later never sells what was already followed
-        value = Decimal(0) if max_adds is not None and nth - 1 > max_adds else Decimal(size(price, qty))
+        value = (Decimal(0) if themed.get(symbol) or (max_adds is not None and nth - 1 > max_adds)
+                 else Decimal(size(price, qty)))
         if fill is not None:
             pins[fill] = value
             units.dirty = True
@@ -689,7 +714,7 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
 
     now = (now or datetime.now(KST)).astimezone(KST)
     clock = now.strftime('%H:%M')
-    if now.weekday() >= 5 or clock >= SESSION_END:
+    if session_over(now):
         return {'action': 'STOP', 'reason': 'outside session'}
     from session_times import MARKET_OPEN
     if clock < MARKET_OPEN:

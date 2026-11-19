@@ -51,7 +51,7 @@ def test_order_start_follows_a_shifted_exchange_open():
     from datetime import date
     from unittest.mock import patch
     with patch.object(session_times, 'SESSION_OPEN', '09:00'), \
-            patch.object(session_times, 'SHIFTED_DAYS', {'2026-11-19': 60}):
+            patch.object(__import__('src.tools.nhplug_calendar', fromlist=['x']), 'SHIFTED_DAYS', {'2026-11-19': 60}):
         assert session_times.order_start(date(2026, 11, 19)) == '10:00'
         assert session_times.order_start(date(2026, 11, 20)) == '09:00'
 
@@ -63,7 +63,7 @@ def test_special_session_days_shift_the_exchange_clock():
     """KRX opens and closes an hour late on 수능 day (2026-11-19: 10:00~16:30, KRX notice 2026-11-05)."""
     from datetime import date
     import session_times as s
-    import session_times; session_times.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
+    import src.tools.nhplug_calendar as calendar; calendar.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
     assert s.shift_min(date(2026, 11, 19)) == 60 and s.shift_min(date(2026, 11, 20)) == 0
     assert s.shifted('09:40', date(2026, 11, 19)) == '10:40' and s.shifted('15:40', date(2026, 11, 18)) == '15:40'
 
@@ -72,7 +72,7 @@ def test_long_term_engine_windows_follow_the_exchange_clock():
     """11/19 09:18: the engine (가상 체결 on) would have traded at 09:40 on pre-open quotes and closed at 15:40."""
     from datetime import date
     import vibe_longterm as L
-    import session_times; session_times.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
+    import src.tools.nhplug_calendar as calendar; calendar.SHIFTED_DAYS = {"2026-11-19": 60}  # restored by conftest
     normal = dict((names, (a, b)) for names, a, b in L.windows(date(2026, 11, 18)))
     late = dict((names, (a, b)) for names, a, b in L.windows(date(2026, 11, 19)))
     assert normal[('trade', 'dca')] == ('09:40', '14:30') and late[('trade', 'dca')] == ('10:40', '15:30')

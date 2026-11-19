@@ -73,3 +73,18 @@ def test_session_opens_at_0900():
         at = datetime.fromisoformat(f'2026-11-06T{stamp}+09:00')
         q = quote(hoga_bsop_hour=stamp, bsop_date='20261106')
         assert check_session(at, q, q, require_advance=False)['allowed'] is allowed, stamp
+
+
+def test_a_shifted_exchange_day_moves_the_whole_permitted_window(monkeypatch):
+    """수능 day (user 2026-11-19): KRX opens 10:00 and closes 16:30, so the 15:00 buy / 15:18 sell ends move an hour too;
+    the caps themselves (session_end <= 15:18 on the ordinary clock) are unchanged."""
+    import src.tools.nhplug_calendar as cal
+    monkeypatch.setattr(cal, 'SHIFTED_DAYS', {'2026-11-19': 60})
+    day = lambda h, m, s=30: datetime(2026, 11, 19, h, m, s, tzinfo=KST)  # noqa: E731
+    at = lambda h, m: quote(hoga_bsop_hour=f'{h:02}:{m:02}:00')  # noqa: E731
+    assert not check_session(day(9, 30), at(9, 30))['allowed']  # before the 10:00 open
+    assert check_session(day(15, 30), at(15, 30), at(15, 29))['allowed']  # 15:00 buy end is 16:00 today
+    assert not check_session(day(16, 0), at(16, 0), at(15, 59))['allowed']
+    assert check_session(day(16, 10), at(16, 10), at(16, 10), require_advance=False, session_end=time(15, 18))['allowed']
+    assert not check_session(day(16, 18), at(16, 18), at(16, 18), require_advance=False, session_end=time(15, 18))['allowed']
+    assert not check_session(datetime(2026, 11, 20, 15, 30, tzinfo=KST), at(15, 30), at(15, 29))['allowed']  # an ordinary day

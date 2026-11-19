@@ -3,6 +3,22 @@ from datetime import datetime, time
 import re
 from zoneinfo import ZoneInfo
 
+# KRX days whose whole clock moves (minutes late): 수능 day opens 10:00 and closes 16:30 (KRX notice 2026-11-05). Every
+# session time (orders, guards, runners) moves by it (user 2026-11-19); session_times reads this one table.
+# shortcut: a hand-kept table; add each year's 수능 day (and any KRX special-hours notice) when it is announced.
+SHIFTED_DAYS = {'2026-11-19': 60}
+
+
+def shift_min(day):
+    """Minutes the exchange clock runs late on `day` (a date), 0 on an ordinary day."""
+    return SHIFTED_DAYS.get(day.isoformat(), 0)
+
+
+def shifted_time(at: time, day) -> time:
+    """`at` (an ordinary-day clock time) on `day`'s exchange clock."""
+    total = at.hour * 60 + at.minute + shift_min(day)
+    return time(total // 60, total % 60, at.second)
+
 
 def check_session(now: datetime, snapshot: dict, previous_snapshot: dict | None = None, *,
                   require_advance: bool = True, session_end: time = time(15),
@@ -22,7 +38,9 @@ def check_session(now: datetime, snapshot: dict, previous_snapshot: dict | None 
             or session_end.tzinfo is not None or not time(9, 10) < session_end <= time(15, 18)
             or type(future_tolerance_seconds) is not int or not 0 <= future_tolerance_seconds <= 5):
         return deny('invalid session policy')
-    if now.weekday() >= 5 or not time(9) <= now.time().replace(tzinfo=None) < session_end:
+    # the caps above are on the ordinary clock; a shifted day (수능) moves the whole window (user 2026-11-19)
+    if (now.weekday() >= 5 or not shifted_time(time(9), now.date()) <= now.time().replace(tzinfo=None)
+            < shifted_time(session_end, now.date())):
         return deny('outside permitted KRX session')
     if not isinstance(snapshot, dict) or snapshot.get('status') != 'ok':
         return deny('market snapshot unavailable')

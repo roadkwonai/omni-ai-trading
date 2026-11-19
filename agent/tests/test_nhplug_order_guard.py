@@ -871,3 +871,24 @@ def test_paper_buy_window_opens_at_0900(tmp_path, monkeypatch):
     clock.now.return_value = datetime(2026, 11, 6, 9, 0, 30, tzinfo=ZoneInfo('Asia/Seoul'))
     adapter(broker).call_tool('call_api', BUY)
     assert len(broker.sent) == 1
+
+
+def test_paper_buy_window_moves_with_a_shifted_exchange_day(tmp_path, monkeypatch):
+    """수능 day (user 2026-11-19): KRX 10:00~16:30, so paper buys are allowed 10:00~16:00 that day."""
+    import json
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from unittest.mock import Mock
+    import src.tools.nhplug_calendar as cal
+    import src.tools.nhplug_order_guard as guard
+    monkeypatch.setattr(cal, 'SHIFTED_DAYS', {'2026-11-19': 60})
+    (tmp_path / 'nhplug').mkdir()
+    (tmp_path / 'nhplug' / 'swing-policy.json').write_text(json.dumps({'enabled': True}))
+    clock = Mock()
+    monkeypatch.setattr(guard, 'datetime', clock)
+    broker = Broker(result({'Output_0': {'mkt_orr_no': 42}}))
+    for h, m, allowed in ((9, 30, False), (15, 30, True), (16, 0, False)):
+        clock.now.return_value = datetime(2026, 11, 19, h, m, tzinfo=ZoneInfo('Asia/Seoul'))
+        before = len(broker.sent)
+        adapter(broker).call_tool('call_api', BUY)
+        assert (len(broker.sent) > before) is allowed, (h, m)

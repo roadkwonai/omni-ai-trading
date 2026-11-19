@@ -5,6 +5,9 @@ import tempfile
 os.environ.setdefault('VIBE_TRADING_TUNABLES', os.devnull)
 os.environ.setdefault('VIBE_TRADING_OVERSOLD_CASES', os.path.join(tempfile.mkdtemp(prefix='oversold-cases-'), 'none.sqlite3'))
 os.environ.setdefault('VIBE_TRADING_SETTINGS_HISTORY', os.path.join(tempfile.mkdtemp(prefix='settings-history-'), 'h.sqlite3'))
+# As scripts/conftest.py: agent/tests/conftest.py's sandbox HOME must not hide the installed Archify (r5).
+import pwd  # noqa: E402
+os.environ.setdefault('ARCHIFY_BIN', os.path.join(pwd.getpwuid(os.getuid()).pw_dir, '.claude/skills/archify/bin/archify.mjs'))
 
 import sys
 
@@ -16,6 +19,13 @@ from streamlit.testing.v1 import AppTest
 # matplotlib font cache); 30 seconds still catches a hung script.
 _run = AppTest.run
 AppTest.run = lambda self, *, timeout=None: _run(self, timeout=timeout if timeout is not None else max(self.default_timeout, 30))
+
+
+@pytest.fixture(autouse=True)
+def _ordinary_exchange_clock(monkeypatch):
+    """Tests use ordinary 09:00~15:30 days; a test of a special-hours day (수능) sets nhplug_calendar.SHIFTED_DAYS itself."""
+    import src.tools.nhplug_calendar as calendar
+    monkeypatch.setattr(calendar, 'SHIFTED_DAYS', {})
 
 
 @pytest.fixture(autouse=True)

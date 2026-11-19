@@ -197,11 +197,16 @@ def index_fallback(code, now, program=None):
             'fallback': {'source': ', '.join(sources), 'note': '네이버 조회 실패로 키움·토스 값 사용(투자자는 토스 기준, 조회 시각 기준)'}}
 
 
+def group_of(name):
+    """The major group (THEME_GROUPS) a theme or sector name belongs to, or None; first match wins."""
+    return next((g for g, words in THEME_GROUPS.items() if any(w in name for w in words)), None)
+
+
 def theme_groups(rows):
     """Stock-count-weighted average change per major group (themes overlap, so this is an approximation)."""
     result = {}
     for row in rows:
-        group = next((g for g, words in THEME_GROUPS.items() if any(w in row['name'] for w in words)), None)
+        group = group_of(row['name'])
         if group and row['count']:
             entry = result.setdefault(group, {'weighted': 0.0, 'count': 0, 'rise': 0, 'fall': 0, 'themes': []})
             entry['weighted'] += row['change_pct'] * row['count']

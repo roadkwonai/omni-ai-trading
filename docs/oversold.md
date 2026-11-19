@@ -30,7 +30,7 @@
 | --- | --- | --- |
 | 노리는 것 | 하락이 멈춘 직후 짧은 되돌림 | 폭락일 장 막판에 사서 며칠 반등 |
 | 시장 조건 | 그 종목 시장의 저가가 전일 대비 −3% 이상 | 지수 저가 −8% 이상, 또는 직전 5일 −5% 뒤 −5% 이상. 전날 나스닥이 오르지 않았어야 함 |
-| 언제 사나 | 장중 아무 때나(신규 매수 마감 전) | 14:30~14:55, 신규 매수 마감 뒤에도 |
+| 언제 사나 | 장중 아무 때나(신규 매수 마감 전) | 14:30\~14:55, 신규 매수 마감 뒤에도 |
 | 엔진 역할 | Jev가 BUY 0.5 이상이어야 삼 | 기본은 삼. Jev가 WAIT 0.7 이상이면 거부 |
 | 크기 | 분할 1회의 100% | 1차 절반 + 다음 거래일 2차 절반 |
 | 익절 | +1.5% 또는 낙폭 회복 중 낮은 값에서 전량 | 평균가 +8% 절반, +15% 나머지 |
@@ -90,7 +90,7 @@ Jev 모드가 켜져 있고 신규 매수 마감 전이면 `nh_paper_isolated.ov
 | ① 시장 판정 | 매분 KODEX 200·KODEX 코스닥150 저가로 판정. 저가 −8% 이상, 또는 −5% 이상이면서 직전 5거래일 지수 −5% 이상. 통과한 날만 전날 밤 나스닥을 읽고, 나스닥이 올랐거나 모르면 불통과. 5분 뒤 다시 읽음 | `oversold_v2_index_drop_pct` 8 · `oversold_v2_capit_drop_pct` 5 · `oversold_v2_prior5_pct` 5 |
 | ② 후보 | 통과한 시장의 감시 종목 중 자기 저가가 개별주 −5%·1배 ETF −3%·2배 ETF −6% 이상 빠졌고, 시장보다 4%p 넘게 더 빠지지 않은 종목(종목 고유 악재 제외). 거래소를 모르는 종목은 시장을 추정하지 않음. 가장 깊게 빠진 순 | `oversold_v2_rel_max_pct` 4 |
 | ③ 리서치 | 후보마다 하루 한 번 Jev가 차트·뉴스·투자자 수급·시황과 해외 테마·애널리스트 의견과 리포트·비슷한 과거 사례를 보고 판단. WAIT 0.7 이상이면 거부, BUY 0.8 이상이면 크기를 키울 수 있음(기본 100%라 키우지 않음). 리서치가 실패하면 규칙대로 기본 크기로 사고 다음 분에 다시 물음 | `oversold_v2_veto_conf` 0.7 · `oversold_v2_boost_pct` 100 |
-| ④ 1차 매수 | 14:30~14:55. 신규 매수 마감 뒤에도 이 경로만 삼. 크기는 1·2차 합계(분할 1회의 100%)의 절반. 하루 3종목까지. 최근 분봉 상승·반대 방향 보유 차단은 보지 않음 | `oversold_v2_from_hhmm` 1430 · `oversold_v2_until_hhmm` 1455 · `oversold_v2_size_pct` 100 · `oversold_v2_max_new` 3 |
+| ④ 1차 매수 | 14:30\~14:55. 신규 매수 마감 뒤에도 이 경로만 삼. 크기는 1·2차 합계(분할 1회의 100%)의 절반. 하루 3종목까지. 최근 분봉 상승·반대 방향 보유 차단은 보지 않음 | `oversold_v2_from_hhmm` 1430 · `oversold_v2_until_hhmm` 1455 · `oversold_v2_size_pct` 100 · `oversold_v2_max_new` 3 |
 | ⑤ 2차 매수 | 다음 거래일 같은 창에서 1차 매수가보다 싸고 손절가보다 위면 나머지 절반. 이미 일부를 팔았으면 사지 않음. 2차를 산 뒤 손절은 새 평균가 기준 | `oversold_v2_add_on` 1 |
 | ⑥ 분할 익절 | 평균가 +8%에서 절반, +15%에서 나머지. 매분 확인해 닿으면 바로 팜. 절반 판 뒤 본전 손절은 걸지 않음 | `oversold_v2_half_tp_pct` 8 · `oversold_v2_tp_pct` 15 |
 | ⑦ 손절 | 평균 매입가 −2%에서 전량. 손절된 포지션은 저점 재매수 감시로 넘어감 | `oversold_v2_stop_pct` 2 |
@@ -153,7 +153,7 @@ stateDiagram-v2
 
 ## 실계좌는 어떻게 따라가나
 
-실계좌 미러(`scripts/nh_live_follow.py`)는 공유 모의 체결을 따릅니다. 낙폭과대 매수도 실계좌 설정 크기로 따라가며, 신규 매수 마감 뒤의 선별 v2 매수(14:30~14:55)도 그날 따라 삽니다. 손절은 모의 청산 계획의 손절 %를 그대로 쓰고 실계좌 손절 2% 상한을 적용하지 않습니다. 모의가 선별 v2를 저점에서 다시 사면 실계좌도 자기 손절 뒤 그 종목을 다시 따라 삽니다. 계좌 하루 손실 한도·운용금·회당 한도는 그대로입니다. 실제 주문은 계좌의 실주문 스위치가 켜졌을 때만 실행됩니다. 자세한 규칙은 [실계좌 운용](live-accounts.md)에 있습니다.
+실계좌 미러(`scripts/nh_live_follow.py`)는 공유 모의 체결을 따릅니다. 낙폭과대 매수도 실계좌 설정 크기로 따라가며, 신규 매수 마감 뒤의 선별 v2 매수(14:30\~14:55)도 그날 따라 삽니다. 손절은 모의 청산 계획의 손절 %를 그대로 쓰고 실계좌 손절 2% 상한을 적용하지 않습니다. 모의가 선별 v2를 저점에서 다시 사면 실계좌도 자기 손절 뒤 그 종목을 다시 따라 삽니다. 계좌 하루 손실 한도·운용금·회당 한도는 그대로입니다. 실제 주문은 계좌의 실주문 스위치가 켜졌을 때만 실행됩니다. 자세한 규칙은 [실계좌 운용](live-accounts.md)에 있습니다.
 
 > [!CAUTION]
 > 실계좌 실주문 스위치는 모의 체결 20건 이상과 별도 승인 전에는 낙폭과대 때문에 켜지 않기로 했습니다(2026-11-13 결정).
@@ -225,20 +225,20 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/oversold_cases.py --rereplay
 | 키 | 기본 | 범위 | 뜻 |
 | --- | --- | --- | --- |
 | `oversold_on` | 1 | 0·1 | 장중 반등 경로 |
-| `oversold_stock_drop_pct` | 6.0 | 1~30 | 개별주 낙폭 % |
-| `oversold_etf_drop_pct` | 6.0 | 0.5~15 | 1배 ETF 낙폭 % |
+| `oversold_stock_drop_pct` | 6.0 | 1\~30 | 개별주 낙폭 % |
+| `oversold_etf_drop_pct` | 6.0 | 0.5\~15 | 1배 ETF 낙폭 % |
 | `oversold_lev_on` | 0 | 0·1 | 2배 ETF 포함 |
-| `oversold_lev_drop_pct` | 8.0 | 1~30 | 2배 ETF 낙폭 % |
-| `oversold_atr_mult` | 1.5 | 0~5 | ATR 배수 |
-| `oversold_calm_min` | 20 | 1~25 | 저가 갱신 없는 분 |
-| `oversold_rebound_pct` | 0.3 | 0~5 | 저가 대비 반등 % |
-| `oversold_market_drop_pct` | 3.0 | 0~15 | 시장 저가 하락 % 이상일 때만(0=조건 없음) |
-| `oversold_size_pct` | 100 | 50~1000 | 분할 1회 대비 매수 크기 % |
-| `oversold_tp_pct` | 1.5 | 0.3~15 | 익절 % |
-| `oversold_recover_pct` | 100 | 20~100 | 낙폭 회복 % 익절(둘 중 낮은 값) |
-| `oversold_stop_pct` | 0.5 | 0.1~5 | 당일 저가 아래 손절 % |
-| `oversold_hold_days` | 1 | 0~3 | 최대 보유 거래일(0=당일) |
-| `oversold_jev_min` | 0.5 | 0~0.95 | Jev 매수 신뢰도 |
+| `oversold_lev_drop_pct` | 8.0 | 1\~30 | 2배 ETF 낙폭 % |
+| `oversold_atr_mult` | 1.5 | 0\~5 | ATR 배수 |
+| `oversold_calm_min` | 20 | 1\~25 | 저가 갱신 없는 분 |
+| `oversold_rebound_pct` | 0.3 | 0\~5 | 저가 대비 반등 % |
+| `oversold_market_drop_pct` | 3.0 | 0\~15 | 시장 저가 하락 % 이상일 때만(0=조건 없음) |
+| `oversold_size_pct` | 100 | 50\~1000 | 분할 1회 대비 매수 크기 % |
+| `oversold_tp_pct` | 1.5 | 0.3\~15 | 익절 % |
+| `oversold_recover_pct` | 100 | 20\~100 | 낙폭 회복 % 익절(둘 중 낮은 값) |
+| `oversold_stop_pct` | 0.5 | 0.1\~5 | 당일 저가 아래 손절 % |
+| `oversold_hold_days` | 1 | 0\~3 | 최대 보유 거래일(0=당일) |
+| `oversold_jev_min` | 0.5 | 0\~0.95 | Jev 매수 신뢰도 |
 
 </details>
 
@@ -248,23 +248,23 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/oversold_cases.py --rereplay
 | 키 | 기본 | 범위 | 뜻 |
 | --- | --- | --- | --- |
 | `oversold_v2_on` | 1 | 0·1 | 선별 v2 경로 |
-| `oversold_v2_from_hhmm` · `oversold_v2_until_hhmm` | 1430 · 1455 | 900~1510 · 930~1515 | 매수 창 |
-| `oversold_v2_index_drop_pct` | 8.0 | 3~20 | 지수 폭락 %(저가) |
-| `oversold_v2_capit_drop_pct` | 5.0 | 2~15 | 투매일 지수 낙폭 % |
-| `oversold_v2_prior5_pct` | 5.0 | 0~20 | 투매 직전 5일 지수 하락 % |
-| `oversold_v2_rel_max_pct` | 4.0 | 0.5~15 | 시장보다 더 빠진 한도 %p |
+| `oversold_v2_from_hhmm` · `oversold_v2_until_hhmm` | 1430 · 1455 | 900\~1510 · 930\~1515 | 매수 창 |
+| `oversold_v2_index_drop_pct` | 8.0 | 3\~20 | 지수 폭락 %(저가) |
+| `oversold_v2_capit_drop_pct` | 5.0 | 2\~15 | 투매일 지수 낙폭 % |
+| `oversold_v2_prior5_pct` | 5.0 | 0\~20 | 투매 직전 5일 지수 하락 % |
+| `oversold_v2_rel_max_pct` | 4.0 | 0.5\~15 | 시장보다 더 빠진 한도 %p |
 | `oversold_v2_add_on` | 1 | 0·1 | 다음 날 2차 매수 |
-| `oversold_v2_half_tp_pct` | 8.0 | 2~30 | 절반 익절 % |
-| `oversold_v2_tp_pct` | 15.0 | 3~45 | 나머지 익절 % |
-| `oversold_v2_stop_pct` | 2.0 | 1~25 | 평균 매입가 대비 손절 % |
-| `oversold_v2_hold_days` | 3 | 1~10 | 보유 거래일 |
-| `oversold_v2_size_pct` | 100 | 10~1000 | 1·2차 합계 크기(분할 1회 대비 %) |
-| `oversold_v2_veto_conf` | 0.7 | 0.5~1.0 | 리서치 거부(Jev WAIT 신뢰도, 1.0이면 거부 안 함) |
-| `oversold_v2_boost_pct` | 100 | 100~200 | 강한 동의(BUY 0.8 이상) 때 크기 % |
-| `oversold_v2_max_new` | 3 | 1~6 | 하루 매수 종목 수 |
-| `oversold_v2_reentry_max` | 2 | 0~3 | 손절 뒤 재매수 횟수(0=끔) |
-| `oversold_v2_reentry_hold_min` | 20 | 5~60 | 재매수 전 저점 유지 분 |
-| `oversold_v2_reentry_bounce_pct` | 1.0 | 0.2~3 | 재매수 저점 반등 % |
+| `oversold_v2_half_tp_pct` | 8.0 | 2\~30 | 절반 익절 % |
+| `oversold_v2_tp_pct` | 15.0 | 3\~45 | 나머지 익절 % |
+| `oversold_v2_stop_pct` | 2.0 | 1\~25 | 평균 매입가 대비 손절 % |
+| `oversold_v2_hold_days` | 3 | 1\~10 | 보유 거래일 |
+| `oversold_v2_size_pct` | 100 | 10\~1000 | 1·2차 합계 크기(분할 1회 대비 %) |
+| `oversold_v2_veto_conf` | 0.7 | 0.5\~1.0 | 리서치 거부(Jev WAIT 신뢰도, 1.0이면 거부 안 함) |
+| `oversold_v2_boost_pct` | 100 | 100\~200 | 강한 동의(BUY 0.8 이상) 때 크기 % |
+| `oversold_v2_max_new` | 3 | 1\~6 | 하루 매수 종목 수 |
+| `oversold_v2_reentry_max` | 2 | 0\~3 | 손절 뒤 재매수 횟수(0=끔) |
+| `oversold_v2_reentry_hold_min` | 20 | 5\~60 | 재매수 전 저점 유지 분 |
+| `oversold_v2_reentry_bounce_pct` | 1.0 | 0.2\~3 | 재매수 저점 반등 % |
 
 </details>
 
@@ -280,6 +280,6 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/oversold_cases.py --rereplay
 
 ## 설계 기록
 
-- 낙폭과대 시험 운영·감사·보완 계획(`docs/oversold-plan.md`, 비공개): 운영 방식, 판단 기준, 로드맵(O-1~O-15), 화면 설계
+- 낙폭과대 시험 운영·감사·보완 계획(`docs/oversold-plan.md`, 비공개): 운영 방식, 판단 기준, 로드맵(O-1\~O-15), 화면 설계
 - 낙폭과대 과거 사례 연구(`docs/oversold-case-study.md`, 비공개): 데이터, 결론, 6개월 재현(2-1절), 낙주매매 설계 검증(2-2절)
 - 사용자 결정 원문: 운영자 로컬 `AGENTS.md`(비공개)의 2026-11-13·11-17 낙폭과대 항목

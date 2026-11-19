@@ -967,6 +967,25 @@ def test_paper_new_listing_fills_are_followed_like_any_paper_fill(tmp_path):
     assert units(1300, 10, '2|114800|10|1300|t') == 1
 
 
+
+def test_a_position_the_paper_opened_on_a_theme_slot_pick_maps_to_no_live_shares(tmp_path):
+    # user 2026-11-19 (docs/theme-slot-plan-2026-11-19.md): the live mirror does not follow 주도 테마 동반주 buys yet
+    folder = tmp_path / 'shared-etf-paper'
+    folder.mkdir()
+    (folder / 'theme-picks.json').write_text(json.dumps({'2026-11-19': {'090430': {'group': '화장품·소비', 'first': '2026-11-19T10:16:00+09:00'}}}))
+    units = f.pinned(lambda price, qty=1: 1, {'hash': 'x'}, tmp_path, folder / 'orders.sqlite3')
+    assert units(133800, 7, '1|090430|7|133800|2026-11-19T10:40:00+09:00', 1) == 0  # opened after it became a pick
+    assert units(135000, 7, '2|090430|7|135000|2026-11-19T11:00:00+09:00', 2) == 0  # its adds follow the opening
+    assert units(1300, 10, '3|114800|10|1300|2026-11-19T10:40:00+09:00', 1) == 1
+    assert units(130000, 7, '4|090430|7|130000|2026-11-18T10:40:00+09:00', 1) == 1  # another day: an ordinary buy
+    assert units(130000, 7, '5|090430|7|130000|2026-11-19T10:05:00+09:00', 1) == 1  # bought before it was a pick
+    assert units(131000, 7, '6|090430|7|131000|2026-11-19T10:20:00+09:00', 2) == 1  # an add to that ordinary position
+    # the same minute (11-19 review): a pick noted at 10:16:40 does not claim a position opened at 10:16:05
+    (folder / 'theme-picks.json').write_text(json.dumps({'2026-11-20': {'008770': {'group': '화장품·소비', 'first': '2026-11-20T10:16:40+09:00'}}}))
+    units = f.pinned(lambda price, qty=1: 1, {'hash': 'x'}, tmp_path, folder / 'orders.sqlite3')
+    assert units(90000, 5, '7|008770|5|90000|2026-11-20T10:16:05.123+09:00', 1) == 1
+    assert units(90000, 5, '8|008770|5|90000|2026-11-20T10:16:50.123+09:00', 1) == 0
+
 # ---- review 3 M6/X4/X5: the shared runner's events.jsonl (39 MB after six sessions, never rotated) is read incrementally ----
 
 def _ledger(folder, fills, events):

@@ -33,14 +33,16 @@ def decision_mode(root):
         return True
 
 
-def review_time(root):
-    """15:10, or 7 minutes after a later runner session close (session_times; the flatten time is a setting)."""
+def review_time(root, day=None):
+    """15:10, or 7 minutes after a later runner session close (session_times; the flatten time is a setting), on the
+    day's exchange clock (16:10 on 수능 day)."""
+    import session_times
+    day = day or session_times.today()
     try:
-        import session_times
-        close = session_times.minutes(session_times.load(root)['close'])  # this watch's own account (isolated: defaults)
-        return session_times.clock_text(max(session_times.minutes('15:10'), close + 7))
+        close = session_times.minutes(session_times.load(root, day)['close'])  # this watch's own account (isolated: defaults)
+        return session_times.clock_text(max(session_times.minutes(session_times.shifted('15:10', day)), close + 7))
     except (OSError, ValueError, KeyError, TypeError):
-        return '15:10'
+        return session_times.shifted('15:10', day)
 
 
 # 11-19 09:03~10:26 every round failed with sqlite3.DatabaseError in the long-running process (it kept handles of WAL
@@ -78,6 +80,11 @@ def main(argv=None):
                     print(json.dumps({'issue_candidates': update_outcomes(root=root)}), flush=True)
                 except Exception as exc:
                     print(json.dumps({'issue_candidates_error': type(exc).__name__}), flush=True)
+                try:  # 신규주 그림자 기록: today's listings under the current rule and two candidate changes (research only, user 2026-11-19)
+                    import ipo_shadow
+                    print(json.dumps({'ipo_shadow': ipo_shadow.update(root)}), flush=True)
+                except Exception as exc:
+                    print(json.dumps({'ipo_shadow_error': type(exc).__name__}), flush=True)
                 try:  # 낙폭과대 반등 outcome log: today, and the previous session again so a held trade's result fills in
                     from oversold_outcomes import collect, market_data
                     import oversold

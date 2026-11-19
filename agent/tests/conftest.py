@@ -173,6 +173,13 @@ def _sandbox_runtime_root():
 
 
 @pytest.fixture(autouse=True)
+def _ordinary_exchange_clock(monkeypatch):
+    """Tests use ordinary 09:00~15:30 days; a test of a special-hours day (수능) sets nhplug_calendar.SHIFTED_DAYS itself."""
+    import src.tools.nhplug_calendar as calendar
+    monkeypatch.setattr(calendar, "SHIFTED_DAYS", {})
+
+
+@pytest.fixture(autouse=True)
 def _reset_env_config():
     """Isolate each test from the process environment and the config cache.
 

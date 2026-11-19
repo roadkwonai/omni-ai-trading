@@ -5,12 +5,12 @@ import { Dialog, DialogBackdrop, DialogClose, DialogContent, DialogDescription, 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger } from '@ui-sdk/react/accordion'
 import {
   ArrowDown, ArrowRight, ArrowUpRight, Bank, BellRinging, CaretDown, Check, Copy, GithubLogo, List, ListChecks, MagnifyingGlassPlus,
-  ArrowsClockwise, ChatsCircle, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TrendDown, UserCircle, Warning, X,
+  ArrowsClockwise, CalendarCheck, ChatsCircle, Download, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TrendDown, UserCircle, Warning, X,
 } from '@phosphor-icons/react'
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
   AI_LOOP, AI_PAID, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
-  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION,
+  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
 // Charts load in their own chunk; the placeholder keeps the height so nothing jumps.
@@ -18,7 +18,7 @@ const ScheduleChart = lazy(() => import('./Charts').then((m) => ({ default: m.Sc
 const chart = (el: React.ReactNode, h: number) => <Suspense fallback={<div className="chart-slot" style={{ height: h }} />}>{el}</Suspense>
 
 const ICONS = { TrendDown, Bank, Plant, Notebook, BellRinging, ListChecks, Scales, Stack, ShieldCheck, ArrowsClockwise, ChatsCircle, LockKey,
-  Lightning, Compass, PiggyBank, ClipboardText, PlugsConnected } as const
+  Lightning, Compass, PiggyBank, ClipboardText, PlugsConnected, Download, CalendarCheck, Robot, Monitor } as const
 const img = (name: string) => `./img/${name}.webp`
 const shot = (id: string) => `./img/screens/${id}.webp`
 const css = (vars: Record<string, string | number>) => vars as React.CSSProperties
@@ -135,13 +135,13 @@ function Hero() {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="container hero-inner">
-        <p className="kicker hero-step" style={css({ '--d': 0 })}>국내 ETF 실시간 매매 · 미국 ETF 장기투자 · 오픈소스</p>
+        <p className="kicker hero-step" style={css({ '--d': 0 })}>Claude Code·Codex에서 대화로 운영하는 AI 트레이딩 · 오픈소스</p>
         <h1 id="hero-title" className="heading-1 hero-title hero-step" style={css({ '--d': 1 })}>
           손절을 망설이는 순간에도<br />AI는 원칙대로 움직입니다
         </h1>
         <p className="lead hero-sub hero-step" style={css({ '--d': 2 })}>
           투자에서 지는 이유는 정보가 아니라 <mark className="hl">망설임</mark>입니다. AI 트레이더 Jev는 <strong className="em">수급과 시황으로 주도주를 찾아 1분마다 판단</strong>하고,
-          <strong className="em">거장의 원칙은 장기 자산을 천천히 키웁니다.</strong> 모든 판단과 주문은 기록으로 남아 매일 복기됩니다.
+          {' '}<strong className="em">거장의 원칙은 장기 자산을 천천히 키웁니다.</strong> Claude Code나 Codex에 설치해 <mark className="hl">대화로 운영하고, 예약 작업이 매일 점검과 리포트를 맡습니다.</mark>
         </p>
         <div className="hero-cta hero-step" style={css({ '--d': 3 })}>
           <a className="btn btn-primary button-md" href={START}><GithubLogo size={18} aria-hidden />GitHub에서 시작하기</a>
@@ -292,7 +292,7 @@ function Candles() {
 
 function Art() {
   return (
-    <section id="art" className="section band" aria-labelledby="art-title">
+    <section id="art" className="section" aria-labelledby="art-title">
       <div className="container">
         <div className="art-head">
           <p className="kicker">투자 기법 · 오래된 증시 격언</p>
@@ -347,7 +347,7 @@ const TONE_ICON = { up: '▲', wait: '■', down: '▼' } as const
 
 function Jev() {
   return (
-    <section id="jev" className="section" aria-labelledby="jev-title">
+    <section id="jev" className="section band" aria-labelledby="jev-title">
       <div className="container">
         <div className="head-split">
           <div className="head">
@@ -435,7 +435,7 @@ function Longterm() {
   const [pick, setPick] = useState(0)
   const regime = REGIMES[pick]
   return (
-    <section id="longterm" className="section band" aria-labelledby="longterm-title">
+    <section id="longterm" className="section" aria-labelledby="longterm-title">
       <div className="container">
         <div className="head-split">
           <div className="head">
@@ -491,7 +491,7 @@ function Longterm() {
 function Dca() {
   const [side, setSide] = useState<'master' | 'me'>('master')
   return (
-    <section id="dca" className="section" aria-labelledby="dca-title">
+    <section id="dca" className="section band" aria-labelledby="dca-title">
       <div className="container">
         <div className="head-split">
           <div className="head">
@@ -536,7 +536,7 @@ function Dca() {
 
 function Styles() {
   return (
-    <section id="styles" className="section band" aria-labelledby="styles-title">
+    <section id="styles" className="section" aria-labelledby="styles-title">
       <div className="container">
         <div className="head">
           <p className="kicker">내 투자 스타일</p>
@@ -569,7 +569,7 @@ function Styles() {
 
 function Data() {
   return (
-    <section id="data" className="section" aria-labelledby="data-title">
+    <section id="data" className="section band" aria-labelledby="data-title">
       <div className="container">
         <div className="head">
           <p className="kicker">단순한 구조</p>
@@ -599,13 +599,34 @@ function AiOps() {
   return (
     <section id="ai" className="section band" aria-labelledby="ai-title">
       <div className="container">
-        <div className="head">
-          <p className="kicker">AI 운영</p>
-          <h2 id="ai-title" className="heading-2">Claude Code·Codex와 채팅하며 운영합니다</h2>
-          <p className="lead">
-            설치부터 매일의 점검, 분석, 리포트까지 AI 코딩 에이전트에게 말로 맡깁니다. 프로젝트 스킬 9개와 예약 작업 15개가
-            사람이 없을 때도 장전 분석, 장중 감사, 매매일지를 씁니다. 주문은 채팅이 아니라 실행기와 주문 가드가 냅니다.
-          </p>
+        <div className="head-split">
+          <div className="head">
+            <p className="kicker">Claude Code · Codex로 운영</p>
+            <h2 id="ai-title" className="heading-2">AI 도구에 설치하고,<br />대화와 예약 작업으로 운영합니다</h2>
+            <p className="lead">
+              Omni AI Trading은 내려받아 실행하는 앱이 아니라 <strong className="em">AI 코딩 에이전트와 함께 쓰는 트레이딩 시스템</strong>입니다.
+              설치는 AI 에이전트에게 맡기고, 상태 확인·분석·설정 변경은 대화로 처리하며, 매일 반복되는 점검과 리포트는 예약 작업이 맡습니다.
+              {' '}<mark className="hl">실제 주문은 채팅이 아니라 실행기가 주문 가드를 거쳐 실행합니다.</mark>
+            </p>
+          </div>
+          <img className="art art-wide" src={img('mascot-agent')} alt="" width="1200" height="800" loading="lazy" />
+        </div>
+        <ol className="use-steps" data-reveal>
+          {USE_STEPS.map((u, i) => {
+            const Icon = ICONS[u.icon as keyof typeof ICONS]
+            return (
+              <li key={u.title} className="use-step">
+                <span className="icon-chip" aria-hidden><Icon size={20} /></span>
+                <span className="craft-no" aria-hidden>{i + 1}</span>
+                <h3 className="heading-4">{u.title}</h3>
+                <p className="small muted">{rich(u.body)}</p>
+              </li>
+            )
+          })}
+        </ol>
+        <div className="ai-chips" data-reveal>
+          <div><p className="title-3">예약 작업이 매일 하는 일</p><ul>{SCHEDULE_CHIPS.map((c) => <li key={c} className="tag">{c}</li>)}</ul></div>
+          <div><p className="title-3">프로젝트 스킬 9개</p><ul>{AI_SKILLS.map((c) => <li key={c} className="tag">{c}</li>)}</ul></div>
         </div>
         <div className="ai-ops">
           <figure className="chat" aria-label="채팅 운영 예시">
@@ -684,12 +705,61 @@ function Daily() {
   )
 }
 
+function StackSection() {
+  return (
+    <section id="stack" className="section band" aria-labelledby="stack-title">
+      <div className="container">
+        <div className="head-split">
+          <div className="head">
+            <p className="kicker">기반 기술</p>
+            <h2 id="stack-title" className="heading-2">검증된 오픈소스 위에<br />국내 시장 매매와 장기투자를 더했습니다</h2>
+            <p className="lead">
+              Omni AI Trading은 <strong className="em">HKUDS Vibe-Trading</strong>을 바탕으로, NH투자증권 나무 PLUG로 국내 ETF·주식을 자동매매하고
+              미국 ETF를 거장의 원칙으로 운용하도록 확장한 오픈소스입니다. 원본의 MIT 라이선스와 저작권 고지를 그대로 따릅니다.
+            </p>
+          </div>
+          <img className="art art-lg" src={img('mascot-foundation')} alt="" width="640" height="640" loading="lazy" />
+        </div>
+        <article className="upstream" data-reveal>
+          <div className="upstream-main">
+            <span className="tag">{UPSTREAM.license} · Omni의 기반</span>
+            <h3 className="heading-3">{UPSTREAM.name}</h3>
+            <p className="small muted">{rich(UPSTREAM.about)}</p>
+            <a className="more button-sm" href={UPSTREAM.href} target="_blank" rel="noopener noreferrer">GitHub에서 원본 보기 <ArrowUpRight size={16} aria-hidden /></a>
+          </div>
+          <div>
+            <p className="title-3">Omni가 이어받아 쓰는 것</p>
+            <ul className="rows">
+              {UPSTREAM.uses.map((u) => <li key={u.title}><strong className="title-2">{u.title}</strong><span className="small muted">{u.body}</span></li>)}
+            </ul>
+          </div>
+        </article>
+        <ul className="stack-grid" data-reveal>
+          {STACK.map((t) => {
+            const Icon = ICONS[t.icon as keyof typeof ICONS]
+            return (
+              <li key={t.name}>
+                <a className="stack-card" href={doc(t.href)}>
+                  <span className="icon-chip" aria-hidden><Icon size={20} /></span>
+                  <span className="caption muted">{t.role}</span>
+                  <strong className="title-1">{t.name}</strong>
+                  <span className="small muted">{t.body}</span>
+                </a>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
 function Integrations() {
   const data = INTEGRATIONS.find((g) => g.group === '데이터')!
   const alerts = INTEGRATIONS.find((g) => g.group === '알림·게시')!
   const link = (it: { anchor?: string; doc?: string }) => (it.doc ? doc(it.doc) : `${doc('integrations.md')}#${it.anchor}`)
   return (
-    <section id="integrations" className="section band" aria-labelledby="integrations-title">
+    <section id="integrations" className="section" aria-labelledby="integrations-title">
       <div className="container">
         <div className="head-split">
           <div className="head">
@@ -735,7 +805,7 @@ function Integrations() {
 
 function Safety() {
   return (
-    <section id="safety" className="section" aria-labelledby="safety-title">
+    <section id="safety" className="section band" aria-labelledby="safety-title">
       <div className="container">
         <div className="head-split">
           <div className="head">
@@ -758,7 +828,7 @@ function Safety() {
           <div>
             <h3 className="heading-4">AI도 틀립니다. 그래서 매일 검증합니다</h3>
             <p className="small muted">
-              첫 주(11/11~11/17, 공유 모의계좌) Jev 진입 신호를 신뢰도 구간별로 5·15·30분 뒤 결과와 비교해 보니, <mark className="hl">신뢰도가 높을수록 오히려 덜 맞았습니다.</mark>
+              첫 주(11/11~11/17, 공유 모의계좌) Jev 진입 신호를 신뢰도 구간별로 5·15·30분 뒤 결과와 비교해 보니, <mark className="hl">신뢰도가 높을수록 오히려 덜 맞았습니다.</mark>{' '}
               그래서 <strong className="em">신뢰도를 수익 확률로 쓰지 않고</strong>, 손절과 하루 손실 한도를 늘 함께 두고, 장 마감마다 구간별 적중률을 다시 확인합니다.
             </p>
           </div>
@@ -848,7 +918,7 @@ function CopyButton({ text }: { text: string }) {
 
 function Start() {
   return (
-    <section id="start" className="section band" aria-labelledby="start-title">
+    <section id="start" className="section" aria-labelledby="start-title">
       <div className="container">
         <div className="head">
           <p className="kicker">시작하기</p>
@@ -964,14 +1034,15 @@ export default function App() {
         <Hero />
         <Why />
         <Principle />
+        <AiOps />
         <Art />
         <Jev />
         <Longterm />
         <Dca />
         <Styles />
         <Data />
-        <AiOps />
         <Daily />
+        <StackSection />
         <Integrations />
         <Safety />
         <Start />

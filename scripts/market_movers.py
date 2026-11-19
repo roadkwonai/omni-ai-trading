@@ -141,6 +141,110 @@ def rank(rows):
     return rankings, candidates, by_code
 
 
+# 주도 테마 동반주 (user 2026-11-19, docs/theme-slot-plan-2026-11-19.md): 11-19 the rise slots went to one theme's
+# +24~30% entertainment stocks all day, so the cosmetics group (#2) never reached Jev. After rank(), each of the top
+# THEME_GROUPS_TOP theme groups that is up and has no candidate yet adds its busiest universe riser, up to THEME_SLOTS.
+# Only Jev's choices change; every order rule stays. Sources as the API bench ranked them (docs/api-selection.md):
+# members once a day (Toss sectors ∪ Naver themes), figures from one Kiwoom ka10095 call, Naver when Kiwoom fails.
+THEME_SLOTS, THEME_GROUPS_TOP, THEME_MIN_UP, THEME_MAX_UP = 2, 3, 2.0, 25.0  # +2~25%: the strength path's own band
+THEME_QUOTE_TRIES = 2  # NH quotes per group at most (the shared app key, 5 calls a second)
+THEME_PICKS = ROOT / 'theme-picks.json'  # {day: {code: {group, first}}}: the live mirror does not follow these (user)
+
+
+def theme_picks(groups, universe, candidates, members_of, figures, quote):
+    """Candidate rows to add: per strong group (theme_groups rows, strongest first) whose members are not yet among
+    `candidates`, the member up THEME_MIN_UP~THEME_MAX_UP % with the most trading value. `members_of(group)` gives the
+    group's universe codes, `figures(codes, groups)` {code: (change %, trading value)}, `quote(codes)` NH scan() rows.
+    A failed lookup leaves the slot empty, as before this rule."""
+    eligible = []
+    for row in groups[:THEME_GROUPS_TOP]:
+        if not isinstance(row.get('change_pct'), (int, float)) or row['change_pct'] <= 0:
+            continue
+        try:
+            codes = set(members_of(row.get('group'))) & set(universe)
+        except Exception:  # noqa: BLE001 - this group only
+            continue
+        if codes and not codes & set(candidates):  # otherwise Jev already sees this group
+            eligible.append((row['group'], codes))
+    if not eligible:
+        return []
+    try:
+        figs = figures(sorted(set().union(*(codes for _, codes in eligible))), [g for g, _ in eligible])
+    except Exception:  # noqa: BLE001 - no figures: no slot this round
+        return []
+    picks = []
+    for group, codes in eligible:
+        if len(picks) >= THEME_SLOTS:
+            break
+        taken = {p['code'] for p in picks}
+        risers = sorted(((value or 0, code) for code in codes - taken for change, value in [figs.get(code) or (None, None)]
+                         if change is not None and THEME_MIN_UP <= change <= THEME_MAX_UP), reverse=True)
+        for _, code in risers[:THEME_QUOTE_TRIES]:  # r5: a failed NH quote tries the group's next busiest riser
+            rows = quote([code])
+            if rows:
+                picks.append({**rows[0], 'reasons': [f'주도 테마 동반주 ({group})'], 'theme_group': group})
+                break
+    return picks
+
+
+def theme_figures(universe):
+    """figures() for theme_picks: Kiwoom ka10095 for the codes, else each group's Naver theme members."""
+    import theme_data
+
+    def figures(codes, groups):
+        try:
+            got, _ = theme_data.kiwoom_quotes(codes)
+        except Exception:  # noqa: BLE001 - Kiwoom down or no key: the Naver figures
+            got = {}
+            for group in groups:
+                got.update(theme_data.naver_members(group, universe)[0])
+        return {code: (f.get('change_pct'), f.get('value_krw')) for code, f in got.items()}
+    return figures
+
+
+def theme_quote(read, universe, sleep=time.sleep):
+    """quote() for theme_picks: NH scan rows, each quote SCAN_GAP after the last (the shared app key, 5 calls a second;
+    11-19 review: right after the paced scan the theme quotes went out back to back)."""
+    def quote(codes):
+        sleep(SCAN_GAP)
+        return scan(read, {c: universe[c] for c in codes}, gap=SCAN_GAP)
+    return quote
+
+
+def theme_round(read, universe, candidates, now, log=print):
+    """theme_picks() on the context thread's latest theme groups (market-context.json, MAX_AGE); [] on any failure."""
+    try:
+        import market_context as mc
+        import theme_data
+        context = json.loads((ROOT / 'market-context.json').read_text())
+        if now - datetime.fromisoformat(context['time']) > mc.MAX_AGE:
+            return []
+        groups = (context.get('themes') or {}).get('groups') or []
+        picks = theme_picks(groups, universe, candidates, lambda group: theme_data.daily_members(group, universe)[0],
+                            theme_figures(universe), theme_quote(read, universe))
+        if picks:
+            note_theme_picks(THEME_PICKS, now, picks)
+        return picks
+    except Exception as exc:  # noqa: BLE001 - the ranking itself goes on without the slot
+        log(json.dumps({'theme_picks_error': type(exc).__name__}))
+        return []
+
+
+def note_theme_picks(path, now, picks, keep_days=10):
+    """Keep each day's theme picks with the first time seen, to the second (the live mirror compares it with fill times;
+    user 2026-11-19)."""
+    day, hhmm = now.date().isoformat(), now.isoformat(timespec='seconds')
+    from config_store import write_json
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        data = {}
+    today = data.setdefault(day, {})
+    for pick in picks:
+        today.setdefault(pick['code'], {'group': pick.get('theme_group'), 'first': hhmm})
+    write_json(path, {d: data[d] for d in sorted(data)[-keep_days:]}, indent=None)
+
+
 def write(path, payload):
     tmp = path.with_suffix('.tmp')
     tmp.write_text(json.dumps(payload, ensure_ascii=False))
@@ -194,6 +298,12 @@ def refresh_cases():
         print(json.dumps({'oversold_series_error': type(exc).__name__}), flush=True)
 
 
+def running(now):
+    """Inside the ranking service's day: 09:00 to 15:05 on the day's exchange clock (16:05 on 수능 day)."""
+    from session_times import shifted
+    return now.weekday() < 5 and '09:00' <= now.strftime('%H:%M') < shifted('15:05', now.date())
+
+
 def wait_for_open(now, sleep=time.sleep):
     """Started before 09:00 on a weekday: take a pre-open market snapshot (last US close), then wait for the open."""
     if now.weekday() >= 5 or now.strftime('%H:%M') >= '09:00':
@@ -220,7 +330,7 @@ def main():
         threading.Thread(target=context_watch, args=(stop, args.interval), daemon=True).start()
     while True:
         now = datetime.now(KST)
-        if not args.once and (now.weekday() >= 5 or not '09:00' <= now.strftime('%H:%M') < '15:05'):
+        if not args.once and not running(now):
             break
         if args.once:
             collect_context()
@@ -231,9 +341,14 @@ def main():
             quoted, source = targets(universe, lambda line: print(line, flush=True))
             rows = scan(read, quoted, gap=SCAN_GAP)
             rankings, candidates, by_code = rank(rows)
+            picks = theme_round(read, universe, candidates, datetime.now(KST), lambda line: print(line, flush=True))
+            for pick in picks:
+                candidates[pick['code']] = pick
+                by_code[pick['code']] = {k: v for k, v in pick.items() if k not in ('reasons', 'theme_group')}
             payload = {'time': datetime.now(KST).isoformat(), 'scanned': len(rows), 'source': source, 'universe': len(universe),
                        'seconds': round(time.time() - started, 1), 'rankings': rankings,
-                       'candidates': candidates, 'rows': {c: by_code[c] for r in rankings.values() for c in r}}
+                       'candidates': candidates, 'theme_picks': [{'code': p['code'], 'group': p['theme_group']} for p in picks],
+                       'rows': {c: by_code[c] for c in [*(c for r in rankings.values() for c in r), *(p['code'] for p in picks)]}}
             write(ROOT / 'movers.json', payload)
             research_store.record('movers', payload)
             print(json.dumps({'time': now.isoformat(timespec='seconds'), 'scanned': len(rows),

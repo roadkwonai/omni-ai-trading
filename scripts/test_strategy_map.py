@@ -150,6 +150,7 @@ class StrategyMapTests(unittest.TestCase):
             self.assertEqual(len(set(paths)), 1)
             self.assertEqual(sorted(p.suffix for p in Path(d).iterdir()), ['.html', '.json'])
 
+    @unittest.skipUnless(shutil.which('node') and m.ARCHIFY.exists(), 'Archify not installed')
     def test_a_rendered_page_is_as_tall_as_its_diagram(self):
         """2026-11-19: Archify's 100vh canvas made a content-height iframe grow without end (99,548px, blank canvas)."""
         with tempfile.TemporaryDirectory() as d:

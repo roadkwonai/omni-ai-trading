@@ -326,6 +326,7 @@ def connect_journal(path, digest):
 
 
 def journal_event(root, event, **fields):
+    root = Path(root)
     entry = {'time': datetime.now(KST).isoformat(), 'event': event, **fields}
     path = root / 'events.jsonl'
     with path.open('a') as stream:
@@ -1360,6 +1361,9 @@ def ipo_time_stop(plan, now):
     return 'ipo_time_stop' if (now - opened).total_seconds() >= IPO_TIME_STOP_MIN * 60 else None
 
 
+_IPO_SEEN = {}  # (day, code) -> the verdict last journaled as ipo_seen
+
+
 def ipo_candidate(read, root, owned, now):
     """(code, facts, minute rows) of a recent new listing trading strongly right now, else (None, why, None).
 
@@ -1369,7 +1373,7 @@ def ipo_candidate(read, root, owned, now):
     import new_listings
     if not IPO_DAYS:
         return None, 'ipo_off', None
-    if now.strftime('%H:%M') < IPO_START:
+    if not ipo_open(now):
         return None, 'ipo_too_early', None
     plans = exit_plans(root)
     if sum((plans.get(code) or {}).get('profile') == 'ipo' for code in owned) >= IPO_MAX_POSITIONS:
@@ -1391,14 +1395,22 @@ def ipo_candidate(read, root, owned, now):
         if quote.get('stck_lstn_date') != item['listed']:
             why = 'listing_unconfirmed'
             continue
-        try:
-            rows = valid_bars(minute_bars(read, code).get('data', {}), code, now)
-        except ValueError:
-            why = 'ipo_bars_unavailable'
-            continue
+        # the quote alone settles these, so no minute-bar read is spent on them (one NH call per listing per cycle)
         failed = ('below_base' if price < base else 'below_open' if price < opened else
-                  'off_high' if price < high * (1 - IPO_NEAR_HIGH_PCT / 100) else
-                  'trend_not_rising' if RISING_CHECK and float(rows[0]['stck_prpr']) <= float(rows[5]['stck_prpr']) else volume_check(rows))
+                  'off_high' if price < high * (1 - IPO_NEAR_HIGH_PCT / 100) else None)
+        if not failed:
+            try:
+                rows = valid_bars(minute_bars(read, code).get('data', {}), code, now)
+            except ValueError:
+                rows, failed = None, 'ipo_bars_unavailable'
+        if not failed:
+            failed = ('trend_not_rising' if RISING_CHECK and float(rows[0]['stck_prpr']) <= float(rows[5]['stck_prpr'])
+                      else volume_check(rows))
+        # each listing's own verdict and base, journaled when it changes (user 2026-11-19, ipo_shadow): `why` alone kept
+        # only the last listing's (11-18 에이엘로봇 was lost), and every path that scans listings records it
+        if _IPO_SEEN.get((today, code)) != (failed or 'pass'):
+            _IPO_SEEN[(today, code)] = failed or 'pass'
+            journal_event(root, 'ipo_seen', symbol=code, why=failed or 'pass', price=price, base=base)
         if failed:
             why = failed
             continue
@@ -1567,10 +1579,18 @@ def trading_journal_brief():
 def v2_window(now=None):
     """True inside the 선별 v2 buy window (oversold_v2_from_hhmm ~ oversold_v2_until_hhmm; it may run past the entry
     cutoff: the replay's best entry was the last hour of the session)."""
-    from session_times import hhmm
-    clock = (now or datetime.now(KST)).strftime('%H:%M')
+    from session_times import hhmm, shifted
+    now = now or datetime.now(KST)
+    clock, day = now.strftime('%H:%M'), now.date()
     return (bool(OVERSOLD.get('oversold_v2_on'))
-            and hhmm(OVERSOLD.get('oversold_v2_from_hhmm', 1430)) <= clock < hhmm(OVERSOLD.get('oversold_v2_until_hhmm', 1455)))
+            and shifted(hhmm(OVERSOLD.get('oversold_v2_from_hhmm', 1430)), day) <= clock
+            < shifted(hhmm(OVERSOLD.get('oversold_v2_until_hhmm', 1455)), day))
+
+
+def ipo_open(now):
+    """New listings are looked at from IPO_START on the day's exchange clock (09:20, 10:20 on 수능 day)."""
+    from session_times import shifted
+    return now.strftime('%H:%M') >= shifted(IPO_START, now.date())
 
 
 def v2_research(root, row, rows, bars, news, investor, modes, attempt=None):

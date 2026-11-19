@@ -146,7 +146,7 @@ chmod 600 ~/.vibe-trading/nhplug/shared-etf-paper/exit-requests.json
 
 | 언제 | 어디서 | 무엇을 |
 | --- | --- | --- |
-| 08:20~09:00 | Discord 실시간 채널, `preflight/<날짜>.jsonl` | 장전 사전 점검 실패가 없는지([자동 작업](automation.md#장전-사전-점검)) |
+| 08:20\~09:00 | Discord 실시간 채널, `preflight/<날짜>.jsonl` | 장전 사전 점검 실패가 없는지([자동 작업](automation.md#장전-사전-점검)) |
 | 장중 | **운영 → 운영 상태** | 실행 중 서비스 수, 오류 기록, 가장 많은 대기 사유 |
 | 장중 | **트레이딩 현황** | 증권사 보유와 실행기 원장이 같은지, 미확인 주문이 0인지 |
 | 장중 | `reviews/operations-audit-<날짜>.md` | 매시 장중 감사 발견과 재발 |

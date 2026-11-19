@@ -18,14 +18,17 @@ MARKET_OPEN = '09:00'      # KRX regular session opens; runners observe from her
 FIRST_ORDER = '09:00'      # user 2026-11-19: orders from the open (was 09:10, 09:00~09:09 observation); prep is done pre-open
 
 
-# KRX days whose whole clock moves (minutes late): 수능 day opens 10:00 and closes 16:30 (KRX notice 2026-11-05).
-# shortcut: a hand-kept table; add each year's 수능 day (and any KRX special-hours notice) when it is announced.
-SHIFTED_DAYS = {'2026-11-19': 60}
-
-
 def shift_min(day):
-    """Minutes the exchange clock runs late on `day` (a date), 0 on an ordinary day."""
-    return SHIFTED_DAYS.get(day.isoformat(), 0)
+    """Minutes the exchange clock runs late on `day` (a date), 0 on an ordinary day: the one table is
+    src.tools.nhplug_calendar.SHIFTED_DAYS (수능 day opens 10:00 and closes 16:30), which the order guards read too."""
+    from src.tools.nhplug_calendar import shift_min as exchange_shift
+    return exchange_shift(day)
+
+
+def today():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo('Asia/Seoul')).date()
 
 
 def shifted(text, day):
@@ -36,11 +39,7 @@ def shifted(text, day):
 def order_start(day=None):
     """First minute any runner may order on `day` (default today): the exchange open (shifted on special days) or the
     later 장 시작 setting."""
-    if day is None:
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-        day = datetime.now(ZoneInfo('Asia/Seoul')).date()
-    return max(shifted(FIRST_ORDER, day), SESSION_OPEN)
+    return max(shifted(FIRST_ORDER, day or today()), SESSION_OPEN)
 
 
 def hhmm(value):
@@ -58,16 +57,20 @@ def clock_text(total):
     return f'{total // 60:02d}:{total % 60:02d}'
 
 
-def times(settings=None):
-    """{'cutoff', 'flatten', 'close'} as HH:MM from strategy settings (defaults when missing)."""
+def times(settings=None, day=None):
+    """{'cutoff', 'flatten', 'close'} as HH:MM from strategy settings (defaults when missing) on `day`'s exchange clock
+    (default today): the settings and the 15:18 cap are ordinary-day times, and a shifted day (수능) moves all three
+    (user 2026-11-19: 11-19 the runner stopped buying at 14:50 and quit at 15:18 while KRX ran to 16:30)."""
     settings = settings or {}
     cutoff = hhmm(settings.get('entry_cutoff_hhmm', DEFAULT_CUTOFF))
     flatten = hhmm(settings.get('flatten_hhmm', DEFAULT_FLATTEN))
     close = min(max(minutes('15:00'), minutes(flatten) + FLATTEN_LEAD_MIN), minutes(LAST_ORDER))
-    return {'cutoff': cutoff, 'flatten': flatten, 'close': clock_text(close)}
+    late = shift_min(day or today())
+    return {'cutoff': clock_text(minutes(cutoff) + late), 'flatten': clock_text(minutes(flatten) + late),
+            'close': clock_text(close + late)}
 
 
-def load(root):
+def load(root, day=None):
     """times() from the saved settings under `root` (the shared paper folder)."""
     from strategy_settings import read_settings
-    return times(read_settings(root)[0])
+    return times(read_settings(root)[0], day)

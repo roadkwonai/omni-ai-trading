@@ -18,7 +18,8 @@ KST = ZoneInfo('Asia/Seoul')
 BASE = 'https://openapi.tossinvest.com'
 TOKEN_FILE = Path.home() / '.vibe-trading/toss/token.json'
 ALLOWED = ('/api/v1/stocks', '/api/v1/market-indicators', '/api/v1/rankings',  # stock master, index/bond quotes, rankings
-           '/api/v1/candles')  # stock 1-minute candles incl. the NXT pre/after-market (2026-11-19); all read-only
+           '/api/v1/candles',  # stock 1-minute candles incl. the NXT pre/after-market (2026-11-19)
+           '/api/v1/sectors')  # sector list and members (theme slot membership, 2026-11-19); all read-only
 GAP = 0.25  # seconds between requests (most groups allow 5+ per second)
 GAP_SLOW = {'/api/v1/stocks/all': 1.0}  # STOCK_ALL allows 1 per second
 _last = [0.0]
