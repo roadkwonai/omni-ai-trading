@@ -763,23 +763,85 @@
 </li>
 </ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>이익은 독립 슬롯(신규주)이, 손실은 불리한 국면의 상단 추격(강도)이 냈다.</p>
+<ul>
+<li><strong>신규주 471800</strong>: 사실 — 1일차 조건으로 486,000원을 사서 +5.28%(+25,668원), MFE +6.52% 중 1.24%p만 놓쳤다. 해석 — 매도 뒤 최저 −11.68%라 빠른 익절이 옳았다. 다만 신규주 재현 10건 평균이 −1.4~0.0%라 한 건으로 경로를 좋게 볼 수 없다.</li>
+<li><strong>강도 035760</strong>: 사실 — +24.80%, 시가 대비 +12.13%, 범위 82% 자리에서 Jev 0.57로 사서 1% 손절. 해석 — 하락장 국면과 상단 가격이 겹친 추격이었다. <mark>상승률만 높고 재료·위치가 받쳐 주지 않는 진입</mark>은 좁은 손절에 쉽게 걸린다.</li>
+<li><strong>수능일 운영</strong>: 사실 — 주문 시작만 10:00으로 옮겨지고 마감·정리는 평일 시각이었다. 해석 — 오늘은 보유가 없어 손익 영향이 없었지만, 보유가 있었다면 거래소 시각 14:00에 정리됐을 것이다.</li>
+<li><strong>실계좌 1</strong>: 사실 — 471800은 따라 사지 못하고 035760만 따라가 −100원. 해석 — 신규주 미러를 오늘부터 열었으니 다음 신규주에서 체결가 차이를 봐야 한다.</li>
+<li><strong>Jev 진입 판단</strong>: 사실 — 98건 30분 적중 34%, 지수 대비 −0.77%p. 해석 — 실제 매수는 Jev 경로가 아니어서 손익과 직접 연결되지 않는다.</li>
+</ul>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>규칙 변경은 제안일 뿐이며, 적용은 사용자 승인 뒤에만 한다.</p>
+<ol>
+<li><strong>강도 경로 상단 추격 점검</strong>
+<ul>
+<li>근거: 강도 매수 중 시가 대비 +7% 이상 3건은 −1.28%·+0.28%·−0.95%, 7% 미만 2건은 +1.77%·−1.17%(장 마감 개선안).</li>
+<li>바꾸면: 시가 대비 상한이나 하루 범위 위치 상한을 더하면 오늘 035760 같은 상단 추격이 줄 것이다.</li>
+<li>확인: 강도 매수 10건 이상이 쌓이면 high_gap_pct·open_gap_pct로 나눠 재현한다. 지금 5건이라 규칙 근거로 쓰지 않는다.</li>
+</ul>
+</li>
+<li><strong>특별 개장일 시각 일괄 이동</strong>(장 마감 개선안 1)
+<ul>
+<li>근거: 수능일 entry_window_closed 26회, 순위 계산기 09시 NH 4,442회(평소 시간당 약 950회).</li>
+<li>바꾸면: 거래소 마지막 80분을 놓치지 않고 개장 전 유량 초과가 준다.</li>
+<li>확인: 지난 특별일 날짜로 단위 시험을 만들고, 다음 특별일 기록에서 16:00 전 entry_window_closed 0건을 본다. 실계좌 가드 시각 상한은 별도 승인이다.</li>
+</ul>
+</li>
+<li><strong>신규주 실계좌 미러 체결가 기록</strong>
+<ul>
+<li>근거: 오늘부터 실계좌가 신규주를 따라 산다. 1일차 신규주는 호가가 얇다.</li>
+<li>바꾸면: 모의와 실계좌 성과 차이가 어디서 나는지 알 수 있다.</li>
+<li>확인: 신규주 체결 5건의 모의·실계좌 체결가 차이 평균.</li>
+</ul>
+</li>
+</ol>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>수능일 시각 규칙 불일치</strong> — 증상: session_times가 주문 시작만 옮기고 마감·정리·종료는 평일 그대로. 영향: 거래소 마지막 80분 미운영, 순위 계산기 개장 전 과호출로 09:00:07부터 유량 초과. 제안: times()가 shift_min(day)를 모든 시각에 더하게 한다(코드 변경·재시작은 사용자 승인).</li>
+<li><strong>NH 유량 초과 분산</strong> — 증상: IGW42903 168건(잔고 2쪽, 장 마감 뒤 PAGE_GAP 수정), IGW42902 실행기 98·순위 계산기 163·미러 28건. 영향: 진입 회차 건너뜀 기록은 없음. 제안: 순위 계산기 연속 조회에 짧은 간격(개선안 2), 내일 PAGE_GAP 효과 확인.</li>
+<li><strong>원장 손상(10:36)</strong> — 증상: trading-ledger.sqlite3 색인 손상. 영향: 10:41 재시작, 매매 영향 없음. 제안: 이미 private_file로 고쳤고 장중 감사가 integrity_check를 돈다. 내일 깨끗한지 확인한다.</li>
+<li><strong>장기투자 일일 전략 리포트 누락</strong> — 증상: strategy-2026-11-19가 없다(최신 11-18). 영향: 매매일지 장기투자 관점의 8절 요지를 못 썼다. 제안: 08:50 예약 작업 실행 기록과 실패 사유를 확인한다.</li>
+<li><strong>실계좌 1 체결 시각 00:00:00 저장</strong>(장 마감 보고) — 증상: live_fills 시각이 자정으로 남음. 영향: 대조·알림 시각에 영향이 있을 수 있다. 제안: 저장 경로를 확인한다.</li>
+</ol>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>판단 맥락이며 매매 지시가 아니다.</p>
+<ul>
+<li>11/19 코스피·코스닥은 올랐지만 외국인은 코스피 −4,040억 원 순매도였고, 반도체 대형주가 매도 상위였다. 지수 상승이 외국인 수급으로 확인되지 않은 날이었다.</li>
+<li>11/19 +24.80%까지 오른 035760을 하루 범위 82% 자리에서 산 강도 진입은 1% 손절에 걸렸고 30분 뒤에도 매수가 아래였다.</li>
+<li>11/19 신규주 471800은 1일차에 +6.5%까지 오른 뒤 마감은 매도가 대비 −6.82%로, 1일차 신규주의 오후 되밀림이 컸다.</li>
+<li>미 10년물 5%대와 연준 월러의 '빅스텝' 언급 보도 등 금리 부담이 이어지고 있다.</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>11/20(금) 09:00</strong> 개장 — 평일 시각으로 돌아와 market_bars_unavailable이 09:00~09:10에 6분을 넘는지, PAGE_GAP 적용 뒤 IGW42903이 사라지는지.</li>
+<li><strong>앤트로픽 나스닥 상장</strong>(공모가 83달러) 첫날 반응과 외국인 코스피 수급 변화.</li>
+<li><strong>이란·미국 중동 충돌</strong> 확전 여부와 WTI·VIX 반응.</li>
+<li><strong>11/20 16:45</strong> 낙폭과대 주간 감사에서 11/17~11/19 선별 v2 표본 확인.</li>
+<li><strong>11/25</strong> 미국 GDP·PCE 물가, <strong>12/09</strong> FOMC(장기투자 거시 일정).</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://news.google.com/rss/articles/CBMiUkFVX3lxTFBReUxnWGFOMG8wM3o5RHlrRlRPWU5qRUwxM0RkbkI4WE1vNHpsTVpQa09rWm9pR05Kd1NMQUgwU2FYYV8xcTNGOUQxS01fOWpmS2fSAVNBVV95cUxQdmltZWdSRzc2THo2T1hCc01ZR2JMYl9WVUVORFJZLVFXN185QTMtRW1GLV9VZWUtNWIycXFGMnJDalJPdFNndG43UFZNNmZkR2RoWQ?oc=5" target="_blank" rel="noopener noreferrer">서울경제 · 2026-11-19 · 상승 출발한 코스피, 반도체주 급락에 다시 5000선 아래로</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMibkFVX3lxTE1lNVVnTGFnQVFzWERXVVltV3p3cFdSUS1pWGt3Q0pYaFZDX2NnUjJ0ejhTeExMOWp5SzAyVXRiVElYM3Vfd1NkV2E4RlBNc1lyM1g0WWVnam9yaWlSWnBiWDFnb1pRakZ5Tm1TY05R?oc=5" target="_blank" rel="noopener noreferrer">업코리아 · 2026-11-19 · 코스피 5,000선 되찾았지만 외국인 매도 지속…19일 수능일 증시 10시 개장</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMibkFVX3lxTFB0UWh3eUxpVlR6c0w3elN3cV8zaVE3RC1RZExZb3hvcS1uTTliT0RuaGJ5TDNIQnpDdTAxaFZnLXN3d3M1TGVlNEVjSDk0YTc0Z0hiS2UzZ2dfMGJkcmtyY0lkMkFzWU8wZEJiMldn?oc=5" target="_blank" rel="noopener noreferrer">디펜스투데이 · 2026-11-19 · 이란, 걸프 미군기지 타격…미 공습 맞서 중동전쟁 격화</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiggFBVV95cUxPVWg2R0c2SVVGUDlSd19iV2syVnY3b290ODVvZ0RfbUdUMDBUOUJjZEFla3hhajBnYmRJTk1mN1o5QlhEcWtjOFlXckVRQUhrelYyTFlPcUtyOEc5V09YcDRZbXJJTXJSZXpzV09aeWJNcWJ3NFBudndMc3dOb21sd2l3?oc=5" target="_blank" rel="noopener noreferrer">한겨레 · 2026-11-19 · 트럼프, 또 이란 대규모 공습 검토…항모 2척 대기</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMib0FVX3lxTE8wbGxiY3doY3FNTFRubmRpT3E2WmxRRnlGRUxnbFh3VlJDdVVkVWQ3N1YyZGc3VFAteV9xek1JekY3SkJaWHRMR2V4UFR4UEdaOUZrMUNwZm9aa3hUSWdITjlldzhJYW5DUmgxcDV5RQ?oc=5" target="_blank" rel="noopener noreferrer">YTN · 2026-11-19 · 뉴욕 증시, 엔비디아 실적 호조에도 혼조 마감</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWEFVX3lxTE5NeVRpVFQzOWlHcV8zQ0tNQ0l3cFQ4VTUzX0hCV05GODMwTGx6eHAwV1NoZUxaSjU3amlFNWg4NWhFWUI3eHJ1STZpQVE2TjlIZkJSVno2N2w?oc=5" target="_blank" rel="noopener noreferrer">네이버페이 머니스토리 · 2026-11-19 · 엔비디아 호실적도 못 넘은 금리 인상 우려, 뉴욕증시 혼조</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTFBWaXpFX2diM2E5bEpucEVWN0tZeVRhUmVIb0pxS3lxY0ZMdGV4X2Nwam5tV2ZiRXU0OVZIcEJfNlhGZ3kxN2lZc0JxaFQ4RUtUeUlvT0pERmdad9IBX0FVX3lxTE1rRHZienNpZFdIRHMzaTdrUWw5ZDN5alRIcHZDMDJ3R1hfV0ZiNk9nVUZsSWZSbFY0XzFMYndaNGZQZzhuYkMwbW1sTDQ4X0VQdURHcFZUTDU4ZklMbjAw?oc=5" target="_blank" rel="noopener noreferrer">경향신문 · 2026-11-19 · 앤트로픽 공모가 83달러 확정…역대 최대 IPO로 나스닥 데뷔</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTFA5UWdaZHdHZDRrcFZyamRmMVZpZnMzeVJSVHFILTdRbF9zZVk2c2VSUnZRTHlrMGhtN3BLclJob3dSeEVEODRTMWZjTmRoZFZaOUtoWHhweWVuUQ?oc=5" target="_blank" rel="noopener noreferrer">한국경제 · 2026-11-19 · 3분기 실적 발표 후 급락한 한국금융지주</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiXEFVX3lxTE9iOWFoT0RKb0tDb2M5bl9aeG9BV0E2U3dKZlBzVWNwV1E3QXJOaVFYRW1mVFJ0V2c4bzBuWkpxenVaMXVUaWZsV2h6Vzk0MUxzc1ZWQnpmNlI5dTVa?oc=5" target="_blank" rel="noopener noreferrer">뉴스핌 · 2026-11-19 · 국제유가 3% 급락에 정유株 '줄하락'</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97883" target="_blank" rel="noopener noreferrer">대신증권 · 2026-11-09 · CJ ENM: 본업의 회복 시그널</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97840" target="_blank" rel="noopener noreferrer">키움증권 · 2026-11-09 · CJ ENM: 3Q 광고 반등 성공, 4Q 수익성 회복 시작</a></li>
+<li><a href="https://news.google.com/search?q=%22%221%EB%A7%8C2000%ED%94%BC%20%EA%B0%84%EB%8B%A4%EB%8D%94%EB%8B%88%22%20%EA%B3%A8%EB%93%9C%EB%A7%8C%EC%82%AD%EC%8A%A4%2C%20%EC%BD%94%EC%8A%A4%ED%94%BC%20%EB%AA%A9%ED%91%9C%EC%B9%98%207500%EC%9C%BC%EB%A1%9C%20%ED%95%98%ED%96%A5%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">뉴시스 · 2026-11-19 · 골드만삭스, 코스피 목표치 7500으로 하향</a></li>
+</ul>
+<p><em>체결가 기준 · 수수료·세금 미반영. 데이터: trading_journal 레코드 · improvement-2026-11-19.md · close-report-2026-11-19.md · longterm.sqlite3 decisions.</em></p>
 </article>
   </main>
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-19 16:50 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
+  <div class="wrap"><p>자동 생성 2026-11-19 16:51 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p></div>
 </footer>
 
 </body>
