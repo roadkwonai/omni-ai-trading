@@ -1,2 +1,4 @@
 User-agent: *
-Disallow: /
+Disallow: /reports/
+
+Sitemap: https://roadkwonai.github.io/omni-ai-trading/sitemap.xml
