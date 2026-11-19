@@ -16,22 +16,21 @@
 ## 지금 상태
 
 > [!IMPORTANT]
-> **배포는 아직 꺼져 있습니다.** HTML은 로컬(`~/.vibe-trading/report-pages/site`)에서 늘 만들어지지만 GitHub에 올리지 않고, 리포트는 Discord로 보내지 않고 '대기'로 쌓입니다. 리포트 본문을 텍스트로 대신 보내지 않습니다(사용자 결정 2026-11-18).
+> **배포가 켜져 있습니다(2026-11-19).** 리포트 HTML은 `~/.vibe-trading/report-pages/site`에서 만들어 `roadkwonai/omni-ai-trading`의 `gh-pages` 브랜치로 푸시하고, 페이지가 열리면 Discord로 링크를 보냅니다. 리포트 본문을 텍스트로 대신 보내지 않습니다(사용자 결정 2026-11-18).
 
 | 항목 | 지금 | 비고 |
 | --- | --- | --- |
-| Pages 저장소 | `roadkwonai/omni-ai-trading` (사용자 결정 2026-11-19) | 비공개·빈 저장소로 만들어 둠. 무료 계정이라 Pages를 켜려면 공개로 바꿔야 함 |
-| Pages 주소 | `https://roadkwonai.github.io/omni-ai-trading/` | 공개 전환·Pages 켜기 뒤 |
-| `.env` `REPORT_PAGES_REPO` | 이 저장소로 바꿀 예정 | 예전 값 `freelife1191/omni-ai-trading`은 만들어진 적 없음 |
-| `.env` `REPORT_PAGES_PUSH` | `off` | `on`일 때만 푸시 |
-| 사이트 구조 | **예정**: 루트 `/` = 랜딩페이지, 리포트 목록 = `/reports/` | 아래 참고 |
+| Pages 저장소 | `roadkwonai/omni-ai-trading` (공개, 2026-11-19) | 코드는 `main`, 사이트는 `gh-pages` |
+| Pages 주소 | `https://roadkwonai.github.io/omni-ai-trading/` | 루트 = 랜딩페이지 |
+| 리포트 목록 | `https://roadkwonai.github.io/omni-ai-trading/reports/` | 검색 색인 금지(`robots.txt`, 페이지마다 noindex) |
+| `.env` `REPORT_PAGES_REPO` | `roadkwonai/omni-ai-trading` | |
+| `.env` `REPORT_PAGES_PUSH` | `on` | `off`로 바꾸면 로컬 커밋까지만 |
 
 > [!NOTE]
-> **예정된 사이트 구조** (사용자 결정 2026-11-19)
-> - Pages 루트(`/`)는 Omni AI Trading 랜딩페이지가 됩니다. 랜딩은 별도 작업으로 만듭니다.
-> - 리포트 목록 페이지는 루트에서 `/reports/`로 옮깁니다. 개별 리포트 주소 `reports/<종류>/<키>.html`은 그대로입니다.
-> - 목록 위치를 옮기는 코드 변경은 다른 작업에서 진행 중이며, 실행 중인 `discord-notify`가 다음에 시작할 때부터 적용됩니다.
-> - 공개 전환, 첫 푸시, Pages 켜기는 사용자가 확인한 뒤에 합니다.
+> **사이트 구조**
+> - Pages 루트(`/`)는 Omni AI Trading 랜딩페이지입니다(소스 `landing/`, 배포 `landing/scripts/deploy.sh`). 리포트 발행기는 루트를 건드리지 않습니다.
+> - 리포트 목록은 `/reports/index.html`, 데이터는 `/reports/reports.json`입니다. 개별 리포트 주소는 `reports/<종류>/<키>.html`입니다.
+> - 랜딩을 고쳤으면 `landing/scripts/deploy.sh`로 다시 올립니다. 발행기는 대기 중인 리포트가 있을 때만 푸시하므로, 리포트가 없는 날의 랜딩 변경은 다음 리포트와 함께 나갑니다.
 
 ## 대상과 일정
 
@@ -158,9 +157,9 @@ API 연동 목록에는 Discord 웹훅과 GitHub Pages 리포트 항목이 있�
 
 ## 배포를 켤 때
 
-사용자 확인이 필요한 단계입니다.
+2026-11-19에 이 순서로 켰습니다. 새 기기나 새 저장소에서 다시 켤 때도 같습니다. 사용자 확인이 필요한 단계입니다.
 
-1. `roadkwonai/omni-ai-trading`을 공개로 바꿉니다(무료 계정에서 Pages를 쓰려면 필요).
+1. Pages 저장소를 공개로 바꿉니다(무료 계정에서 Pages를 쓰려면 필요).
 2. `.env`를 고칩니다.
    - `REPORT_PAGES_REPO=roadkwonai/omni-ai-trading`
    - `REPORT_PAGES_URL`은 비워 두면 `https://roadkwonai.github.io/omni-ai-trading/`을 씁니다(사용자 도메인이면 적음).
@@ -201,7 +200,7 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/report_pages.py --preview long
 | 2026-11-17 | 디자인 개선: 넓은 화면, 테마 버튼, 콜아웃·형광펜·자동 막대·chart·archify |
 | 2026-11-18 | 리포트 본문 텍스트 발송 제거. Pages 배포 전에는 대기 |
 | 2026-11-18 | 장기투자 복기·감사(`longterm-audit`) 추가 |
-| 2026-11-19 | Pages 저장소를 `roadkwonai/omni-ai-trading`으로 결정, 루트 랜딩·`/reports/` 목록 예정 |
+| 2026-11-19 | Pages 저장소를 `roadkwonai/omni-ai-trading`으로 정하고 공개, 루트 랜딩·`/reports/` 목록으로 배포 켬 |
 
 랜딩페이지 기획은 `docs/omni-landing-plan.md`에 있습니다. (비공개 설계 기록이라 공개 저장소에는 없습니다)
 
