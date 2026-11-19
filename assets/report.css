@@ -246,6 +246,10 @@ h2.label { font-size: 21px; line-height: 1.4; color: var(--fg); letter-spacing: 
 
 .footer { border-top: 1px solid var(--stroke-weak); background: var(--bg-default); color: var(--fg-subtle); font-size: 13px; padding: var(--x6) 0; }
 .footer p { margin: 0; }
+.footer p + p { margin-top: var(--x2); }
+.footer a { color: inherit; text-underline-offset: 3px; }
+.disclaimer-bar { border-bottom: 1px solid var(--stroke-weak); background: var(--warn-weak); color: var(--fg); font-size: 14px; line-height: 1.6; padding: var(--x2) 0; }
+.disclaimer-bar strong { color: var(--warn); margin-right: var(--x2); }
 
 /* ---------- index ---------- */
 .hero-split { display: flex; align-items: center; justify-content: space-between; gap: var(--x6); }
