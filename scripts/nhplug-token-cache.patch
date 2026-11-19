@@ -1,0 +1,62 @@
+diff --git a/src/auth.ts b/src/auth.ts
+index 359868f..bcb4286 100644
+--- a/src/auth.ts
++++ b/src/auth.ts
+@@ -1,3 +1,7 @@
++import { createHash, randomBytes } from "node:crypto";
++import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, unlinkSync } from "node:fs";
++import { homedir } from "node:os";
++import { join } from "node:path";
+ import type { Config } from "./config.js";
+ 
+ interface TokenState {
+@@ -7,6 +11,24 @@ interface TokenState {
+ }
+ 
+ let cached: TokenState | null = null;
++let cachedScope = "";
++
++function cacheFile(config: Config): string {
++  const scope = createHash("sha256").update(config.authUrl + "\0" + config.appKey).digest("hex");
++  return join(homedir(), ".vibe-trading", "nhplug", "tokens", scope + ".json");
++}
++
++function store(file: string, token: TokenState): void {
++  const dir = join(homedir(), ".vibe-trading", "nhplug", "tokens");
++  mkdirSync(dir, { recursive: true, mode: 0o700 });
++  chmodSync(dir, 0o700);
++  const temp = file + "." + randomBytes(8).toString("hex") + ".tmp";
++  try {
++    writeFileSync(temp, JSON.stringify(token), { mode: 0o600, flag: "wx" });
++    renameSync(temp, file);
++  } finally { try { unlinkSync(temp); } catch {} }
++}
++
+ 
+ /**
+  * 접근 토큰 발급. NH Open API 규약:
+@@ -18,6 +40,16 @@ let cached: TokenState | null = null;
+  */
+ export async function getAccessToken(config: Config, force = false): Promise<string> {
+   const now = Date.now();
++  const file = cacheFile(config);
++  if (cachedScope !== file) { cached = null; cachedScope = file; }
++  if (force) { cached = null; try { unlinkSync(file); } catch {} }
++  if (!force && !cached) {
++    try {
++      const value = JSON.parse(readFileSync(file, "utf8"));
++      if (typeof value.token === "string" && value.token && typeof value.expiresAt === "number" && Number.isFinite(value.expiresAt)) cached = value;
++    } catch {}
++  }
++  // shortcut: concurrent cold starts may issue multiple tokens; add a process lock if frequent.
+   if (!force && cached && cached.expiresAt > now + 30_000) {
+     return cached.token;
+   }
+@@ -61,6 +93,7 @@ export async function getAccessToken(config: Config, force = false): Promise<str
+         token,
+         expiresAt: now + (Number.isFinite(expiresInSec) ? expiresInSec : 86400) * 1000,
+       };
++      store(file, cached);
+       return token;
+     }
+ 

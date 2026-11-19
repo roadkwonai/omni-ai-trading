@@ -1,0 +1,164 @@
+"""What each external API gives this system, when it is asked, and where the data ends up (dashboard 'API 연동').
+
+Hand-kept map (2026-11-17), read with the call log of scripts/api_calls.py. A provider key matches api_calls.HOSTS.
+`keys` are .env names only (values are never read here except for presence); `outputs` are files under the runtime root
+whose age shows the last successful use even before the call log has entries. `expect_min`: how often the API
+is called during the session when the services run (no success for 3x that, at least 5 minutes, marks it 지연).
+`tokens`: (glob under the runtime root, expiry field) of the cached access tokens; only the expiry is read.
+"""
+from __future__ import annotations
+
+U = lambda data, endpoint, when, screen, feature, purpose: {  # noqa: E731 - one row of the use map
+    'data': data, 'endpoint': endpoint, 'when': when, 'screen': screen, 'feature': feature, 'purpose': purpose}
+
+CATALOG = [
+    {'key': 'nh', 'name': 'NH 나무 PLUG', 'kind': '증권사 · 시세·주문', 'expect_min': 1, 'icon': 'account_balance',
+     'keys': ['APP_KEY', 'APP_SECRET'], 'tokens': [('nhplug/tokens/*.json', 'expiresAt')], 'auth': '앱 키 → 접근 토큰(MCP 서버가 관리)', 'site': 'https://www.nhplug.com',
+     'note': '유일한 주문 경로. 실주문은 nh_guarded_live 보호 경로와 LiveOrderGuard만 거칩니다. 웹소켓 실시간(nh_ws_monitor)은 기록하지 않습니다.',
+     'outputs': [('공유 모의 실행기 기록', 'nhplug/shared-etf-paper/events.jsonl'), ('순위 스캔', 'nhplug/shared-etf-paper/movers.json'),
+                 ('모의 계좌 상태', 'nhplug/shared-etf-paper/account-state.json')],
+     'uses': [U('현재가·호가·VI·투자경고', 'get_stock_price', '실행기 매 1분 · 순위 5분 · 대시보드 조회 때', '트레이딩 현황 → 보유·주문 · 트레이딩 현황 → 순위 · 실계좌',
+                '매수·매도 판단, 손절·익절 감시, 매수 기록 관찰값', '모든 주문 가격과 보호 조건의 기준 시세'),
+              U('분봉·일봉', 'krstockQuotePeriod', '실행기 매 1분', '엔진 비교 · 매매일지 → 차트',
+                'Jev 차트 이미지, 분봉 지표, 낙폭과대 판정', '엔진이 보는 가격 흐름'),
+              U('종목 투자자 동향', 'krstockQuoteCurrentInvestor', '진입 후보 확인 때', 'AI·실행 기록', '진입 판단 참고', '외국인·기관 수급 확인'),
+              U('모의 잔고·주문·체결', 'list_accounts · krstockOrderCash* · krstockOrderCancel', '실행기 주문 때 · 매 회차 대조',
+                '트레이딩 현황 · 주문·정리', '공유 모의 자동매매', '모의 주문과 체결·잔량 대조'),
+              U('실계좌 잔고·실현손익·주문', 'krstockInquiryRealizedPnl · 보호 경로 주문', '실계좌 미러 회차마다', '실계좌',
+                '실계좌 미러·손실 래치', '실주문(스위치가 켜졌을 때만)과 하루 손실 한도')]},
+    {'key': 'kiwoom', 'name': '키움 REST', 'kind': '증권사 · 조회 전용', 'icon': 'query_stats', 'expect_min': 5,
+     'keys': ['KIWOOM_APP_KEY', 'KIWOOM_APP_SECRET'], 'tokens': [('kiwoom/token.json', 'expires_at')], 'auth': '앱 키 → 토큰 24시간(공유 캐시 kiwoom/token.json)', 'site': 'https://openapi.kiwoom.com',
+     'note': '약관: 시세는 개인 이용, 제3자 제공 금지. 외부 AI 전달 적용은 미정(docs/broker-data-sources-research.md 5장). 주문 TR은 호출하지 않습니다.',
+     'outputs': [('토큰 캐시', 'kiwoom/token.json'), ('시황 수집', 'nhplug/shared-etf-paper/market-context.json')],
+     'uses': [U('프로그램매매 시간대별', 'ka90005', '시황 수집 5분마다', '시장 상황 → 프로그램매매 장중 추이', '시장 참고', '차익·비차익 흐름과 베이시스'),
+              U('외국계 창구 순매수', 'ka10037', '시황 수집 5분마다', '시장 상황 → 외국인·기관 장중 순매수', '시장 참고', '외국계 증권사 창구 수급'),
+              U('KRX 순위(거래대금·거래량·등락률)', 'ka10032 · ka10030 · ka10027', '순위 계산기 5분마다', '트레이딩 현황 → 순위',
+                'Jev 종목 후보 선별', '구성종목 중 상위만 골라 NH 시세 조회를 줄임'),
+              U('1분봉', 'ka10080', '장 마감 뒤', '매매일지 → 차트 · 전략 구조 → 낙주매매 재현', '차트·사례 재현', 'NH 분봉이 없을 때 하루치 분봉'),
+              U('KRX/NXT 괴리율', 'ka11370', '장전 08:00~08:50', '시장 상황 → 장전 KRX/NXT 괴리율', '장전 브리프', 'NXT 가격이 벌어진 종목'),
+              U('업종현재가·테마그룹', 'ka20001 · ka90001', '네이버 실패 때만', '시장 상황 → 대체 출처 경고', '시황 대체 출처', '네이버 장애 시 지수·테마')]},
+    {'key': 'toss', 'name': '토스증권 Open API', 'kind': '증권사 · 조회 전용', 'icon': 'toll', 'expect_min': 5,
+     'keys': ['TOSS_CLIENT_ID', 'TOSS_CLIENT_SECRET'], 'tokens': [('toss/token.json', 'expires_at')], 'auth': '클라이언트 자격 → 토큰 1개(재발급 시 이전 토큰 폐기, 공유 캐시 toss/token.json) · IP 허용 목록',
+     'site': 'https://developers.tossinvest.com', 'note': '약관: 본인 투자 목적, 제3자 배포 금지. 종목 마스터는 초당 1회 제한.',
+     'outputs': [('토큰 캐시', 'toss/token.json'), ('상장 예정', 'nhplug/shared-etf-paper/upcoming-listings.json')],
+     'uses': [U('지수 1분봉', '/api/v1/market-indicators/…', '시황 수집 5분마다', '시장 상황 → 장중 지수 흐름', '시황 참고', '코스피·코스닥 장중 위치'),
+              U('투자자별 순매수 랭킹', '/api/v1/rankings/…', '시황 수집 · 장 마감 뒤', '시장 상황 → 순매수 상위 · 매매일지 → 수급', '시장 참고', '외국인·기관·개인 상위 종목'),
+              U('투자자별 매매대금(기관 세부)', '/api/v1/market-indicators/…', '장 마감 뒤 · 네이버 실패 때', '매매일지 → 수급', '일지 기록', '금융투자·연기금 등 세부 수급'),
+              U('공매도·신용·대차', '/api/v1/stocks/{code}/…', '장 마감 뒤', '매매일지 → 수급', '일지 기록', '매매 종목 수급 압력'),
+              U('상장 예정 · 최근 상장', '/api/v1/stocks/…', '장전 · KIND 실패 때', '시장 상황 → 장전 상장 예정 · 트레이딩 현황 → 신규주', '신규주 후보 대체 출처', '상장일 확인'),
+              U('지수 일봉', '/api/v1/market-indicators/…', '네이버 실패 때만', '시장 상황 → 대체 출처 경고', '국면 계산 대체', '200일선·추세')]},
+    {'key': 'naver', 'name': '네이버 증권', 'kind': '포털 · 시세·수급·리서치', 'expect_min': 5, 'icon': 'travel_explore',
+     'keys': [], 'auth': '키 없음(공개 웹 API)', 'site': 'https://m.stock.naver.com',
+     'note': '비공식 웹 API라 형식이 바뀌면 실패합니다. 실패하면 키움·토스로 대체하고, 그것도 실패하면 20분 안의 직전 값을 다시 씁니다.',
+     'outputs': [('시황 수집', 'nhplug/shared-etf-paper/market-context.json')],
+     'uses': [U('지수·투자자 수급·프로그램·테마', 'm.stock.naver.com/api/index/…', '시황 수집 5분마다', '시장 상황 · 종합 현황',
+                'Jev 시황 요약 · 국면 판단', '시장 방향과 수급'),
+              U('종목 투자자 동향', 'm.stock.naver.com/api/stock/{code}/trend', '장 마감 뒤 · 사례 갱신', '매매일지 → 수급 · 전략 구조 → 낙주매매 재현', '일지·사례 기록', '종목 수급'),
+              U('애널리스트 컨센서스·리포트', 'm.stock.naver.com · finance.naver.com/research', '낙폭과대 판단 · 장 마감 뒤', '매매일지 → 애널리스트 · 전략 구조 → 낙폭과대 FLOW',
+                '낙폭과대 목표가 · 일지', '목표가와 의견'),
+              U('증권 주요 뉴스', 'm.stock.naver.com/api/news/…', 'Google·Bing 실패 때', 'AI·실행 기록', 'Jev 판단 뉴스 3순위', '뉴스 대체 출처')]},
+    {'key': 'kind', 'name': 'KRX KIND', 'kind': '거래소 · 공시', 'icon': 'new_releases',
+     'keys': [], 'auth': '키 없음(웹 페이지)', 'site': 'https://kind.krx.co.kr', 'note': '실패하면 토스 종목 마스터로 대체하고 15분 뒤 다시 시도합니다.',
+     'outputs': [('신규상장 목록', 'nhplug/shared-etf-paper/new-listings.json')],
+     'uses': [U('최근 14일 신규상장', 'kind.krx.co.kr/…', '하루 한 번(실패 시 15분 뒤)', '트레이딩 현황 → 신규주', 'Jev 신규주 진입 후보', '상장일·종목 목록')]},
+    {'key': 'krx', 'name': 'KRX 정보데이터 OpenAPI', 'kind': '거래소 · 통계', 'icon': 'bar_chart',
+     'keys': ['KRX_API_KEY'], 'auth': 'AUTH_KEY 헤더', 'site': 'https://openapi.krx.co.kr', 'note': '전 거래일 확정 통계(당일 실시간 아님).',
+     'outputs': [('장전 브리프', 'nhplug/shared-etf-paper/premarket-brief.json')],
+     'uses': [U('전 거래일 종목·지수 통계', 'data-dbg.krx.co.kr/svc/apis/…', '장전 07:40~09:10', '시장 상황 → 장전 한국거래소 통계', '장전 브리프 · 엔진 premarket_context', '전날 시장 확인')]},
+    {'key': 'opendart', 'name': 'OpenDART', 'kind': '공시', 'icon': 'description',
+     'keys': ['OPENDART_API_KEY'], 'auth': 'crtfc_key 쿼리(기록에 남기지 않음)', 'site': 'https://opendart.fss.or.kr', 'note': '외부 공시는 지시가 아니라 참고 자료입니다.',
+     'outputs': [('장전 브리프', 'nhplug/shared-etf-paper/premarket-brief.json')],
+     'uses': [U('관심 종목 공시 목록', 'opendart.fss.or.kr/api/list.json', '장전 07:40~09:10', '시장 상황 → 장전 공시', '장전 브리프 · 엔진 premarket_context', '전날·당일 공시 확인')]},
+    {'key': 'google_news', 'name': 'Google 뉴스 RSS', 'kind': '뉴스', 'icon': 'newspaper',
+     'keys': [], 'auth': '키 없음', 'site': 'https://news.google.com', 'note': '11/17 09:09~09:23 HTTP 429로 막힌 이력. 실행기 공용 3분 캐시, 실패 시 5분 쉬고 Bing·네이버로 넘어갑니다.',
+     'outputs': [('뉴스 공유 캐시', 'nhplug/news-cache.json')],
+     'uses': [U('분야별 헤드라인', 'news.google.com/rss/search', '3분 공유 캐시(실행기 매 1분 요청)', 'AI·실행 기록 · 매매일지 → 이슈', 'Jev 진입·보유 판단 뉴스', '시황·종목 뉴스'),
+              U('관심종목·장전·일지 뉴스', 'news.google.com/rss/search', '관심종목 선정 · 장전 · 장 마감 뒤', '시장 상황 → 장전 뉴스 · 매매일지 → 뉴스', '관심종목 선정 · 일지', '이슈 확인'),
+              U('장기 관점 뉴스(연준·미국 거시·반도체·반도체 정책·지정학·양자·우주)', 'news.google.com/rss/search', '평일 08:45 하루 1번(장기 엔진)',
+                '장기투자 → 기록 · 포트폴리오·주문 → 왜 샀나', '장기 엔진 스토리 점검(피터 린치) 입력', '장기 보유 판단 참고')]},
+    {'key': 'bing_news', 'name': 'Bing 뉴스 RSS', 'kind': '뉴스', 'icon': 'feed',
+     'keys': [], 'auth': '키 없음', 'site': 'https://www.bing.com/news', 'note': 'Google 실패 때 쓰는 2순위 출처.',
+     'outputs': [('뉴스 공유 캐시', 'nhplug/news-cache.json')],
+     'uses': [U('분야별 헤드라인', 'www.bing.com/news/search', 'Google이 막혔을 때', 'AI·실행 기록', 'Jev 판단 뉴스 2순위', '뉴스 대체 출처'),
+              U('장기 관점 뉴스', 'www.bing.com/news/search', '평일 08:45 하루 1번(순서를 돌려 1·2순위)', '장기투자 → 기록', '장기 엔진 스토리 점검 입력', '뉴스 대체 출처')]},
+    {'key': 'yahoo', 'name': 'Yahoo Finance', 'kind': '해외 시세', 'icon': 'public', 'expect_min': 5,
+     'keys': [], 'auth': '키 없음', 'site': 'https://finance.yahoo.com', 'note': 'yfinance(curl_cffi)는 track()으로 묶은 곳만 기록됩니다(시황·NXT). exit_replay 연구는 기록하지 않습니다.',
+     'outputs': [('낙폭 사례집', 'nhplug/shared-etf-paper/oversold-cases.sqlite3'), ('매매일지', 'nhplug/shared-etf-paper/trading-journal.sqlite3')],
+     'uses': [U('해외 지수·원자재·코인 일봉', 'yfinance/download', '시황 수집 5분마다', '시장 상황 · 매매일지 → 시장', '시황 요약', '나스닥·유가·VIX 등'),
+              U('해외 선물', 'yfinance/fast_info', 'NXT 가상 회차', '운영 상태 → NXT 가상 서비스', 'NXT 종가 베팅', '야간 방향'),
+              U('일봉·분봉 차트', 'query1.finance.yahoo.com/v8/finance/chart/{code}', '장 마감 뒤 · 사례 갱신', '매매일지 → 차트 · 전략 구조 → 낙주매매 재현 · 장기투자',
+                '사례집·재현·막힌 후보 사후 결과', '과거 가격')]},
+    {'key': 'fred', 'name': 'FRED (세인트루이스 연준)', 'kind': '거시 지표', 'icon': 'percent',
+     'keys': ['FRED_API_KEY'], 'auth': '쿼리 api_key(무료 키)', 'site': 'https://fred.stlouisfed.org',
+     'note': '장기투자 참고 입력입니다. 국면 판정·주문 규칙은 쓰지 않습니다. 키가 없으면 그 입력만 빠집니다.',
+     'outputs': [('장기투자 판단 기록', 'nhplug/vibe-longterm/longterm.sqlite3')],
+     'uses': [U('금리차·10년물·실질금리·하이일드 스프레드', 'api.stlouisfed.org/fred/series/observations', '장기투자 아침 판단(평일 08:45)',
+                '장기투자 → 시장 → 시황·국면 · 전략 리포트 2절', '테마 스토리 점검 · 장기 전략 리포트', '금리·신용 배경'),
+              U('경제 발표 일정', 'api.stlouisfed.org/fred/releases/dates', '장기투자 아침 판단', '장기투자 → 시장 → 시황·국면 · 전략 리포트 2절',
+                '장기 전략 리포트', 'CPI·고용·GDP·PCE·PPI 발표일')]},
+    {'key': 'sec', 'name': 'SEC EDGAR', 'kind': '미국 공시', 'icon': 'description',
+     'keys': [], 'auth': '키 없음 · 일반 User-Agent(VIBE_TRADING_SEC_UA로 바꿀 수 있음)', 'site': 'https://www.sec.gov/edgar',
+     'note': '장기투자 미국 종목 아이디어(참고 전용, 주문 없음). 재무는 분기, 시세 스크린은 주 1회입니다. 호출 간격은 공유 SEC 스로틀을 따릅니다.',
+     'outputs': [('미국 종목 아이디어', 'nhplug/vibe-longterm/ideas.sqlite3')],
+     'uses': [U('ETF 보유 종목(N-PORT)', 'www.sec.gov/Archives/edgar/data/…', '분기 유니버스 갱신(us_ideas --universe)',
+                '장기투자 → 미국 종목 아이디어', '거장 추천·텐베거 후보 대상', 'IVV·QQQM·SOXX·QTUM·UFO·IWO 보유'),
+              U('회사 재무(XBRL company facts)', 'data.sec.gov/api/xbrl/companyfacts/CIK….json', '분기 유니버스 갱신',
+                '장기투자 → 미국 종목 아이디어', '거장 스크린', '매출·이익·현금흐름·희석·부채'),
+              U('기관 13F 보유', 'www.sec.gov/cgi-bin/browse-edgar · Archives', '분기 유니버스 갱신',
+                '장기투자 → 미국 종목 아이디어', '거장 13F 동향', '버크셔·브리지워터·오크트리 보유 변화')]},
+    {'key': 'fed', 'name': '연준 FOMC 일정', 'kind': '거시 지표', 'icon': 'account_balance',
+     'keys': [], 'auth': '키 없음', 'site': 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm',
+     'note': 'FRED는 FOMC 발표를 매일로 표시해 회의일은 연준 공식 일정 페이지에서 읽습니다(HTML).',
+     'outputs': [('장기투자 판단 기록', 'nhplug/vibe-longterm/longterm.sqlite3')],
+     'uses': [U('FOMC 회의 발표일', 'www.federalreserve.gov/monetarypolicy/fomccalendars.htm', '장기투자 아침 판단(평일 08:45)',
+                '장기투자 → 시장 → 시황·국면 · 전략 리포트 2절', '장기 전략 리포트', '금리 결정일')]},
+    {'key': 'tradingview', 'name': 'TradingView 스캐너', 'kind': '해외 시세', 'icon': 'candlestick_chart',
+     'keys': [], 'auth': '키 없음', 'site': 'https://www.tradingview.com', 'note': '비공식 스캐너 엔드포인트.',
+     'outputs': [('NXT 가상 기록', 'nhplug/nxt-virtual/events.jsonl')],
+     'uses': [U('코스피200 야간선물', 'scanner.tradingview.com/…/scan', 'NXT 가상 07:55 · 15:35 회차', '시장 상황 → 장전 야간선물 · 운영 상태 → NXT 가상 서비스', 'NXT 종가 베팅 · 장전 브리프', '야간 선물 방향')]},
+    {'key': 'openai', 'name': 'OpenAI API', 'kind': 'AI 판단', 'icon': 'psychology',
+     'keys': ['OPENAI_API_KEY'], 'auth': 'Bearer 키', 'site': 'https://platform.openai.com', 'note': '확률은 수익 확률이 아닙니다. 판단 모드가 OpenAI일 때와 실계좌 AI 관찰기에서 씁니다.',
+     'outputs': [('공유 모의 실행기 기록', 'nhplug/shared-etf-paper/events.jsonl')],
+     'uses': [U('Decisions 판단', 'api.openai.com/v1/…', '판단 모드 OpenAI일 때 매 회차', 'AI·실행 기록 · 계좌·자동매매 → AI 모드', 'ETF 진입 판단', '수치 분봉 기반 판단')]},
+    {'key': 'jev', 'name': 'TypeSafe Jev', 'kind': 'AI 판단', 'icon': 'smart_toy', 'expect_min': 1,
+     'keys': ['JEV_API_KEY'], 'auth': 'API 키 헤더 · 이미지 요청 TypeSafe-Danger-Zone-Images', 'site': 'https://typesafe.ai',
+     'note': '메인 엔진. 정규 요청과 이벤트 요청은 잠금 파일로 나눠 메인을 먼저 보장합니다.',
+     'outputs': [('공유 모의 실행기 기록', 'nhplug/shared-etf-paper/events.jsonl')],
+     'uses': [U('차트 이미지 판단', 'api.typesafe.ai/…', '실행기 매 1분', '종합 현황 · 엔진 비교 · AI·실행 기록', 'Jev 진입·보유 판단', '메인 매매 판단'),
+              U('낙폭과대·잔여분 판단', 'api.typesafe.ai/…', '선별 v2 후보 · 실계좌 잔여분 회차', '전략 구조 → 낙폭과대 FLOW · 실계좌', '선별 v2 거부·확대 · 실계좌 잔여분 매도', '보조 판단')]},
+    {'key': 'discord', 'name': 'Discord 웹훅', 'kind': '알림 발송', 'icon': 'forum',
+     'keys': ['DISCORD_WEBHOOK_REALTIME', 'DISCORD_WEBHOOK_LONGTERM'], 'auth': '웹훅 주소 자체가 비밀(주소는 기록하지 않음)', 'site': 'https://discord.com',
+     'note': '보내기만 합니다. 체결·계획·NAV·마감 요약은 텍스트로, 리포트는 HTML 링크(Pages 꺼짐이면 본문 텍스트)로 갑니다. 리포트별 발송 결과는 리포트 발행 화면에 있습니다.',
+     'outputs': [('발송 커서', 'nhplug/discord-notify.json'), ('리포트 발행 기록', 'nhplug/report-pages.sqlite3')],
+     'uses': [U('매매 알림', 'discord.com/api/webhooks/{code}/{token}', '체결마다 즉시 · 15:40', 'API 연동 → 리포트 발행', 'Jev·장기투자 체결 알림', 'REALTIME·LONGTERM 채널'),
+              U('리포트 링크', 'discord.com/api/webhooks/{code}/{token}', '리포트가 게시되어 열린 뒤', 'API 연동 → 리포트 발행', '리포트 HTML 링크 발송', '매매일지·장전·개선안·장기 전략')]},
+    {'key': 'report_pages', 'name': 'GitHub Pages 리포트', 'kind': '리포트 게시', 'icon': 'web',
+     'keys': [], 'auth': 'git 푸시 토큰 GH_TOKEN(.env 또는 상위 .envrc, 환경변수로만 전달)', 'site': 'https://pages.github.com',
+     'note': 'git 푸시는 HTTP 훅 밖이라 여기 호출 수에 없고, 리포트 발행 화면의 게시 기록에 남습니다. 여기 호출은 게시 확인(HEAD)과 Pretendard 글꼴 내려받기입니다.',
+     'outputs': [('리포트 사이트 목록', 'report-pages/site/reports/index.html'), ('리포트 발행 기록', 'nhplug/report-pages.sqlite3')],
+     'uses': [U('게시 확인', '<owner>.github.io/<repo>/reports/…', '푸시 뒤 발송 전', 'API 연동 → 리포트 발행', '링크 발송 전 열림 확인', '404 링크를 보내지 않기'),
+              U('Pretendard 글꼴', 'cdn.jsdelivr.net/npm/pretendard@1.3.9/…', '사이트 첫 생성 때 한 번', 'API 연동 → 리포트 발행', '리포트 HTML 글꼴', '자체 호스팅 대체 글꼴')]},
+]
+BY_KEY = {p['key']: p for p in CATALOG}
+CALLERS = {  # script stem -> who is calling (api_calls.caller())
+    'nh_paper_isolated': '공유 모의 실행기·Jev 가상', 'isolated_paper_learning_watch': '학습 관찰기', 'etf_regime_observer': '국면 관찰기',
+    'dashboard': '대시보드', 'market_movers': '순위·시황 수집', 'premarket': '장전 수집',
+    'vibe_longterm': '장기투자 엔진', 'nh_live_follow': '실계좌 미러', 'nxt_virtual': 'NXT 가상', 'trading_journal': '매매일지 작성',
+    'oversold_cases': '낙폭 사례집',
+    'discord_notify': '디스코드 알림·리포트 발행', 'report_pages': '리포트 발행',
+    'nh_live_auto': '실계좌 인버스 자동', 'nh_guarded_live': '실계좌 보호 주문', '-c': '수동 실행'}
+
+
+def name_of(key):
+    return BY_KEY.get(key, {}).get('name') or ('기타 호스트' if key == 'other' else key)
+
+
+def screen_map():
+    """One row per (screen, API): which API feeds which screen and why — for the 'where is it used' table."""
+    rows = []
+    for p in CATALOG:
+        for use in p['uses']:
+            for screen in [s.strip() for s in use['screen'].split(' · ')]:
+                rows.append({'화면': screen.split('→')[0].strip(), '위치': screen, 'API': p['name'], '데이터': use['data'],
+                             '기능': use['feature'], '용도': use['purpose']})
+    return rows

@@ -1,0 +1,21 @@
+# Dashboard theme (ui-ux-pro-max: dark, minimal, data-dense). Profit red / loss blue follow Korean market convention.
+# Both light and dark are defined and no base is forced, so the header's theme button (theme.py) can pick
+# 시스템 (OS prefers-color-scheme) → 다크 → 라이트; the choice is saved in dashboard-prefs.json.
+[theme.dark]
+primaryColor = "#22C55E"
+backgroundColor = "#020617"
+secondaryBackgroundColor = "#0E1223"
+textColor = "#F8FAFC"
+
+[theme.light]
+primaryColor = "#16A34A"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EEF2F7"
+textColor = "#0F172A"
+
+# A restart (launchd, kickstart) must not open a new browser tab each time (user 2026-11-13).
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

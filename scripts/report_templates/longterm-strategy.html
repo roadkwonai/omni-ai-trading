@@ -1,0 +1,26 @@
+{% extends "report.html" %}
+{% block highlights %}
+{% if extra.scenarios %}
+<section class="card" aria-labelledby="sc-title">
+  <h2 id="sc-title" class="label">시나리오별 대응</h2>
+  <div class="grid">
+    {% for s in extra.scenarios %}
+    <div class="tile">
+      <h3>{{ s.name }}</h3>
+      <p><strong>조건</strong> {{ s.trigger }}</p>
+      <p><strong>대응</strong> {{ s.action }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% if extra.watch_next %}
+  <h3 class="label watch-title">다음에 지켜볼 것</h3>
+  <ul class="watch">{% for w in extra.watch_next[:5] %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% elif extra.watch_next %}
+<section class="card" aria-labelledby="wn-title">
+  <h2 id="wn-title" class="label">다음에 지켜볼 것</h2>
+  <ul class="watch">{% for w in extra.watch_next[:5] %}<li>{{ w }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

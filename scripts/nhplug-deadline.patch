@@ -1,0 +1,148 @@
+--- a/src/client.ts
++++ b/src/client.ts
+@@ -1,4 +1,6 @@
+ import type { Config } from "./config.js";
++import { lstatSync, statSync } from "node:fs";
++import { dirname, isAbsolute, normalize } from "node:path";
+ import { getAccessToken, clearTokenCache } from "./auth.js";
+ 
+ /**
+@@ -32,6 +34,33 @@
+   return body.includes("IGW40043") || /유효하지\s*않은\s*token/i.test(body);
+ }
+ 
++export type PaperOrderGuard = { expires_at_epoch_ms: number; intent_id: string; payload_sha256: string };
++
++export class PaperOrderNotSent extends Error {
++  constructor(public readonly code: "NH_SIGNAL_EXPIRED" | "NH_STOP_REQUESTED", public readonly guard: PaperOrderGuard) {
++    super(code);
++  }
++}
++
++function checkPaperOrderGuard(guard: PaperOrderGuard): void {
++  if (Date.now() >= guard.expires_at_epoch_ms) throw new PaperOrderNotSent("NH_SIGNAL_EXPIRED", guard);
++  const stopPath = process.env.NHPLUG_PAPER_ETF_STOP_PATH;
++  if (!stopPath || !isAbsolute(stopPath) || normalize(stopPath) !== stopPath || !stopPath.endsWith("/nhplug/shared-etf-paper/STOP")) {
++    throw new Error("ETF paper stop path unavailable");
++  }
++  if (!statSync(dirname(stopPath)).isDirectory()) throw new Error("ETF paper stop directory unavailable");
++  let stopped = false;
++  try {
++    lstatSync(stopPath);
++    stopped = true;
++  } catch (e) {
++    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
++  }
++  if (stopped) throw new PaperOrderNotSent("NH_STOP_REQUESTED", guard);
++  if (!statSync(dirname(stopPath)).isDirectory()) throw new Error("ETF paper stop directory unavailable");
++  if (Date.now() >= guard.expires_at_epoch_ms) throw new PaperOrderNotSent("NH_SIGNAL_EXPIRED", guard);
++}
++
+ /** 호출 실패(HTTP 200 이 아닌 응답)를 표현하는 구조화 오류. 업무 오류는 여기로 오지 않는다. */
+ export class NhplugApiError extends Error {
+   constructor(
+@@ -71,7 +100,8 @@
+   cts?: string,
+   ctsFlag?: string,
+   wantPagination = false,
+-  isTrading = true
++  isTrading = true,
++  paperOrderGuard?: PaperOrderGuard
+ ): Promise<any> {
+   const mayRetry = !isTrading && !path.toLowerCase().includes("/order/");
+   const url = `${config.baseUrl}${path}`;
+@@ -91,6 +121,7 @@
+     if (cts) headers["cts"] = cts;
+     if (ctsFlag) headers["cts_flag"] = ctsFlag;
+ 
++    if (paperOrderGuard) checkPaperOrderGuard(paperOrderGuard);
+     try {
+       res = await fetch(url, { method: "POST", headers, body });
+     } catch (e) {
+--- a/src/tools.ts
++++ b/src/tools.ts
+@@ -1,7 +1,8 @@
+ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+ import { z } from "zod";
+ import type { Config } from "./config.js";
+-import { callRest } from "./client.js";
++import { callRest, PaperOrderNotSent } from "./client.js";
++import { createHash } from "node:crypto";
+ import { loadOperations, findOperation, listDomains } from "./spec.js";
+ 
+ function textResult(obj: unknown) {
+@@ -47,6 +48,19 @@
+   return errorResult(msg);
+ }
+ 
++function guardedPayloadHash(operationId: string, input: Record<string, unknown>): string {
++  const keys = Object.keys(input).sort();
++  if (keys.some((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))) throw new Error("invalid order fields");
++  const ordered: Record<string, unknown> = {};
++  for (const key of keys) {
++    const value = input[key];
++    if (!(value === null || typeof value === "string" || typeof value === "boolean" ||
++          (typeof value === "number" && Number.isSafeInteger(value)))) throw new Error("invalid order field value");
++    ordered[key] = value;
++  }
++  return createHash("sha256").update(JSON.stringify({ input: ordered, operationId }), "utf8").digest("hex");
++}
++
+ export function registerTools(server: McpServer, config: Config): void {
+   // ── 메타 도구 1: 사용 가능한 API 목록 ────────────────────────────────
+   server.tool(
+@@ -148,6 +162,10 @@
+     async ({ operationId, input, cts, cts_flag, want_pagination }) => {
+       const op = findOperation(operationId);
+       if (!op) return errorResult(`operationId '${operationId}' 를 찾을 수 없습니다. list_apis 로 확인하세요.`);
++      if (process.env.NHPLUG_PAPER_ETF_STOP_PATH !== undefined &&
++          ["/krstock/order/v1/cashbuy", "/krstock/order/v1/cashsell"].includes(op.path.toLowerCase())) {
++        return errorResult("ETF 전용 서버에서는 보호 주문 도구가 필요합니다.");
++      }
+       if (op.isTrading && !config.enableTrading) {
+         return errorResult(
+           `'${operationId}' 는 주문(거래) API 입니다. 안전을 위해 기본 비활성 상태입니다. 실행하려면 서버 환경변수 NHPLUG_ENABLE_TRADING=true 로 설정 후 재시작하세요.`
+@@ -161,7 +179,43 @@
+         return textResult(res);
+       } catch (e) {
+         return toErrorResult(e);
++      }
++    }
++  );
++
++  // Guarded mock orders use a separate tool so an older server cannot drop the guard.
++  server.tool(
++    "call_api_guarded",
++    "모의 국내주식 현금주문 전용: 신호 만료시각과 주문 바인딩을 전송 직전 확인합니다.",
++    {
++      operationId: z.enum(["krstockOrderCashBuy", "krstockOrderCashSell"]),
++      input: z.record(z.any()),
++      order_guard: z.object({
++        expires_at_epoch_ms: z.number().int().positive().safe(),
++        intent_id: z.string().regex(/^[0-9a-f]{32}$/),
++        payload_sha256: z.string().regex(/^[0-9a-f]{64}$/),
++      }).strict(),
++    },
++    async ({ operationId, input, order_guard }) => {
++      if (!config.enableTrading || config.baseUrl !== "https://moapi.nhplug.com:8443") {
++        return errorResult("모의 국내주식 주문 환경이 아닙니다.");
+       }
++      const op = findOperation(operationId);
++      if (!op || !op.isTrading || !["/krstock/order/v1/cashBuy", "/krstock/order/v1/cashSell"].includes(op.path)) {
++        return errorResult("지원하지 않는 모의 주문입니다.");
++      }
++      try {
++        if (guardedPayloadHash(operationId, input) !== order_guard.payload_sha256) {
++          return errorResult("주문 바인딩이 일치하지 않습니다.");
++        }
++        const result = await callRest(config, op.path, input, undefined, undefined, false, true, order_guard);
++        return textResult(result);
++      } catch (error) {
++        if (error instanceof PaperOrderNotSent) {
++          return textResult({ _nh_order_guard: { version: 1, code: error.code, no_send: true, ...error.guard } });
++        }
++        return toErrorResult(error);
++      }
+     }
+   );
+ 

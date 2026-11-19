@@ -1,0 +1,18 @@
+---
+name: ops-bootstrap
+description: 다른 Claude 계정이나 새 세션·새 기기에서 vibe-trading 프로젝트를 이어서 진행하거나 백업에서 복원할 때 쓴다. "다른 계정", "새 세션", "이어서 진행", "복원", "백업", "bootstrap", "이식" 요청에 반응한다. 설정·예약 작업·스킬·서비스를 점검하고 되살리는 순서를 안내하며 주문·실계좌 스위치는 건드리지 않는다.
+---
+
+이 프로젝트는 코드·설정·예약 작업·스킬은 git, 원장·이벤트·리포트는 `~/.vibe-trading`(백업 아카이브로 이동)에 있다. 자세한 구조는 `docs/portability.md`. 아래 순서대로 점검하고, 각 단계에서 이상이 있으면 그 단계에서 멈춰 사용자에게 알린다.
+
+1. **읽기**: 저장소 루트 `AGENTS.md`(확정 정책)와 있으면 `CLAUDE_HANDOFF.md`(개인 작업 기록, git에 없음)를 읽는다. 답변은 한국어, 시각은 Asia/Seoul. `.env` 값·계좌번호·키는 출력하지 않는다.
+2. **점검**: `PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py check`. 확인할 것은 `.env` 키(이름만), 실행 데이터 폴더 유무, launchd 서비스 상태, 예약 작업 부족, 마지막 백업 나이다. `.env`가 없으면 `.env.example`을 복사해 사용자가 직접 채우게 한다(키를 대신 입력하지 않는다).
+3. **복원**(실행 데이터 폴더가 없거나 비었을 때만): 사용자가 가진 백업 파일로 `state_sync.py verify <파일>` 후 `state_sync.py import <파일>`. 거래 서비스가 돌고 있으면 거부된다. 대시보드 '백업·이식' 탭에서도 같은 일을 할 수 있다(확인 문구 '백업 가져오기'). 기존 파일은 지우지 않고 `~/.vibe-trading/restore-backup-<시각>/`로 옮겨진다. 복원 뒤 `state/settings`(git, 계좌번호 제거본)는 참고용이며 `accounts.json`의 계좌 해시는 백업에서만 온다.
+4. **서비스 재설치**: `scripts/launchd_services.py`(`--out DIR`로 plist 렌더) → `~/Library/LaunchAgents`로 복사 → `launchctl bootstrap gui/$(id -u) <plist>`. 먼저 대시보드·관찰·읽기 전용 서비스부터. 실주문과 관련된 서비스(`live-follow-*`, `longterm-live-*`, `--execute` 인자)와 계좌별 실주문 스위치는 사용자의 명시 승인 뒤에만 켠다. 모의 `shared-etf-paper`의 `--execute`도 계좌·보호 설정을 확인한 뒤 사용자 승인을 받는다.
+5. **예약 작업 복원**: `ops/scheduled-tasks/manifest.json`의 모든 항목을 그대로 다시 등록한다. 항목마다 `<taskId>/SKILL.md` 본문(앞머리 `---` 블록 아래 전체)을 prompt로, `title`을 title로, `description`을 description으로 scheduled-tasks MCP의 `create_scheduled_task`를 호출한다. `cron`이 있으면 cronExpression으로, `cron`이 없고 `schedule`(일회성 시각, KST ISO)이 있으면 fireAt으로 넣는다. 일회성 시각이 이미 지났으면 만들지 않고 보고에 '지난 일회성 작업'으로 적는다. 일(셋째 칸)과 월(넷째 칸)이 숫자로 고정된 cron(예: `50 8,9 19 11 *`, 날짜를 정한 하루짜리 작업)은 해마다 그날 다시 돌므로, 그 날짜가 이미 지났으면 만들지 않고 '지난 날짜 고정 작업'으로 적는다. cron과 시각은 이 Mac의 시간대로 돈다. 등록 전에 시스템 시간대가 Asia/Seoul인지 확인하고, 다르면 사용자에게 알려 바꾸게 한다(시각을 바꿔 넣지 않는다). `enabled`가 false인 작업은 만든 뒤 `update_scheduled_task`로 끈다. 이미 있는 taskId는 `list_scheduled_tasks`로 확인해 중복 생성하지 않는다. `permission_mode`(예: bypassPermissions)는 도구로 넣을 수 없으니, 그 값이 있는 작업 목록을 사용자에게 알려 앱에서 같은 권한 모드로 맞추게 한다. 다 만든 뒤 `list_scheduled_tasks` 결과의 작업 수·cron·한 번 시각이 manifest와 같은지 대조해 보고한다. manifest는 평일 16:55 state-sync(`state_sync.py export`)가 Claude 앱의 예약 작업 저장소에서 지시문·cron·한 번 시각·켜짐·권한 모드를 읽어 자동으로 갱신하며, 수동으로는 `state_sync.py tasks-export`로 갱신한다.
+6. **기기별 스킬 링크·리포트 사이트**: `.claude/skills/ui-ux-pro-max`(→ `.agents/skills`)와 `developing-with-streamlit`(→ `.venv` 안 streamlit)은 기기마다 다시 링크하는 심볼릭 링크라 git에 없다(필요하면 `ln -s`). 디자인 스킬 `design-taste-frontend`(taste-skill v2.5.1, 36MB라 git 제외)는 `git clone --depth 1 --branch v2.5.1 https://github.com/Leonxlnx/taste-skill /tmp/taste && cp -R /tmp/taste/skills/taste-skill .claude/skills/design-taste-frontend`로 다시 설치한다(Node 22+·Chrome 필요). 리포트 HTML 사이트(`~/.vibe-trading/report-pages/site`)는 원본 리포트에서 다시 만들 수 있으므로 `report_pages.py --scan`으로 되살린다. Pages 푸시(`REPORT_PAGES_PUSH=on`)는 사용자 승인 뒤에만 켠다(docs/report-pages.md).
+6. **스킬 확인**: `.claude/skills/`(git에 있음)와 `.agents/skills/`(개인 폴더, git 제외)를 `ls`로 나열하고 AGENTS.md가 언급한 스킬(premarket-analysis, trading-journal-writer, longterm-strategy-writer, intraday-audit 등)이 있는지 확인한다.
+7. **검증**: 대시보드(`shared-etf-dashboard`)를 열어 종합 현황·운영 상태·API 연동·백업·이식 탭을 본다. 테스트는 `PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python -m pytest -q -p no:cacheprovider scripts/test_state_sync.py`.
+8. **마무리 보고**: 무엇이 있고 없는지(키 이름, 서비스, 예약 작업, 최근 백업), 사용자가 직접 해야 할 일(.env 채우기, 승인 필요한 서비스)을 짧게 정리한다.
+
+하지 않는 일: 원장·이벤트 수정과 삭제, 서비스가 도는 중 복원, git 커밋(사용자 요청 때만), 주문, 실주문 스위치 변경.

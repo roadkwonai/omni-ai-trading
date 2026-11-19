@@ -1,0 +1,33 @@
+{% extends "_base.html" %}
+{% block body %}
+<section class="hero">
+  <div class="wrap">
+    <span class="kicker">{{ kind_name }}</span>
+    <h1>{{ title }}</h1>
+    <ul class="meta">
+      <li>{{ period_label }}</li>
+      <li>{{ channel_label }}</li>
+      <li>원본 {{ source_name }}</li>
+    </ul>
+    {% if summary %}<p class="lede">{{ summary }}</p>{% endif %}
+  </div>
+</section>
+<div class="wrap layout">
+  {% if toc|length > 1 %}
+  <nav class="toc" aria-label="목차">
+    <p>목차</p>
+    <ol>{% for item in toc %}<li><a href="#{{ item.id }}">{{ item.text }}</a></li>{% endfor %}</ol>
+  </nav>
+  {% else %}<div></div>{% endif %}
+  <main id="main" class="stack">
+    {% if toc|length > 1 %}
+    <details class="toc-mobile">
+      <summary>목차 · {{ toc|length }}개 절</summary>
+      <ol>{% for item in toc %}<li><a href="#{{ item.id }}">{{ item.text }}</a></li>{% endfor %}</ol>
+    </details>
+    {% endif %}
+    {% block highlights %}{% endblock %}
+    <article class="card prose">{{ body|safe }}</article>
+  </main>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "report.html" %}
+{% block highlights %}
+{% if extra.top_issues or extra.watch_next %}
+<section class="card" aria-labelledby="hl-title">
+  <h2 id="hl-title" class="label">한눈에 보기</h2>
+  <div class="grid">
+    {% for issue in extra.top_issues[:3] %}
+    <div class="tile">
+      <h3><span class="stars" aria-label="중요도 {{ issue.stars }}점">{{ '★' * issue.stars }}{{ '☆' * (5 - issue.stars) }}</span><br>{{ issue.title }}</h3>
+      <p>{{ issue.why }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% if extra.watch_next %}
+  <h3 class="label watch-title">다음에 지켜볼 것</h3>
+  <ul class="watch">{% for w in extra.watch_next[:5] %}<li>{{ w }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

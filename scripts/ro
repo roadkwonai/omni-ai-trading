@@ -1,0 +1,83 @@
+#!/bin/bash
+# Read-only runner for the scheduled report tasks (2026-11-18: the 08:50 long-term report waited 30 minutes for a Bash
+# approval). Only what is listed below, never an order or live-order script and never --execute, so one narrow permission
+# rule (Bash(scripts/ro *) in .claude/settings.local.json) lets an unattended task run it.
+#   scripts/ro [--out FILE] <script.py> [args...]     a listed script (PYTHONPATH set)
+#   scripts/ro sql <db under ~/.vibe-trading> "<SELECT|WITH|PRAGMA ...>"   read-only SQLite query, rows as JSON lines
+#   scripts/ro services                                  launchd vibetrading services (launchctl list)
+#   scripts/ro pytest <scripts/test_*.py|streamlit_namuh/test_*.py>...
+#   scripts/ro vibe-status                               whether the long-term engine is switched on
+# --out writes stdout to FILE (no shell redirect needed). It and every path argument of a listed script stay under
+# .scratch/, ~/.vibe-trading/nhplug/vibe-longterm/reports/ or reviews/, or ~/.vibe-trading/nhplug/shared-etf-paper/reviews/.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+export PYTHONPATH=agent:scripts:streamlit_namuh
+py=.venv/bin/python
+out=""
+if [ "${1:-}" = "--out" ]; then out="${2:-}"; shift 2; fi
+for a in "$@"; do
+  case "$a" in --execute*|--live*|--watch*) echo "ro: $a is not allowed" >&2; exit 2;; esac
+done
+task_path() {  # the only folders a task may name: never the engine's databases or settings (2026-11-19 review)
+  case "$1" in *..*) return 1;; esac
+  case "$1" in
+    .scratch/*|"$HOME"/.vibe-trading/nhplug/vibe-longterm/reports/*|"$HOME"/.vibe-trading/nhplug/vibe-longterm/reviews/*) ;;
+    "$HOME"/.vibe-trading/nhplug/shared-etf-paper/reviews/*) ;;
+    *) return 1;;
+  esac
+}
+SCRIPTS=" longterm_report.py longterm_audit.py longterm_cases.py us_ideas.py intraday_audit.py
+ oversold_outcomes.py oversold_research.py oversold_cases.py daily_improvement.py trading_journal.py journal_template.py
+ premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py jev_explain.py audit_incidents.py "
+SCRIPTS=" $(echo $SCRIPTS) "
+case "${1:-}" in
+  vibe-status) cmd=("$py" -c "import engine_ops, pathlib; print(engine_ops.status(pathlib.Path.home() / '.vibe-trading/nhplug')['vibe'])");;
+  services) launchctl list | grep vibetrading || true; exit 0;;
+  sql)
+    db="${2:-}"; q="${3:-}"
+    cmd=("$py" -c '
+import json, sqlite3, sys
+from pathlib import Path
+db, q = Path(sys.argv[1]).expanduser().resolve(), sys.argv[2]
+home = (Path.home() / ".vibe-trading").resolve()
+if home not in db.parents or not db.is_file():
+    sys.exit("ro sql: the database must be a file under ~/.vibe-trading")
+if q.lstrip().split(None, 1)[0].upper() not in ("SELECT", "WITH", "PRAGMA") or ";" in q.strip().rstrip(";"):
+    sys.exit("ro sql: one SELECT, WITH or PRAGMA statement only")
+con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+con.row_factory = sqlite3.Row
+for row in con.execute(q):
+    print(json.dumps(dict(row), ensure_ascii=False, default=str))
+' "$db" "$q");;
+  pytest)
+    shift
+    prev=""
+    for f in "$@"; do  # no other option: --basetemp deletes a folder, -p loads a module, -c/--rootdir move the config
+      case "$prev" in
+        -k) prev=""; continue;;
+        -p) [ "$f" = no:cacheprovider ] || { echo "ro: pytest -p takes only no:cacheprovider" >&2; exit 2; }; prev=""; continue;;
+      esac
+      case "$f" in
+        *..*) echo "ro: pytest arguments may not contain .." >&2; exit 2;;
+        scripts/test_*.py|streamlit_namuh/test_*.py|-q|-x|-v|-k|-p|-pno:cacheprovider) ;;
+        *) echo "ro: pytest runs only scripts/test_*.py or streamlit_namuh/test_*.py with -q -x -v -k -p no:cacheprovider" >&2; exit 2;;
+      esac
+      prev="$f"
+    done
+    cmd=("$py" -m pytest "$@");;
+  *.py)
+    case "$SCRIPTS" in *" $1 "*) ;; *) echo "ro: not allowed: $1" >&2; exit 2;; esac
+    [ "$1" = market_movers.py ] && { case " $* " in *" --once "*) ;; *) echo "ro: market_movers.py needs --once" >&2; exit 2;; esac; }
+    for a in "${@:2}"; do  # --reports, --incidents-db, launchd --out, --root, --db ... (also --opt=PATH and abbreviations)
+      case "$a" in *..*|*/*) task_path "${a#--*=}" || { echo "ro: $a: paths only under .scratch/ or the report folders" >&2; exit 2; };; esac
+    done
+    s="$1"; shift; cmd=("$py" "scripts/$s" "$@");;
+  *) echo "ro: not allowed: ${1:-<none>} (scripts:${SCRIPTS}; or sql, services, pytest, vibe-status)" >&2; exit 2;;
+esac
+if [ -n "$out" ]; then
+  task_path "$out" || { echo "ro: --out must be under .scratch/, vibe-longterm/reports|reviews/ or shared-etf-paper/reviews/" >&2; exit 2; }
+  mkdir -p "$(dirname "$out")"
+  "${cmd[@]}" > "$out"
+else
+  exec "${cmd[@]}"
+fi
