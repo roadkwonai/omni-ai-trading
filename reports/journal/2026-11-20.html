@@ -806,24 +806,74 @@
 <li>진입하지 않은 이유(상위): inverse_too_late 113 · jev_low_confidence 92 · jev_wait 88 · trend_not_rising 40 · entry_window_closed 26 · inverse_low_confidence 11</li>
 <li>제한 규칙이 막은 횟수: reentry_allow 3 · careful_reentry 3 · opposite 1 · volume 13 · rising 58 · add_better 1 · cutoff 26 · order_guard 20 · inverse_guard 2</li>
 </ul>
+<aside class="callout warning" role="note" aria-label="주의"><p class="callout-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/></svg>주의</p><p>09:54 인버스 매수가 모든 진입 조건을 통과하고도 주문 가드에서 <code>Quote unavailable for session check</code>로 거부됐다. 같은 초에 대시보드 시세 조회 4건이 겹친 NH 유량 초과(IGW42902)가 원인이다(장 마감 개선안 1).</p>
+</aside>
+<ul>
+<li><strong>주문을 놓친 것</strong>: 위 1건이다. 10:41에 비슷한 가격(1,373원)으로 다시 사서 손익 차이는 거의 0원으로 추정한다.</li>
+<li><strong>장중 재시작 11회</strong>: 그중 3회(11:19·11:31·11:43)는 인버스 361주를 들고 있을 때였고 손절 감시가 12~40초 멈췄다. 손실은 없었다.</li>
+<li><strong>NH 유량 초과는 줄었다</strong>: 실행기 IGW42902 29건, 순위 계산기 16건(11/19 163건), 잔고 IGW42903 5건(11/19 168건)이다. 11/19 장 마감 뒤 고친 쪽 간격이 효과를 냈다.</li>
+<li><strong>장기 엔진 마감 오류</strong>: 15:40 <code>close</code>가 <code>price unavailable NDXMIX</code>로 실패했다. 오늘 산 0261H0(혼합 ETF)의 종가를 못 읽어 순자산 기록이 빠졌을 수 있다.</li>
+<li><strong>낙폭과대 ATR</strong>: 09:54 삼성전자 실시간 판정의 ATR 배수가 비어 6% 하한만으로 '발동'이 됐다. 하락 멈춤 조건이 막아 매수는 없었다(개선안 3).</li>
+<li><strong>뉴스 수집</strong>: '시황' 헤드라인에 전날(11/19) 기사가 섞여 데이터 순위 1위가 오늘과 반대 내용이었다.</li>
+</ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>사실</strong>: 지수가 −5%대로 빠진 날 가장 큰 수익은 인버스가 아니라 시장과 반대로 오른 한진칼에서 났다. <strong>해석</strong>: 폭락일에도 '지수에 베팅'보다 '독립적으로 강한 종목'이 더 나은 기회일 수 있다. 오늘 장중 사용자 결정('강한 종목이 있으면 굳이 인버스 아님')과 같은 방향의 사례다.</li>
+<li><strong>사실</strong>: 한진칼은 12분 만에 +2% 목표로 다 팔렸고 그 뒤 매도가 대비 +6.49%까지 갔다. <strong>해석</strong>: 약세장 목표가 강도 종목에는 너무 짧았다. 오늘 승인된 +1% 추세형 전환이 맞는 처방인지 다음 사례로 확인한다.</li>
+<li><strong>사실</strong>: 인버스는 코스피 −4.4% 뒤 범위 중간에서 샀고 본전에 끝났다. <strong>해석</strong>: 하락 후반 추격은 기대값이 작다. 사용자가 장중에 '늦음' 관문을 넣은 것이 이 복기와 맞는다.</li>
+<li><strong>사실</strong>: 10:14부터 모의 크기가 실계좌 운용금 기준(분할 1회 248,333원)으로 줄었다. <strong>해석</strong>: 오늘부터 모의 성적은 이전 날과 금액으로 비교할 수 없고 수익률로 봐야 한다.</li>
+<li><strong>이번 주(11/16~11/20)</strong>: 모의 +115,624원, 매매일 5·매도 승률 73%, 최고 11/16 +163,333원·최저 11/17 −54,328원이다. 손익은 인버스(114800 +87,148원)와 신규주 471800(+25,668원)에 몰렸고 삼성전자(−4,600원)·035760(−4,500원)에서 잃었다. 실계좌 1은 주간 −233원으로 모의 흐름을 금액 비율대로 따라갔지만 인버스에서 −2,458원이었다.</li>
+</ul>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>강도 종목 청산 — 추세형 전환(+1%)의 효과 확인.</strong> 근거: 한진칼 매도 뒤 최고 +6.49%·마감 +2.16%, 매도 30분 뒤 +1.30%. 바꾸면: 같은 종목이 +2% 전량 대신 고점 −1.5% 추적으로 남아, 오늘이라면 10:51 고가 근처까지 일부를 들고 갔을 것이다(추정). 확인 방법: 오늘 승인된 규칙이 적용된 강도 진입 10건의 실현 수익률과 '매도 뒤 30분 변화'를 이전 11건(평균 −0.26%)과 비교한다. 규칙 변경은 제안이 아니라 이미 승인된 것의 검증이다.</li>
+<li><strong>인버스 '늦음' 관문(−3%) 표본 쌓기.</strong> 근거: 11:23~14:49 113회 막았고 그 사이 인버스는 1,370원 → 1,383원(+0.95%)이었다. 50% 크기라면 많아야 약 +1,200원이다(장 마감 개선안 추정). 바꾸면: 기준을 풀면 오늘처럼 후반 추격이 늘어난다. 확인 방법: 지수 −3% 이상 하락일 5일 이상에서 막힌 시각 이후 인버스의 마감 수익률을 모은다. 지금은 바꾸지 않는다.</li>
+<li><strong>폭락일 '시장 독립 강세' 후보 우선순위(가설).</strong> 근거: 오늘 시장 대비 +10.04%인 한진칼이 가장 좋은 매매였다. 바꾸면: 지수 −3% 이상 날에는 강도 슬롯 후보를 '시장 대비 초과 상승' 순으로 보는 것을 검토할 수 있다. 확인 방법: 막힌 강도 후보 사후 결과(blocked_outcomes)에서 폭락일만 따로 시장 대비 수익률을 10건 이상 모은다. 오늘 막힌 강도 후보는 장 마감까지 −1.05%로, 아직 근거가 약하다.</li>
+</ul>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>주문 세션 점검 유량 초과 재시도 없음.</strong> 증상: 09:54:42 인버스 매수가 <code>Quote unavailable for session check</code>로 거부. 영향: 오늘은 손익 영향이 거의 없으나, 같은 점검이 손절 매도에 걸리면 손절이 늦어질 수 있다. 제안: 장 마감 개선안 1 — 세션 점검 시세가 IGW42902일 때만 1초 뒤 한 번 더 묻기(승인 필요).</li>
+<li><strong>장중 재시작이 잦음.</strong> 증상: 11회, 보유 중 3회. 영향: 진입 회차 누락, 손절 감시 12~40초 공백. 제안: 장 마감 개선안 2 — 긴급이 아닌 코드 변경은 보유 없을 때나 12:00~12:30·장 마감 뒤에 묶어 재시작(사용자 결정).</li>
+<li><strong>낙폭과대 ATR 실패를 하루 내내 기억.</strong> 증상: <code>oversold.daily_atr</code>가 조회 실패도 그날 끝까지 캐시해 ATR 없이 6% 하한으로 발동 판정. 영향: 승인 기준(1.5 ATR)보다 얕은 낙폭에서 살 수 있음. 제안: 장 마감 개선안 3 — 실패는 10분만 기억, ATR을 모르면 발동으로 보지 않기.</li>
+<li><strong>장기 엔진 마감 평가 실패.</strong> 증상: 15:40 <code>close: price unavailable NDXMIX</code>. 영향: 오늘 가상 계좌 순자산 기록과 계좌·레시피 그림자 평가가 빠졌을 수 있다. 0261H0를 처음 든 날이라 종가 조회 경로(Yahoo .KS 등)에 이 코드가 없을 가능성이 있다(가설). 제안: 장기투자 복기·감사에서 원인을 확인한다.</li>
+<li><strong>매매일지 이슈 수집에 전날 기사 섞임.</strong> 증상: '5138 마감·1.39% 상승' 등 11/19 기사가 오늘 시황 ★4로 1위. 영향: 일지와 엔진 참고 맥락이 오늘 시장을 거꾸로 볼 수 있다. 제안: 이슈 헤드라인에 발행 시각을 받아 그날 기사만 순위에 넣는다.</li>
+</ul>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li>11/20 코스피·코스닥이 저가 −6%대까지 빠지며 외국인·기관·프로그램이 함께 팔았고, 하락이 817 종목으로 퍼졌다.</li>
+<li>폭락일에도 시장과 반대로 강하게 오른 종목(오늘 한진칼, 시장 대비 +10%)이 지수 ETF보다 더 좋은 기회였다.</li>
+<li>지수가 이미 −4% 넘게 빠진 뒤의 인버스 매수는 본전 근처로 끝났다.</li>
+<li>미국 증시 급락은 앤트로픽 상장 뒤 AI 투자 회의론과 연준 긴축 우려가 겹친 것이라는 해석이 많았다. 다음 거래일 갭은 금요일 밤 미국 장에 달려 있다.</li>
+<li>강한 매도 뒤 거래량이 12년 만에 최저라는 보도가 있어, 반등이 와도 거래 주체가 얇을 수 있다.</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>11/23(월) 개장 전</strong>: 금요일 밤 뉴욕증시(나스닥·반도체)와 VIX가 28선에서 내려오는지. 월요일 갭 방향을 정한다.</li>
+<li><strong>11/23(월) 장중 14:30~14:55</strong>: 선별 v2 판정. 오늘 −6%대 하락이 직전 5일에 들어가, 월요일 시장 저가가 −5%를 넘으면 '직전 5일 −5% 뒤 −5%' 조건을 통과할 수 있다(실시간 KODEX 200 직전 5일 −4.63%와 표본 −3.83%가 다른 점 주의).</li>
+<li><strong>11/23(월) 09:00</strong>: 실행기가 08:55 시작·09:00 정각 첫 회차, 개장 즉시 진입 판단(NXT 프리마켓 분봉)이 처음 적용되는 날이다. 첫 회차가 실제로 도는지 본다.</li>
+<li><strong>강도 종목 추세형 전환</strong>: 첫 강도 진입에서 +1% 뒤 추세형 청산으로 바뀌는지(이벤트 strength_trend).</li>
+<li><strong>연준 발언·미 국채 10년 5%선</strong>: 12월 인상 우려가 이어지는지. 금·비트코인 동반 약세가 계속되는지 본다.</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://news.google.com/search?q=%22%EC%BD%94%EC%8A%A4%ED%94%BC%C2%B7%EC%BD%94%EC%8A%A4%EB%8B%A5%20%EB%8F%99%EB%B0%98%20%EB%A7%A4%EB%8F%84%EC%82%AC%EC%9D%B4%EB%93%9C%EC%B9%B4%E2%80%A6%EC%82%BC%EC%A0%84%EB%8B%89%EC%8A%A4%206%25%EB%8C%80%20%EA%B8%89%EB%9D%BD%28%EC%A2%85%ED%95%A9%29%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">뉴스1 · 2026-11-20 · 코스피·코스닥 동반 매도사이드카…삼전닉스 6%대 급락(종합)</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiVkFVX3lxTE1Yc3F6WmI1eDZwZWFHM0pHSW5YcVhPT2dnQU05RW1vNHp5cUJ5VnVySWpORjBiX0ZsVmJHVlFRR1Fsazk2aWllSmdHYld2WklOWkRHMkZR?oc=5" target="_blank" rel="noopener noreferrer">헤럴드경제 · 2026-11-20 · “오천피 또 깨졌다” 앤트로픽 흥행에도 코스피 4% 하락 출발</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiVkFVX3lxTE1xQ0pCZVdVbUx4cHBaMGlTMzdOVlU2MnFzU1h4ZEowZEFrSUxraVp2WkswOFhaTmJYNDRZQ0dtaVNwUXhwSC0xZ0lNQXhTWXBhbFpvS3lB?oc=5" target="_blank" rel="noopener noreferrer">헤럴드경제 · 2026-11-20 · 활력 떨어진 코스피…거래량 12년만 최저</a></li>
+<li><a href="https://news.google.com/search?q=%22%EC%82%BC%EC%84%B1%EC%A0%84%EC%9E%90%20%EC%A3%BC%EA%B0%80%20%EC%9E%A5%EC%A4%91%205%25%EB%8C%80%20SK%ED%95%98%EC%9D%B4%EB%8B%89%EC%8A%A4%206%25%EB%8C%80%20%EB%82%B4%EB%A0%A4%2C%20%EB%AF%B8%EA%B5%AD%20AI%C2%B7%EB%B0%98%EB%8F%84%EC%B2%B4%EC%A3%BC%20%EC%95%BD%EC%84%B8%20%EC%98%81%ED%96%A5%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">비즈니스포스트 · 2026-11-20 · 삼성전자 주가 장중 5%대 SK하이닉스 6%대 내려</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMicEFVX3lxTFBsM1UySkQ1YmdONUNYZV82VjczODNrVU1GZVVKa3pKSGJ6Ym1COGdFaUJjOUpMb0RQVF81X0o1QjlaZGZnYWM4RlVrNmt4aG5VVFUwdkF5U2tJT3JQamxuR0FoQ0N0aF9FRGwyaTBFemQ?oc=5" target="_blank" rel="noopener noreferrer">연합인포맥스 · 2026-11-20 · [뉴욕증시] 앤트로픽 상장은 매도 신호였나…2%대 급락 마감</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMicEFVX3lxTE9LOGtRSHlESVBTWllsaU93T2ZHT1I5bnFXeTgxdElHbkN1T19ZQkJ2ajRDdHBVQkl1cHExVTBtQkM4azdaYTdSWEtvZ0VSQ1p0MUtWNlFVZmlEdkI4cnlSV0dFRkNQSEhZZXUzYV9GbFY?oc=5" target="_blank" rel="noopener noreferrer">굿모닝베트남미디어 · 2026-11-20 · 국제 금값 이틀 새 250달러 급락… 연준 12월 금리 인상 우려 확산</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMidEFVX3lxTE9McG9OMXFLSU5VMFNBSThrbG1Nd2l5RjBva3djNHNiM3Nqenp5al9vTUcwSlN3NnBwdkJha3RWYmdzbVhnWXoyMXFSUG0tZmwtRTY0N1k0enpHRi1BMF9fMTM4VHgwNENqVlhjOHlBam9nSmJi?oc=5" target="_blank" rel="noopener noreferrer">부산일보 · 2026-11-20 · JP모건 “미 기준금리 내년 3월까지 3번 연속 인상 전망”</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiakFVX3lxTE1pckhpdlZ3Z0JheVdXanMwaEdGYmhZaGxVZzZ5RTIwN09KYXNhNkJNQjRmOEotd3l4YW9RcG51LUw0T2ZwUEpYdFVrNHdaMC1DY014UXlDV04zYjVPNm5aRUpPbGtpZ215bVE?oc=5" target="_blank" rel="noopener noreferrer">AI타임스 · 2026-11-20 · AMD, 중국 제재 기업과 거래 의혹에 주가 8% 급락</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMic0FVX3lxTFBLcjNranY1b2tYeWEtN0Nld2tRWEZqSXpMQzVoNi0tNXItS1JndXNqT1VGLWNueFM5eDZMb0g0azg3SGh4TUljVGVqYTRYd2NhZl8xekZNWXhpMEVtQnc5SnBWZUcxb29oNUNiNnRxQXpqUkHSAWZBVV95cUxPdFlnOVAwTktQNUhhV2pfNWJ1OVQ5U3I1WnNrdGxJcFhVRVNBTWZrWDRUWjA5NkZzTmN1Sk94d0FGbFNGWXFCbUVXdk5SdDhRLVdSQ1plYWpidjVQY1hyMGp6WGNIRlE?oc=5" target="_blank" rel="noopener noreferrer">동아일보 · 2026-11-20 · 트럼프 “이란 추가 공습 서두르지 않아…새해 시작뒤 논의”</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiakFVX3lxTFBIbnFIb0JtUHcwbVFidWFIc3hoTWxpbVpJR1NhYUJITS1MQ3VIWGhRZDhOLTFRZWdqSVRBRWh6Y2VvUUdiREwzblpBMFd3bUp6dnAyNEZDRkVmTFZQcTREZjA2dmt4SGo4M1E?oc=5" target="_blank" rel="noopener noreferrer">뉴스웨이 · 2026-11-20 · 삼전닉스 목표가 줄하향</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMicEFVX3lxTE1DNnozSW84Z1I0cUVZdDZzTml2ei1xVnRlUTY4TmtDS3B0THZJa1pVSGE3STk3cGtjWVJuTFpsZnF1am5JaXVwM2tpeTBYc3JVcERteUVGYmtORzBNMkwtN0ZFWEt4UVQ0NWppZWNxNHk?oc=5" target="_blank" rel="noopener noreferrer">연합인포맥스 · 2026-11-20 · 대신증권, 증권업 투자의견 하향</a></li>
+</ul>
 </article>
   </main>
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-20 16:48 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
+  <div class="wrap"><p>자동 생성 2026-11-20 16:50 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
 </footer>
 
 </body>
