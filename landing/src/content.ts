@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.2' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.3' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 
@@ -15,7 +15,23 @@ export const DISCLAIMER_FULL = [
 ]
 export const AI_PAID = "이 서비스는 AI 도구와 함께 쓰는 AI 트레이딩 시스템입니다. 설치·운영·리포트 작성에 Claude Code나 Codex 같은 AI 코딩 에이전트가 필요하고, 이를 쓰려면 해당 서비스의 유료 요금제(Claude Pro·Max 또는 ChatGPT Plus·Pro 같은 구독, 또는 API 사용료)가 필요합니다. 매매 판단에 쓰는 Jev·OpenAI API도 각 서비스의 이용 조건과 요금을 따릅니다."
 
+// Service intro video (YouTube, 권로드의 AI실험실 channel). Chapters match the video description.
+export const VIDEO = {
+  id: 'c4FZw6AYRAg',
+  url: 'https://youtu.be/c4FZw6AYRAg',
+  length: '3분 33초',
+  chapters: [
+    { t: 0, label: '왜 망설이면 지는가' },
+    { t: 36, label: '두 엔진 · AI는 의견, 규칙이 주문' },
+    { t: 84, label: 'Jev 실시간 판단과 진입 관문' },
+    { t: 109, label: '여러 겹의 안전장치' },
+    { t: 138, label: '장기투자 · 여운봉 저수지 매매법' },
+    { t: 165, label: '복기와 리포트' },
+  ],
+}
+
 export const NAV = [
+  { href: '#video', label: '소개 영상' },
   { href: '#why', label: '왜 AI인가' },
   { href: '#ai', label: 'AI로 운영' },
   { href: '#art', label: '투자 기법' },

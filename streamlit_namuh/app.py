@@ -25,7 +25,7 @@ import theme as THEME
 from guides import help_row, guide_dialog, LIVE_LIMITS, live_dot, values as guide_values
 import status_cards as sc
 import live_labels as LL
-from settings_view import LIVE_STOP_GUIDE, SIZING_HELP, TRANCHE_HELP, krw_words
+from settings_view import FOLLOW_HELP, LIVE_STOP_GUIDE, SIZING_HELP, TRANCHE_HELP, krw_words
 from nh_live_buy_control import buy_allowed
 from nh_paper_isolated import paper_pages
 from etf_universe import SYMBOLS as ETF_CODES, NAMES as ETF_NAMES
@@ -121,6 +121,49 @@ def display_quotes(read, codes, ttl):
         return dict(zip(codes, pool.map(one, codes)))
 
 
+def display_prices(read, codes, ttl):
+    """{code: (row with iem_cd, stck_prpr, stck_prdy_clpr, or None; 'kiwoom' | 'nh')} for display only (2026-11-20 NH call
+    plan P1, docs/nh-call-reduction-plan.md): one Kiwoom ka10095 call for up to 100 codes, kept `ttl` seconds for every
+    session of this dashboard; NH (display_quotes) only for the codes Kiwoom did not answer (no key, a failure, a code it
+    does not know). Never for orders or their checks."""
+    codes = list(dict.fromkeys(codes))
+    key = ('kiwoom-prices', tuple(codes))
+    hit = _read_cache().get(key)
+    got = hit[1] if hit and time.monotonic() - hit[0] < max(ttl, 1) else None
+    if got is None:
+        got = {}
+        try:
+            import kiwoom_data
+            for s in kiwoom_data.call('ka10095', {'stk_cd': '|'.join(codes[:100])}, 'atn_stk_infr', max_pages=1):
+                code = str(s.get('stk_cd') or '').split('_')[0]  # '090430_AL' (KRX+NXT) -> '090430'
+                price, base, opened, high, volume = (abs(kiwoom_data.num(s.get(k)) or 0)
+                                                     for k in ('cur_prc', 'base_pric', 'open_pric', 'high_pric', 'trde_qty'))
+                if code in codes and price > 0 and base > 0:
+                    got[code] = {'iem_cd': code, 'stck_prpr': price, 'stck_prdy_clpr': base, 'stck_oprc': opened,
+                                 'stck_hgpr': high, 'acml_vol': volume}
+        except Exception:  # noqa: BLE001 - no key or Kiwoom down: NH answers below
+            got = {}
+        _read_cache()[key] = (time.monotonic(), got)
+    out = {code: (row, 'kiwoom') for code, row in got.items()}
+    missing = [code for code in codes if code not in out]
+    if missing:
+        out.update({code: (quote, 'nh') for code, quote in display_quotes(read, missing, ttl).items()})
+    return out
+
+
+LISTING_FIELDS_S = 6 * 3600  # NH listing date and listed shares change at most once a day
+
+
+def listing_quotes(read, codes):
+    """{code: quote} for the new-listing panel (2026-11-20 NH call audit): prices, open, high and volume from one Kiwoom
+    call (display_prices, shared for 60 s); NH only for the listing date and listed shares the runner checks, kept
+    LISTING_FIELDS_S for every session. Each tab used to read every listing's NH quote once a minute."""
+    priced = display_prices(read, codes, 60)
+    static = display_quotes(read, codes, LISTING_FIELDS_S)
+    return {code: {**{k: v for k, v in (static.get(code) or {}).items() if k in ('stck_lstn_date', 'lstn_stcn_unit0', 'iem_nm')},
+                   **((priced.get(code) or (None, None))[0] or {})} for code in codes}
+
+
 def verify_account(read, account, account_types, cache_s=0):
     """cache_s only for screens that read balances (the account list is shared with resolve_accounts); never before an order."""
     data = call(read, 'list_accounts', {}, cache_s=cache_s)
@@ -163,6 +206,22 @@ def snapshot_due(kept, now):
     """True when a kept broker snapshot must be fetched again: none yet, or older than the refresh interval or the
     chart's freshness limit, whichever is shorter (with auto refresh off it was kept until the chart called it stale)."""
     return kept is None or (now - kept['time']).total_seconds() > min(refresh_s(), SNAPSHOT_MAX_AGE)
+
+
+SHARED_SNAPSHOT_S = 20  # seconds a broker snapshot one session fetched serves the others (2026-11-20 NH call audit)
+
+
+def shared_snapshot(kind, account, fetch, fresh=False):
+    """A display-only broker snapshot shared by every session of this dashboard: each open browser tab kept its own and
+    re-read the same balance and orders on its own timer (two tabs doubled the dashboard's NH calls). `fresh` (a refresh
+    button) always reads again. Never before an order."""
+    key = ('broker-snapshot', kind, account)
+    hit = _read_cache().get(key)
+    if not fresh and hit and time.monotonic() - hit[0] < SHARED_SNAPSHOT_S:
+        return hit[1]
+    got = fetch()
+    _read_cache()[key] = (time.monotonic(), got)
+    return got
 
 
 def shared_etf_broker_snapshot(read, paper, account, now):
@@ -598,8 +657,8 @@ def new_listing_panel(now):
         return
     cache = st.session_state.get('ipo_quotes')
     if not cache or (now - cache[0]).total_seconds() > 60:
-        quotes = display_quotes(st.session_state.get('_read_adapter'), [item['code'] for item in listings], QUOTE_CACHE_S)
-        cache = (now, {code: quote or {} for code, quote in quotes.items()})
+        read, codes = st.session_state.get('_read_adapter'), [item['code'] for item in listings]
+        cache = (now, listing_quotes(read, codes))
         st.session_state['ipo_quotes'] = cache
     rows = []
     for item in listings:
@@ -1511,28 +1570,49 @@ def follow_state(key):
     return latest_follow(get_runtime_root() / 'nhplug').get(key)
 
 
-def sizing_example_view(record, budget, rules, sizing, tranche):
-    """What this live account buys for one paper tranche under each sizing basis (with the values on screen)."""
+def sizing_example_view(record, budget, rules, sizing, tranche, limits=None):
+    """What this live account buys for one paper buy under each sizing basis, computed with the values on screen
+    (1주 가격 상한, 한 번 최대 금액, 회당 매수 한도, 금액 비율), plus a calculator for any price and paper quantity."""
     import nh_live_follow as F
+    shown = {**record, 'budget': budget, 'rules': {**rules, 'tranche_krw': tranche}, **({'limits': limits} if limits else {})}
     try:
-        ratio, rows = F.sizing_example({**record, 'budget': budget, 'rules': {**rules, 'tranche_krw': tranche}})
+        ratio, rows = F.sizing_example(shown)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         st.caption(f'예시를 계산하지 못했습니다({type(exc).__name__}).')
         return
-    mark = {'amount': ' ◀ 지금', 'share': ''}, {'share': ' ◀ 지금', 'amount': ''}
+    from accounts import live_limits
+    order_max = live_limits(record=shown)['order_max_krw']
     cap = int(budget.get('order_price_max_krw', 0))
-
-    def shares(n, price):
-        return f'{n}주' if n else f'안 삼 (1주 {krw_words(price)} > 상한)'
-    lines = ['| 1주 가격 | 모의가 산 것 | 금액 기준' + mark[0][sizing] + ' | 1주 기준' + mark[1][sizing] + ' |', '|---|---|---|---|']
+    follow = rules.get('follow_pct')
+    if sizing == 'amount':
+        st.metric('금액 비율 (모의가 쓴 돈의 몇 %를 따라 사나)', f'{float(ratio):.1%}',
+                  '직접 정함' if follow is not None else '자동 계산: 운용금 ÷ 모의가 하루에 쓰려는 돈', delta_color='off', help=FOLLOW_HELP)
+    else:
+        st.caption('1주씩: 금액 비율은 쓰지 않습니다. 모의가 몇 주를 사든 실계좌는 1주를 삽니다.')
+    st.markdown(f'**이 계좌는 이렇게 따라 삽니다** · 지금 화면의 한도로 계산했습니다: 1주 가격 상한 **{krw_words(cap)}**, '
+                f'회당 매수 한도 **{krw_words(order_max)}**' + (f', 한 번에 따라 살 최대 금액 **{krw_words(tranche)}**, 금액 비율 **{float(ratio):.1%}**'
+                                                              if sizing == 'amount' else '') + '.')
+    now = {'amount': '금액 비율이면', 'share': '1주씩이면'}
+    head = ' | '.join(now[k] + (' ◀ 지금 설정' if k == sizing else '') for k in ('amount', 'share'))
+    lines = [f'| 종목 1주 가격 | 모의가 산 수량 | {head} |', '|---|---|---|---|']
     for r in rows:
-        lines.append(f"| {krw_words(r['price'])} | {r['paper_qty']:,}주 ({krw_words(r['paper_krw'])}) | "
-                     f"{krw_words(r['live_krw'])}어치 → {shares(r['amount'], r['price'])} | {shares(r['share'], r['price'])} |")
-    st.markdown(f'**이 계좌 예시** · 모의가 분할 1회로 한 종목을 살 때 실계좌가 따라 사는 수량입니다. '
-                f'금액 기준 비율 **{float(ratio):.1%}**, 1주 가격 상한 {krw_words(cap)}, 체결 1건당 최대 {krw_words(tranche)}.')
+        cell = lambda n, why, price=r['price']: (f'{n}주 (약 {krw_words(n * price)}) · {why}' if n else f'안 삼 · {why}')  # noqa: E731
+        lines.append(f"| {krw_words(r['price'])} | {r['paper_qty']:,}주 ({krw_words(r['paper_krw'])}어치) | "
+                     f"{cell(r['amount'], r['amount_why'])} | {cell(r['share'], r['share_why'])} |")
     st.markdown('\n'.join(lines))
-    st.caption('차이는 싼 종목에서 납니다. 금액 기준은 모의와 금액 비중을 맞추려 여러 주를 사고, 1주 기준은 늘 1주라 싼 종목일수록 실계좌 비중이 작아집니다. '
-               '1주가 안 되는 몫도 모의가 보유하는 동안 최소 1주는 삽니다.')
+    with st.container(border=True):
+        st.markdown('**직접 계산해 보기** · 종목 1주 가격과 모의가 산 수량을 넣으면 이 설정으로 실계좌가 몇 주를 사는지 보여 줍니다.')
+        c1, c2 = st.columns(2)
+        price = int(c1.number_input('종목 1주 가격 (원)', 100, 10_000_000, 226_000, step=1_000, key=f"calc_price_{record.get('hash', '')[:8]}"))
+        qty = int(c2.number_input('모의가 산 수량 (주)', 1, 100_000, 2, key=f"calc_qty_{record.get('hash', '')[:8]}"))
+        quote = F.follow_quote(shown, price, qty)
+        n, why = quote[sizing]
+        st.markdown(f"→ 지금 설정({now[sizing][:-2]})이면 실계좌는 **{n}주**" + (f" (약 {krw_words(n * price)})" if n else '') + f" · {why}")
+        other = 'share' if sizing == 'amount' else 'amount'
+        st.caption(f"{now[other][:-2]}였다면 {quote[other][0]}주 · {quote[other][1]}")
+    st.caption('· 1주가 안 되는 몫이어도 1주는 삽니다(1주 가격 상한·한 번 최대 금액 안일 때).  \n'
+               '· 모의 수량만큼 사려면 금액 비율을 고르고 비율을 100%로 정하세요. 1주씩은 몇 주든 1주입니다.  \n'
+               '· 운용금과 하루 손실 한도는 주문할 때 가드가 한 번 더 확인합니다.')
 
 
 def follow_mode_view(key, prefix=''):
@@ -1912,7 +1992,7 @@ def live_account_view(read, key, record, number, configured, events):
         # with auto refresh off, a kept snapshot went stale after a sale (capital used still showed the sold position)
         if refresh or auto or snapshot_due(kept, datetime.now(KST)):
             try:
-                st.session_state[state] = live_broker_snapshot(read, number, datetime.now(KST))
+                st.session_state[state] = shared_snapshot('live', number, lambda: live_broker_snapshot(read, number, datetime.now(KST)), refresh)
             except Exception:
                 st.session_state[state] = None
         snapshot = st.session_state[state]
@@ -2096,7 +2176,7 @@ def live_assets(key, records, refresh=False):
         read = st.session_state.get('_read_adapter')
         number = live_number(read, records, key) if read is not None else None
         try:
-            account = live_broker_snapshot(read, number, datetime.now(KST))['account'] if number else None
+            account = shared_snapshot('live', number, lambda: live_broker_snapshot(read, number, datetime.now(KST)), refresh)['account'] if number else None
         except Exception:
             account = None
         total = None
@@ -2132,11 +2212,80 @@ def live_limit_inputs(key, record, budget, unit, prefix, slide, guide=None):
     return limits
 
 
+def match_live_panel(record, records, prefix=''):
+    """모의 운용금을 실계좌에 맞춤 (user 2026-11-20): switch, live account, 동시 보유 종목 수, the values before/after; saved at once."""
+    import accounts as A
+    record = A.load().get('paper-shared') or record  # what is saved now: the form below may have just saved a new budget
+    match = record.get('match_live') if isinstance(record.get('match_live'), dict) else None
+    manual = (match or {}).get('manual') or {}
+    lives = {k: r for k, r in records.items() if r.get('kind') == 'live' and r.get('engine') == 'jev' and not r.get('invalid')}
+    with st.container(border=True):
+        st.markdown('**실계좌 운용금에 맞춰 모의매매** ' + (':green[켜짐]' if match else ':gray[꺼짐]'),
+                    help='켜면 모의계좌의 분할 1회 매수 금액·종목당 최대·주문 보호 한도를 고른 실계좌 운용금과 한도로 계산해 저장합니다. '
+                         '모의가 실계좌와 같은 크기로 사고팔아, 실계좌(금액 비율 100%)가 모의 수량을 그대로 따라갈 수 있습니다. '
+                         '실계좌 운용금·한도를 바꾸면 모의 값도 다시 계산됩니다. 끄면 켜기 전 값으로 돌아갑니다.')
+        if not lives:
+            st.caption('맞출 Jev 트레이딩 실계좌가 없습니다.')
+            return
+        c1, c2 = st.columns(2)
+        keys = list(lives)
+        live_key = c1.selectbox('맞출 실계좌', keys, index=keys.index(match['account']) if match and match.get('account') in keys else 0,
+                                format_func=lambda k: lives[k].get('label', k), key=f'{prefix}match_account')
+        positions = int(c2.number_input('동시 보유 종목 수', A.MATCH_POSITIONS[0], A.MATCH_POSITIONS[1],
+                                        int((match or {}).get('positions') or 2), key=f'{prefix}match_positions',
+                                        help='운용금을 몇 종목에 나눌지입니다. 분할 1회 = 운용금 ÷ (3번 나눠 사기 × 종목 수), 종목당 최대 = 운용금 ÷ 종목 수.'))
+        after = A.match_values(record, lives[live_key], positions)
+        now_limits, new_limits = A.paper_limits(record), after['limits']
+        capital = int(lives[live_key]['budget']['capital_krw'])
+        mine = ' · 지금은 아래에서 직접 정한 값 사용'
+        rows = [('분할 1회 매수 금액', record['budget'].get('first_buy_krw'), after['budget']['first_buy_krw'],
+                 f'운용금 {krw_words(capital)} ÷ (3번 나눠 사기 × {positions}종목)' + (mine if 'first_buy_krw' in manual else '')),
+                ('종목당 최대', record['budget'].get('per_symbol_krw'), after['budget']['per_symbol_krw'],
+                 f'운용금 ÷ {positions}종목' + (mine if 'per_symbol_krw' in manual else '')),
+                ('보유 금액 한도', now_limits['held_max_krw'], new_limits['held_max_krw'], '실계좌 운용금'),
+                ('회당 매수 한도', now_limits['order_max_krw'], new_limits['order_max_krw'], '실계좌 회당 매수 한도'),
+                ('하루 손실 한도', now_limits['daily_loss_krw'], new_limits['daily_loss_krw'], '실계좌 하루 손실 한도')]
+        st.dataframe([{'항목': n, '지금 (저장값)': krw_words(a), '계산값': krw_words(b), '계산 (바꾸는 곳)': how} for n, a, b, how in rows] +
+                     [{'항목': '하루 새 종목', '지금 (저장값)': f"{now_limits['daily_new_symbols']}개", '계산값': f"{new_limits['daily_new_symbols']}개",
+                       '계산 (바꾸는 곳)': '실계좌 하루 새 종목'}],
+                     hide_index=True, width='stretch')
+        st.caption('분할 1회·종목당 최대는 모의계좌에만 있는 값이라 실계좌 설정에는 없습니다. 실계좌 운용금(실계좌 탭)이나 위 동시 보유 종목 수를 '
+                   '바꾸면 다시 계산됩니다. 실계좌는 모의가 산 수량을 금액 비율대로 따라 삽니다(실계좌 탭 → 금액·한도·미러 규칙).')
+        st.caption(f"하락장·횡보장에는 분할 1회가 절반 안팎으로 줄어 1주가 그보다 비싼 종목(약 {krw_words(after['budget']['first_buy_krw'] // 2)} 넘는 종목)은 "
+                   '첫 매수를 못 할 수 있습니다. 모의 하루 손실 한도도 실계좌와 같아져, 그만큼 잃으면 그날 새 매수를 멈춥니다.')
+        confirm = st.checkbox('모의계좌 매수 크기와 한도가 바뀌는 것을 확인했습니다', key=f'{prefix}match_confirm')
+        b1, b2 = st.columns(2)
+        if b1.button('맞춤 켜기·다시 계산' if not match else '다시 계산해 저장', type='primary', disabled=not confirm, key=f'{prefix}match_on'):
+            try:
+                A.set_match(live_key, positions, True)
+            except (OSError, ValueError) as exc:
+                st.error(f'저장하지 못했습니다: {exc}')
+            else:
+                st.toast('모의계좌를 실계좌 운용금에 맞췄습니다. 실행기는 다음 회차부터 새 값을 씁니다.', icon=':material/check_circle:')
+                st.rerun()
+        if match and b2.button('맞춤 끄기 (켜기 전 값으로)', key=f'{prefix}match_off'):
+            try:
+                A.set_match(live_key, on=False)
+            except (OSError, ValueError) as exc:
+                st.error(f'되돌리지 못했습니다: {exc}')
+            else:
+                st.toast('켜기 전 값으로 되돌렸습니다.', icon=':material/undo:')
+                st.rerun()
+        if match:
+            st.info('아래 분할 1회·종목당 최대는 직접 바꿔 "저장"하면 바로 적용되고, 실계좌 운용금이 바뀌어도 그 값을 유지합니다'
+                    '(회당 매수·보유 금액 한도는 넘지 않게 줄임). 계산값으로 돌아가려면 "다시 계산해 저장"을 누르세요. '
+                    '주문 보호 한도(회당 매수·보유 금액·하루 손실·하루 새 종목)는 늘 실계좌 값을 따릅니다.')
+
+
 @st.fragment  # a +/- click or typed amount reruns this form only, so its slider follows at once (11-18: the whole
 # page with balances, quotes and the sidebar reran on every click, the slider lagged and quick clicks bounced back)
 def account_form(key, record, records, prefix=''):
     """Main engine, auto switch and budget for one account (prefix keeps widget keys unique per screen)."""
     from accounts import BUDGET_LIMITS
+    fresh = st.session_state.get(f'{prefix}record_{key}')  # a fragment rerun keeps the page's old arguments: the saved record
+    record = fresh if isinstance(fresh, dict) else record
+    if (done := st.session_state.pop(f'{prefix}saved_{key}', None)):
+        st.success(done)
     live = record['kind'] == 'live'
     labels = ACCOUNT_LABELS
     def all_units():  # a new default unit applies to every money field of this account
@@ -2166,6 +2315,7 @@ def account_form(key, record, records, prefix=''):
         budget = {}
         caps = {}
         if not live:  # the first buy fits in one order and a symbol's total in the held limit: follow those limits as edited
+            match_live_panel(record, records, prefix)
             from accounts import paper_limits
             saved_caps = paper_limits(record)
             caps = {'first_buy_krw': st.session_state.get(f'{prefix}{key}_order_max_krw_krw', saved_caps['order_max_krw']),
@@ -2250,17 +2400,27 @@ def account_form(key, record, records, prefix=''):
                     '설정 변경만으로 기존 보유를 더 사거나 팔지 않습니다(2026-11-17). 기존 보유는 모의가 팔 때 비율대로 줄어듭니다.')
             s1, s2 = st.columns([3, 2])
             sizing = s1.radio('매수 크기 기준', ['share', 'amount'], index=['share', 'amount'].index(current['sizing']), horizontal=True,
-                              format_func=lambda v: {'share': '1주 기준 (모의 분할 1회 = 1주)', 'amount': '금액 기준 (모의 체결 금액의 운용금 비율)'}[v],
+                              format_func=lambda v: {'share': '1주씩 (모의가 몇 주를 사든 1주)', 'amount': '금액 비율 (모의가 쓴 돈의 정한 %만큼)'}[v],
                               key=f'{prefix}{key}_sizing', help=SIZING_HELP)
+            follow = current.get('follow_pct')
             if sizing == 'amount':
-                tranche = money_input(s2, '체결 1건당 최대 금액 (금액 기준)', *map(int, LIVE_RULE_LIMITS['tranche_krw']), int(current['tranche_krw']),
+                tranche = money_input(s2, '한 번에 따라 살 최대 금액 (금액 비율일 때)', *map(int, LIVE_RULE_LIMITS['tranche_krw']), int(current['tranche_krw']),
                                       f'{prefix}{key}_tranche', unit, TRANCHE_HELP, slide)
+                f1, f2 = st.columns([2, 3])
+                mode = f1.radio('금액 비율 정하는 법', ['auto', 'manual'], index=0 if follow is None else 1, horizontal=True,
+                                format_func=lambda v: {'auto': '자동 (운용금에 맞춰 계산)', 'manual': '직접 정하기 (%)'}[v], key=f'{prefix}{key}_follow_mode',
+                                help=FOLLOW_HELP)
+                if mode == 'manual':
+                    follow = float(num_input(f2, '모의가 쓴 돈의 몇 %를 살까 (100% = 모의 수량 그대로)', 1, 100, int(round(follow or 10)), f'{prefix}{key}_follow_pct',
+                                             slider=slide, help=FOLLOW_HELP))
+                else:
+                    follow = None
             else:  # not used by the share basis: shown disabled, the saved value kept for 금액 기준
                 tranche = int(current['tranche_krw'])
-                s2.number_input('체결 1건당 최대 금액 (금액 기준) (원)', value=tranche, disabled=True, key=f'{prefix}{key}_tranche_off',
+                s2.number_input('한 번에 따라 살 최대 금액 (금액 비율일 때) (원)', value=tranche, disabled=True, key=f'{prefix}{key}_tranche_off',
                                 help='1주 기준에서는 쓰지 않습니다. 모의가 몇 주를 사든 실계좌는 1주를 삽니다. ' + TRANCHE_HELP)
-                s2.caption(f'1주 기준: 쓰지 않음 (저장값 {krw_words(tranche)} 유지)')
-            sizing_example_view(record, budget, current, sizing, int(tranche))
+                s2.caption(f'1주씩일 때는 쓰지 않습니다 (저장값 {krw_words(tranche)} 유지)')
+            sizing_example_view(record, budget, {**current, 'follow_pct': follow}, sizing, int(tranche))  # limits below: saved values
             limits = live_limit_inputs(key, record, budget, unit, prefix, slide)
             r1, r2, r3 = st.columns(3)
             if sizing == 'amount':  # not used by amount sizing (2026-11-17): shown disabled, the saved value kept for 1주 기준
@@ -2268,7 +2428,7 @@ def account_form(key, record, records, prefix=''):
                 r1.number_input('1회 매수 최대 수량 (주)', value=max_qty, disabled=True, key=f'{prefix}{key}_maxqty_off',
                                 help='금액 기준에서는 쓰지 않습니다(주수 제한 없음). 회당 매수 한도·운용금·하루 손실이 매수를 제한합니다. '
                                      '1주 기준으로 바꾸면 이 값을 다시 정할 수 있습니다.')
-                r1.caption('금액 기준: 주수 제한 없음')
+                r1.caption('금액 비율일 때: 주수 제한 없음')
             else:
                 max_qty = num_input(r1, '1회 매수 최대 수량 (주)', *map(int, LIVE_RULE_LIMITS['max_order_qty']), int(current['max_order_qty']),
                                     f'{prefix}{key}_maxqty', slider=slide,
@@ -2289,14 +2449,14 @@ def account_form(key, record, records, prefix=''):
                                  help='추격 한도를 넘었어도 ① 엔진이 최근 15분 안에 그 종목을 다시 고르고(Jev 진입 통과 또는 진입 신뢰도 이상 후보) '
                                       '② 현재가가 모의 계획의 1차 익절가보다 낮으면 삽니다. 1차 익절가를 넘었다면 모의도 '
                                       '팔기 시작하는 구간이라 사지 않습니다.')
-            rules = {**current, 'stop_loss_pct': stop, 'follow_paper': True, 'sizing': sizing, 'tranche_krw': int(tranche),
+            rules = {**current, 'stop_loss_pct': stop, 'follow_paper': True, 'sizing': sizing, 'tranche_krw': int(tranche), 'follow_pct': follow,
                      'max_order_qty': int(max_qty), 'chase_pct': float(chase), 'evidence_chase': evidence, 'max_adds': int(adds)}
         if st.button('저장', type='primary', key=f'{prefix}save_{key}'):
             try:
                 from accounts import save_one  # this account only, on top of what is on disk now (never a stale copy)
-                save_one(key, {'engine': engine, 'auto': auto, 'budget': budget, **({'rules': rules} if rules else {}),
+                st.session_state[f'{prefix}record_{key}'] = save_one(key, {'engine': engine, 'auto': auto, 'budget': budget, **({'rules': rules} if rules else {}),
                                **({'limits': {k: int(v) for k, v in limits.items()}} if limits else {})})
-                st.success('저장했습니다. 모의계좌는 실행기의 다음 주기(약 1분)부터 적용됩니다.')
+                st.session_state[f'{prefix}saved_{key}'] = '저장했습니다. 모의계좌는 실행기의 다음 주기(약 1분)부터 적용됩니다.'
             except (OSError, ValueError) as exc:
                 text = str(exc)
                 for raw, word in {**ACCOUNT_LABELS, 'order_max_krw': '회당 매수 한도', 'daily_buy_krw': '하루 매수 한도',
@@ -2304,6 +2464,11 @@ def account_form(key, record, records, prefix=''):
                                   'tranche_krw': '분할 1회 금액'}.items():
                     text = text.replace(raw, word.replace('(원)', '').strip())
                 st.error(f'저장하지 못했습니다: {text}')
+            else:
+                try:  # redraw the form (and the match table above it) with the saved values
+                    st.rerun(scope='fragment')
+                except st.errors.StreamlitAPIException:  # drawn outside a fragment run (a nested call, a test page)
+                    st.rerun()
     saved = {ACCOUNT_LABELS.get(k, k).replace('(원)', '').strip(): v for k, v in record['budget'].items()}
     if record['kind'] != 'live':
         from accounts import paper_limits
@@ -3756,7 +3921,86 @@ def entry_reason_label(reason):
             'one_share_over_buy': '1주 값이 한 번 매수 금액보다 큼(강도 후보 건너뜀)',
             'losing_streak_cooldown': '연속 손실 쉬기(3번 연속 손실 후 30분)',
             'direction_not_confirmed': '지수 방향이 맞지 않음', 'market_unconfirmed': '시장 요약 없음(지수 확인 불가)',
-            'downtrend_no_averaging_down': '약세장 물타기 금지'}.get(reason, reason or '—')
+            'downtrend_no_averaging_down': '약세장 물타기 금지',
+            # 11-20 매수 차단 사유 탭: strength candidates and the inverse gate
+            'strength_change_out_of_range': '오늘 등락률이 강도 범위 밖', 'jev_below_min': 'Jev 관심도 기준 미만',
+            'not_in_movers': '관심종목 시세 목록에 없음', 'held': '이미 보유 중', 'bars_missing': '분봉 자료 없음',
+            'pick_cooldown': '주문 거절 뒤 쉬는 중', 'picked': '강도 후보로 고름', 'no_strength_candidate': '강도 후보 없음',
+            'below_open': '시가 아래', 'below_base': '기준가 아래', 'off_high': '고가에서 멀어짐', 'no_new_listing': '신규주 없음',
+            'ipo_daily_limit': '오늘 신규주 매수 한도', 'inverse_low_confidence': '인버스: Jev 신뢰도 부족',
+            'inverse_too_late': '인버스: 지수가 이미 많이 빠짐', 'inverse_chase': '인버스: 추격 금지(VWAP·범위 위)',
+            'inverse_index_not_falling': '인버스: 지수 하락 부족', 'inverse_index_not_falling_now': '인버스: 최근 30분 하락 아님',
+            'inverse_index_rebounding': '인버스: 지수 반등 중', 'inverse_regime_not_falling': '인버스: 하락장 아님',
+            'inverse_flows_not_selling': '인버스: 프로그램 순매도 아님', 'inverse_us_not_falling': '인버스: 전날 나스닥 하락 아님',
+            'inverse_market_unknown': '인버스: 시장 자료 없음', 'careful_reentry_chase': '신중 재진입: 추격 금지',
+            'careful_reentry_weak': '신중 재진입: VWAP 아래'}.get(reason, reason or '—')
+
+
+def block_rows(events, day):
+    """(latest, per_stock) of why buys waited on `day` (user 2026-11-20 '대시보드에서 차단 사유도 보이게'): the latest cycle's
+    chain (Jev's pick and its refusal, each ranked strength stock's reason, the new-listing reason) and, per stock, how often
+    and why it was passed over today (v2_entry_gate strength_reasons; Jev-picked symbols with their own refusal)."""
+    cycles, per = {}, {}
+    for event in events:
+        if not isinstance(event, dict) or event.get('event') != 'v2_entry_gate' or event.get('permitted') is not False:
+            continue
+        stamp = event_time(event.get('time'))
+        if stamp is None or stamp.date() != day:
+            continue
+        cycle = cycles.setdefault(event.get('cycle_id') or event.get('time'), {'time': stamp, 'steps': []})
+        cycle['time'] = max(cycle['time'], stamp)
+        cycle['steps'].append(event)
+        found = dict(event.get('strength_reasons') or {})
+        if event.get('choice') not in (None, 'WAIT'):
+            found.setdefault(event['choice'], event.get('reason'))
+        for code, why in found.items():
+            if why == 'picked':
+                continue
+            row = per.setdefault(code, {'count': 0, 'reasons': {}, 'last': None, 'last_why': None})
+            row['count'] += 1
+            row['reasons'][why] = row['reasons'].get(why, 0) + 1
+            if row['last'] is None or stamp >= row['last']:
+                row['last'], row['last_why'] = stamp, why
+    latest = max(cycles.values(), key=lambda c: c['time']) if cycles else None
+    stocks = sorted(({'code': code, **row, 'top': max(row['reasons'].items(), key=lambda kv: kv[1])} for code, row in per.items()),
+                    key=lambda r: r['last'], reverse=True)
+    return latest, stocks
+
+
+def step_line(step, steps, names):
+    """One refusal of a cycle in words. A Jev wait right after a refused Jev pick in the same cycle is the hand-off to the
+    strength and new-listing paths (11-20: an inverse the gate refused read as 'Jev 대기 의견')."""
+    pick = step.get('choice')
+    if pick not in (None, 'WAIT'):
+        return f"**Jev 선택 {names.get(pick, pick)}** → {entry_reason_label(step.get('reason'))}"
+    before = [s for s in steps[:steps.index(step)] if s.get('choice') not in (None, 'WAIT')]
+    if step.get('reason') == 'jev_wait' and before:
+        return f"**{names.get(before[-1]['choice'], before[-1]['choice'])} 막힘** → 강도·신규주 경로로 넘김"
+    return f"**Jev 대기** → {entry_reason_label(step.get('reason'))}"
+
+
+def block_reason_panel(events, now):
+    """The 매수 차단 사유 tab of the paper desk: the last cycle's chain, then today's stocks and why each was not bought."""
+    latest, stocks = block_rows(events, now.date())
+    if latest is None:
+        st.caption('오늘 매수를 보류한 회차 기록이 없습니다.')
+        return
+    names = {**stock_names(), **ETF_NAMES}  # Jev picks ETFs by key (INV), the strength path by code
+    st.markdown(f"##### 최근 회차 · {latest['time']:%H:%M:%S}")
+    for step in latest['steps']:
+        st.markdown('- ' + step_line(step, latest['steps'], names))
+        if step.get('strength_reasons'):
+            st.markdown('  - 강도 후보: ' + ' · '.join(f'{names.get(c, c)} {entry_reason_label(w)}' for c, w in step['strength_reasons'].items()))
+        elif step.get('strength_reason'):
+            st.markdown(f"  - 강도 후보: {entry_reason_label(step['strength_reason'])}")
+        if step.get('ipo_reason'):
+            st.markdown(f"  - 신규주: {entry_reason_label(step['ipo_reason'])}")
+    st.markdown('##### 오늘 종목별 차단 사유')
+    st.dataframe(pd.DataFrame([{'종목': names.get(r['code'], r['code']), '코드': r['code'], '마지막': f"{r['last']:%H:%M}",
+                                '마지막 사유': entry_reason_label(r['last_why']), '오늘 횟수': r['count'],
+                                '가장 많은 사유': f"{entry_reason_label(r['top'][0])} ({r['top'][1]})"} for r in stocks]),
+                 hide_index=True, width='stretch')
+    st.caption('강도 후보는 Jev 관심 상위 종목마다 사지 않은 이유를 13:36부터 남깁니다. 인버스·지수 ETF는 Jev가 고른 회차의 사유입니다. 규칙대로 막힌 것이며 주문 오류가 아닙니다.')
 
 
 def risk_exit_warning(events):
@@ -3829,7 +4073,41 @@ def bars_from_period(rows, timeframe):
     return [bars[k] for k in sorted(bars)]
 
 
+KIWOOM_MINUTES = {'1분': 1, '5분': 5, '15분': 15}
+
+
+def kiwoom_minute_bars(symbol, timeframe):
+    """Chart bars for 1/5/15-minute charts from one Kiwoom ka10080 page (900 rows, KRX regular session), for display only
+    (user 2026-11-20 '차트만 바꿔줘'; the runner's decision bars stay NH). Kiwoom stamps a bar by its first minute and
+    NH by its last, so bars move `scope` minutes later to line up with the runner's records and fill markers."""
+    import kiwoom_data
+    scope = KIWOOM_MINUTES[timeframe]
+    key = ('kiwoom-bars', symbol, scope)
+    hit = _read_cache().get(key)
+    if hit and time.monotonic() - hit[0] < CHART_CACHE_S:
+        return hit[1]
+    bars = []
+    for r in kiwoom_data.call('ka10080', {'stk_cd': symbol, 'tic_scope': str(scope), 'upd_stkpc_tp': '0'},
+                              'stk_min_pole_chart_qry', max_pages=1):
+        t = str(r.get('cntr_tm') or '')
+        o, h, l, c = (abs(kiwoom_data.num(r.get(f)) or 0) for f in ('open_pric', 'high_pric', 'low_pric', 'cur_prc'))
+        if len(t) != 14 or not '090000' <= t[8:] < '153100' or min(o, h, l, c) <= 0 or not (l <= min(o, c) and max(o, c) <= h):
+            continue  # NXT pre/after-market rows come in the same answer
+        at = datetime.strptime(t, '%Y%m%d%H%M%S').replace(tzinfo=KST) + timedelta(minutes=scope)
+        bars.append({'time': int(at.timestamp()), 'open': o, 'high': h, 'low': l, 'close': c,
+                     'volume': int(abs(kiwoom_data.num(r.get('trde_qty')) or 0))})
+    bars = sorted({b['time']: b for b in bars}.values(), key=lambda b: b['time'])
+    _read_cache()[key] = (time.monotonic(), bars)
+    return bars
+
+
 def period_bars(read, symbol, timeframe):
+    if timeframe in KIWOOM_MINUTES:
+        try:
+            if bars := kiwoom_minute_bars(symbol, timeframe):
+                return bars
+        except Exception:  # noqa: BLE001 - no key or Kiwoom down: NH as before
+            pass
     gubun, xtick, count, _ = TIMEFRAMES[timeframe]
     fields = {'market_cd': 'KRX', 'iem_cd': symbol, 'gubun': gubun, 'array_cnt': str(count), 'view_main_yn': 'Y'}
     if xtick:
@@ -5087,10 +5365,10 @@ def main():
                        **{f'{name} ·{source}': code for code, name, source in account_watchlist(picked)}}
             rows, failed = [], []
             # reused for one refresh interval (other tabs and sessions rerun in between); the button asks again
-            quotes = display_quotes(read, list(dict.fromkeys(targets.values())), 1 if fresh else refresh_s())
+            quotes = display_prices(read, list(dict.fromkeys(targets.values())), 1 if fresh else refresh_s())
             for label, code in targets.items():
                 try:
-                    row = quotes[code]
+                    row = quotes[code][0]
                     if row is None:
                         raise ValueError('quote failed')
                     price, previous = row.get('stck_prpr'), row.get('stck_prdy_clpr')
@@ -5104,7 +5382,8 @@ def main():
             tone = lambda v: 'color:#ef4444' if str(v).startswith('▲') else 'color:#3b82f6' if str(v).startswith('▼') else ''
             if rows:
                 st.dataframe(pd.DataFrame(rows).style.map(tone, subset=['등락']), hide_index=True, height=38 + 35 * len(rows))
-            st.caption(f"조회 {datetime.now(KST):%H:%M:%S} · NH 나무 PLUG · 전일 종가 대비 · {refresh_s()}초 REST 조회(최대 {refresh_s()}초 묵은 값)이며 체결 스트림이 아닙니다")
+            sources = ' · '.join(dict.fromkeys({'kiwoom': '키움', 'nh': 'NH 나무 PLUG'}[s] for _, s in quotes.values())) or 'NH 나무 PLUG'
+            st.caption(f"조회 {datetime.now(KST):%H:%M:%S} · {sources} · 전일 종가 대비 · {refresh_s()}초 REST 조회(최대 {refresh_s()}초 묵은 값)이며 체결 스트림이 아닙니다")
             if failed:
                 st.warning('시세를 불러오지 못한 종목: ' + ', '.join(failed) + '. 이전 값을 현재 시세로 사용하지 마세요.')
         quotes_slot = st.container()  # filled at the end of main(): the tabs no longer wait for a dozen quote calls
@@ -5226,7 +5505,7 @@ def main():
                     kept = st.session_state.get('etf_broker_snapshot')
                     if refresh or etf_auto or (snapshot_due(kept, datetime.now(KST)) and not (kept is None and st.session_state.get('etf_broker_error'))):
                         try:
-                            st.session_state.etf_broker_snapshot = shared_etf_broker_snapshot(read, paper, account, datetime.now(KST))
+                            st.session_state.etf_broker_snapshot = shared_snapshot('paper', account, lambda: shared_etf_broker_snapshot(read, paper, account, datetime.now(KST)), refresh)
                             st.session_state.etf_broker_error = False
                         except Exception:
                             st.session_state.pop('etf_broker_snapshot', None)
@@ -5275,8 +5554,12 @@ def main():
                         rules_card(*strategy_settings())
                     latest_views = comparison_data(recent)
                     paper_trade_chart(read, snapshot, refresh, etf_auto, latest_views[-1].get('jev') if latest_views else None)
-                    movers_tab, reasons, history, broker_tab, sell_tab, settings_tab = st.tabs(
-                        ['시장·관심종목', 'Jev 판단 근거', '판단·주문 기록', '증권사 잔고·주문 원본', '즉시 매도', '전략·AI 설정'], key='etf_desk_tab', on_change='rerun')  # only the open tab runs
+                    movers_tab, blocks_tab, reasons, history, broker_tab, sell_tab, settings_tab = st.tabs(
+                        ['시장·관심종목', '매수 차단 사유', 'Jev 판단 근거', '판단·주문 기록', '증권사 잔고·주문 원본', '즉시 매도', '전략·AI 설정'],
+                        key='etf_desk_tab', on_change='rerun')  # only the open tab runs
+                    if blocks_tab.open:
+                        with blocks_tab:
+                            block_reason_panel(recent, datetime.now(KST))
                     if sell_tab.open:
                         with sell_tab:
                             paper_quick_sell('paper_quick')

@@ -45,7 +45,9 @@ LIVE_SIZING = ('share', 'amount')
 DEFAULT_LIVE_RULES = {'take_profit_pct': 2.0, 'stop_loss_pct': 2.0, 'sell_confidence': 0.7, 'flatten': True, 'regime_exits': True,
                       'overnight': True, 'follow_paper': True,
                       'sizing': 'share', 'tranche_krw': 100_000, 'max_order_qty': 100, 'chase_pct': 1.0, 'evidence_chase': True,
-                      'max_adds': 100}
+                      'max_adds': 100, 'follow_pct': None}
+# 금액 기준 모의 대비 비율 (user 2026-11-20): None = 자동 (운용금 ÷ 모의 하루 계획), else 1~100% of the paper fill's KRW
+FOLLOW_PCT = (1.0, 100.0)
 # Order-guard limits of the shared paper account, set from the dashboard (user request 2026-11-13). The order guard
 # (agent/src/tools/nhplug_order_guard.py PAPER_LIMITS) and the loss stop read the same keys with the same bounds and fall
 # back to these defaults on any invalid value. held_max_krw caps the cost of open positions (user decision 2026-11-13).
@@ -121,6 +123,9 @@ def problems(record):
         for switch in ('regime_exits', 'overnight', 'follow_paper', 'evidence_chase'):  # rules saved before a switch existed default to ON
             if type(rules.get(switch, True)) is not bool:
                 issues.append(f'{switch} 값이 올바르지 않습니다.')
+        follow = rules.get('follow_pct')
+        if follow is not None and (type(follow) not in (int, float) or not FOLLOW_PCT[0] <= follow <= FOLLOW_PCT[1]):
+            issues.append(f'모의 대비 비율은 {FOLLOW_PCT[0]:g}~{FOLLOW_PCT[1]:g}% 또는 자동이어야 합니다.')
         if rules.get('sizing') not in LIVE_SIZING:
             issues.append('매수 크기 기준은 share 또는 amount여야 합니다.')
         if type(rules.get('tranche_krw')) is int and record.get('budget', {}).get('capital_krw') and rules['tranche_krw'] > record['budget']['capital_krw']:
@@ -209,12 +214,86 @@ def save_one(key, changes, path=FILE, required=False):
     accounts = stored(path)
     base = accounts.get(key) or (load(path).get(key) or {})
     record = {**{k: v for k, v in base.items() if k not in ('invalid', 'mode')}, **changes}
+    match = record.get('match_live') if isinstance(record.get('match_live'), dict) else None
+    if key == 'paper-shared' and match and 'budget' in changes and 'match_live' not in changes:
+        live = accounts.get(match.get('account'))
+        auto = match_values(record, live, match['positions'])['budget'] if live and not problems(live) else {}
+        manual = {k: record['budget'][k] for k in ('first_buy_krw', 'per_symbol_krw') if record['budget'].get(k) != auto.get(k)}
+        record['match_live'] = {**match, 'manual': manual or None}  # 직접 정한 값 (user 2026-11-20): kept when the live side changes
     issues = problems(record)
     if issues:
         raise ValueError(f'{record.get("label", key)}: ' + ' '.join(issues))
     accounts[key] = record
     _write(accounts, path, required)
+    if key != 'paper-shared' and ((accounts.get('paper-shared') or {}).get('match_live') or {}).get('account') == key:
+        resync_match(path)  # the paper follows this live account's capital and limits
     return record
+
+
+# 모의 운용금을 실계좌에 맞춤 (user 2026-11-20 '분할 금액까지 맞추기'): paper-shared `match_live` =
+# {'account': live key, 'positions': 동시 보유 종목 수, 'before': {'budget', 'limits'} saved when switched on}. While on, the
+# paper's budget and order-guard limits are written from that live account, so the runner, the order guard and the loss
+# stop (which read accounts.json as before) trade the paper at the live account's scale.
+MATCH_POSITIONS = (1, 5)
+MATCH_SPLITS = 3  # nh_paper_isolated.SPLIT_TRANCHES (first buy + two adds)
+
+
+def match_values(paper, live, positions):
+    """{'budget', 'limits'} of the paper account sized to `live`: 분할 1회 = 운용금 ÷ (3 × 동시 보유 종목), 종목당 =
+    운용금 ÷ 동시 보유 종목, 보유 금액 한도 = 운용금, 회당 매수·하루 새 종목·하루 손실 = the live account's (each within the
+    paper bounds)."""
+    capital = int((live.get('budget') or {})['capital_krw'])
+    live_limits_ = live_limits(record=live)
+    clamp = lambda v, bounds: max(bounds[0], min(bounds[1], int(v)))  # noqa: E731
+    first = clamp(capital // (MATCH_SPLITS * positions), BUDGET_LIMITS['paper']['first_buy_krw'])
+    limits = {**paper_limits(paper),
+              'order_max_krw': clamp(min(live_limits_['order_max_krw'], capital), PAPER_LIMITS['order_max_krw']),
+              'held_max_krw': clamp(capital, PAPER_LIMITS['held_max_krw']),
+              'daily_new_symbols': clamp(live_limits_['daily_new_symbols'], PAPER_LIMITS['daily_new_symbols']),
+              'daily_loss_krw': clamp((live.get('budget') or {}).get('daily_loss_krw') or 20_000, PAPER_LIMITS['daily_loss_krw'])}
+    first = min(first, limits['order_max_krw'])
+    per_symbol = max(first, min(clamp(capital // positions, BUDGET_LIMITS['paper']['per_symbol_krw']), limits['held_max_krw']))
+    return {'budget': {**(paper.get('budget') or {}), 'first_buy_krw': first, 'per_symbol_krw': per_symbol}, 'limits': limits}
+
+
+def set_match(account, positions=2, on=True, path=FILE):
+    """Switch the paper account's match to a live account on (values written now, the previous ones kept) or off
+    (the previous budget and limits restored). Returns the paper record written."""
+    accounts = stored(path)
+    paper = accounts.get('paper-shared') or load(path)['paper-shared']
+    current = paper.get('match_live') if isinstance(paper.get('match_live'), dict) else None
+    if not on:
+        if not current:
+            return paper
+        before = current.get('before') or {}
+        return save_one('paper-shared', {'budget': before.get('budget') or paper['budget'], 'limits': before.get('limits') or paper.get('limits'),
+                                         'match_live': None}, path)
+    live = accounts.get(account)
+    if not live or live.get('kind') != 'live' or problems(live):
+        raise ValueError('맞출 실계좌를 찾지 못했습니다.')
+    if type(positions) is not int or not MATCH_POSITIONS[0] <= positions <= MATCH_POSITIONS[1]:
+        raise ValueError(f'동시 보유 종목 수는 {MATCH_POSITIONS[0]}~{MATCH_POSITIONS[1]}개입니다.')
+    before = current['before'] if current else {'budget': paper.get('budget'), 'limits': paper.get('limits')}
+    return save_one('paper-shared', {**match_values(paper, live, positions),
+                                     'match_live': {'account': account, 'positions': positions, 'before': before}}, path)
+
+
+def resync_match(path=FILE):
+    """Rewrite the matched paper values after the live account's capital or limits changed; None when off or unchanged."""
+    accounts = stored(path)
+    paper = accounts.get('paper-shared') or {}
+    match = paper.get('match_live') if isinstance(paper.get('match_live'), dict) else None
+    live = accounts.get((match or {}).get('account'))
+    if not match or not live or problems(live):
+        return None
+    values = match_values(paper, live, match['positions'])
+    manual = match.get('manual') if isinstance(match.get('manual'), dict) else {}
+    values['budget'] = {**values['budget'], **{k: v for k, v in manual.items() if k in ('first_buy_krw', 'per_symbol_krw')}}
+    values['budget']['first_buy_krw'] = min(values['budget']['first_buy_krw'], values['limits']['order_max_krw'])
+    values['budget']['per_symbol_krw'] = max(values['budget']['first_buy_krw'], min(values['budget']['per_symbol_krw'], values['limits']['held_max_krw']))
+    if values['budget'] == paper.get('budget') and values['limits'] == paper.get('limits'):
+        return None
+    return save_one('paper-shared', values, path)
 
 
 def _write(accounts, path, required=False):

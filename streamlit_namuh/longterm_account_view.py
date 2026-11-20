@@ -288,7 +288,13 @@ def module_toggles(prefix, saved, regime, disabled=False):
 
 
 def nh_price(code):
-    """The current price of `code` from the dashboard's read-only NH adapter, or None (no adapter, a failed read)."""
+    """The current price of `code` from the dashboard's read-only NH adapter, or None (no adapter, a failed read). Kept
+    60 s for every session (2026-11-20 NH call audit: every rerun of the account desk re-read the same codes)."""
+    return _nh_price(code) if '_read_adapter' in st.session_state else None
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _nh_price(code):
     try:
         response = st.session_state['_read_adapter'].call_tool('get_stock_price', {'stock_code': code})
         row = ((response or {}).get('data') or {}).get('Output_0') or {}
@@ -442,7 +448,9 @@ def yeo_panel(key, prefix, root, saved, capital=None):
     dca = longterm_dca.clean(L.load_settings(root)['dca'].get(key))
     st.info('**위 금액은 지금 저수지로 계산한 예시입니다.** 실제 단계 금액은 그 하락 주기의 1단계가 오는 날의 저수지(현금 + 저수지 ETF)로 정해지고, '
             '2·3단계도 그 1단계 금액을 기준으로 나눕니다. 그 전에 적립식으로 돈이 들어오거나 잔고가 바뀌면 금액도 달라집니다.'
-            + (f" 지금 이 장부는 적립식이 켜져 있어 {longterm_dca.FREQUENCIES[dca['frequency']]} "
+            + (" 지금 이 장부는 적립식이 '입금할 때'로 켜져 있어, 운용금을 올린 만큼만 적립식이 나눠 삽니다(그 몫은 저수지에 넣지 않음)."
+               if dca['on'] and dca['frequency'] == 'deposit' else
+               f" 지금 이 장부는 적립식이 켜져 있어 {longterm_dca.FREQUENCIES[dca['frequency']]} "
                f"{'종목별 ' + format(dca['shares_n'], ',') + '주' if dca['size'] == 'shares' else format(dca['amount_krw'], ',') + '원'}이 들어옵니다"
                "(적립식이 산 몫과 대기 자금은 저수지에 넣지 않음)." if dca['on'] else ''), icon=':material/info:')
     return cfg

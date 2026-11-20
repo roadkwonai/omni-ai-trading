@@ -623,3 +623,96 @@ def test_the_order_window_follows_the_exchange_clock_on_a_late_open_day():
     at = datetime(2026, 11, 19, 9, 45, tzinfo=longterm_live.KST)
     out = longterm_live.cycle(None, 'x', None, {}, 'live-2', now=at, execute_orders=False, may_cancel=False, root='/nonexistent')
     assert out == {'action': 'WAIT', 'reason': 'before 10:40'}
+
+
+# 입금할 때만 사는 적립식 (user approval 2026-11-20, docs/longterm-dca-deposit-plan.md)
+DEPOSIT = {'on': True, 'style': 'master', 'profile': 'dalio', 'when_by': 'master', 'size_by': 'master', 'buy_every': 'day',
+           'frequency': 'deposit', 'time': '10:00', 'spread_weeks': 1}  # 300,000 over 5 buys: 60,000 a buy
+DAY2 = '2026-11-19'
+at2 = lambda h, m: datetime(2026, 11, 19, h, m, tzinfo=KST)
+
+
+def raised(capital):
+    return {'budget': {**RECORD['budget'], 'capital_krw': capital}}
+
+
+def test_a_deposit_account_buys_nothing_until_its_capital_is_raised(tmp_path):
+    broker = Broker(cash=800_000)
+    with patch.object(LL, 'capital_logged', return_value=True):
+        send_all(tmp_path, broker, start=(9, 40), dca=DEPOSIT)
+        run(tmp_path, at(10, 0), broker, execute_orders=True, dca=DEPOSIT)
+    dca = LL.load_state(tmp_path, 'live-2')['dca']
+    assert dca['capital_seen'] == CAPITAL and not dca.get('waiting_krw')
+    assert not [o for o in LL.load_state(tmp_path, 'live-2')['orders'] if 'dca' in o['source'].split('+')]
+
+
+def test_a_raised_capital_is_kept_out_of_the_days_plan_and_bought_by_the_dca(tmp_path):
+    broker = Broker(cash=800_000)
+    with patch.object(LL, 'capital_logged', return_value=True):
+        send_all(tmp_path, broker, start=(9, 40), dca=DEPOSIT)
+        run(tmp_path, at(10, 0), broker, execute_orders=True, dca=DEPOSIT)
+        plan = {**PLAN, 'day': DAY2}
+        first = run(tmp_path, at2(9, 40), broker, execute_orders=True, dca=DEPOSIT, plan=plan, record=raised(800_000))
+        assert first['action'] == 'PLAN' and any('입금 반영' in n for n in first.get('deposit', []))
+        dca = LL.load_state(tmp_path, 'live-2')['dca']
+        assert dca['waiting_krw'] == 300_000 and dca['capital_seen'] == 800_000
+        assert first['nav'] <= 800_000 - 300_000  # the deposit is the 적립식's, not the strategy's
+        for m in range(41, 60):  # the day's engine orders out before the 적립식's time
+            run(tmp_path, at2(9, m), broker, execute_orders=True, dca=DEPOSIT, plan=plan, record=raised(800_000))
+        result = run(tmp_path, at2(10, 0), broker, execute_orders=True, dca=DEPOSIT, plan=plan, record=raised(800_000))
+    bought = [o for o in result['orders'] if 'dca' in o['source'].split('+')]
+    assert result['action'] == 'DCA' and bought and sum(o['qty'] * o['price'] for o in bought) <= 60_000
+
+
+def test_a_capital_change_without_history_is_not_a_deposit(tmp_path):
+    broker = Broker(cash=800_000)
+    with patch.object(LL, 'capital_logged', return_value=False):
+        send_all(tmp_path, broker, start=(9, 40), dca=DEPOSIT)
+        run(tmp_path, at2(9, 40), broker, execute_orders=True, dca=DEPOSIT, plan={**PLAN, 'day': DAY2}, record=raised(800_000))
+    dca = LL.load_state(tmp_path, 'live-2')['dca']
+    assert dca['capital_seen'] == CAPITAL and not dca.get('waiting_krw')
+
+
+def test_capital_logged_reads_the_latest_settings_history_row(tmp_path, monkeypatch):
+    import config_store
+    monkeypatch.setenv('VIBE_TRADING_SETTINGS_HISTORY', str(tmp_path / 'h.sqlite3'))
+    assert not LL.capital_logged('live-2', 800_000)
+    config_store.record('accounts', {'live-2': {'budget': {'capital_krw': 500_000}}}, {'live-2': {'budget': {'capital_krw': 800_000}}})
+    assert LL.capital_logged('live-2', 800_000) and not LL.capital_logged('live-2', 900_000)
+
+
+# 적립 알림 (user 2026-11-20): 적립식이 꺼져 있어도 거장이 사는 날을 알려 다른 계좌에서 참고해 사게 한다 (주문 없음)
+ALERT = {'on': False, 'alert': True, 'style': 'master', 'profile': 'dalio', 'when_by': 'me', 'size_by': 'me', 'amount_krw': 100_000,
+         'frequency': 'daily', 'time': '10:00'}
+
+
+def test_an_alert_only_dca_records_what_it_would_buy_and_sends_nothing(tmp_path):
+    broker = Broker(cash=600_000)
+    send_all(tmp_path, broker, start=(9, 40), dca=ALERT)
+    send_all(tmp_path, broker, start=(9, 41), dca=ALERT)  # the engine's own orders out
+    sent = len(broker.sent)
+    alert = run(tmp_path, at(10, 0), broker, execute_orders=True, dca=ALERT)
+    assert alert['action'] == 'DCA_ALERT' and alert['orders'] and len(broker.sent) == sent
+    row = alert['orders'][0]
+    assert {'code', 'name', 'krw', 'price', 'qty'} <= set(row) and sum(o['krw'] for o in alert['orders']) <= 100_000
+    state = LL.load_state(tmp_path, 'live-2')
+    assert not [o for o in state['orders'] if 'dca' in o['source'].split('+')] and not state['dca']  # the 적립식 itself stays off
+    assert run(tmp_path, at(10, 1), broker, execute_orders=True, dca=ALERT)['action'] != 'DCA_ALERT'  # once a day
+
+
+def test_the_alert_book_carries_over_to_the_next_day(tmp_path):
+    broker = Broker(cash=600_000)
+    send_all(tmp_path, broker, start=(9, 40), dca=ALERT)
+    send_all(tmp_path, broker, start=(9, 41), dca=ALERT)  # the engine's own orders out
+    run(tmp_path, at(10, 0), broker, execute_orders=True, dca=ALERT)
+    first = LL.load_state(tmp_path, 'live-2')['dca_alert']
+    plan = {**PLAN, 'day': '2026-11-19'}
+    run(tmp_path, datetime(2026, 11, 19, 9, 40, tzinfo=KST), broker, execute_orders=True, dca=ALERT, plan=plan)
+    assert LL.load_state(tmp_path, 'live-2')['dca_alert']['contributed_krw'] == first['contributed_krw']
+
+
+def test_no_alert_without_the_switch(tmp_path):
+    broker = Broker(cash=600_000)
+    send_all(tmp_path, broker, start=(9, 40), dca={**ALERT, 'alert': False})
+    send_all(tmp_path, broker, start=(9, 41), dca={**ALERT, 'alert': False})
+    assert run(tmp_path, at(10, 0), broker, execute_orders=True, dca={**ALERT, 'alert': False})['action'] == 'HOLD'

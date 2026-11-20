@@ -11,6 +11,7 @@ STATES = {'terminal': '완료', 'acknowledged': '접수·체결 확인 중', 'un
 OPERATIONS = {'krstockOrderCashBuy': '매수', 'krstockOrderCashSell': '매도', 'krstockOrderCancel': '취소'}
 REASONS = {
     'matches the paper runner': '엔진 원장과 같음',
+    'quiet: broker re-read every 5 minutes': '쉬는 중(보유·미체결·따라 살 것 없음, 증권사 조회 5분마다)',
     'paper runner bought': '엔진이 매수함',
     'paper runner holds less': '엔진이 줄여서 매도',
     'before the session': '장 시작 전',

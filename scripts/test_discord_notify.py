@@ -495,3 +495,15 @@ def test_long_term_cursor_waits_for_every_destination(monkeypatch):
     state = {'seen': [], 'lt_cursor': 10}
     dn.deliver([('longterm', 'lt:7', 'L')], state, {'longterm': [('discord', 'u'), ('slack', 's')]}, sender=ok, sleep=lambda s: None)
     assert state['lt_cursor'] == 6 and 'lt:7' in state['seen'] and 'lt:7' not in state['seen_slack']
+
+
+def test_a_dca_alert_is_posted_once_a_day_with_what_to_buy(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(dn, 'HOME', tmp_path)
+    order = {'key': 'NDX', 'code': '379810', 'name': 'KODEX 미국나스닥100', 'krw': 58_800, 'price': 23_315, 'qty': 2}
+    events = [{'time': '2026-11-23T10:00:00+09:00', 'account': 'live-2', 'action': 'DCA_ALERT', 'orders': [order], 'notes': ['여운봉 · 조정']},
+              {'time': '2026-11-23T10:05:00+09:00', 'account': 'live-2', 'action': 'DCA_ALERT', 'orders': [order], 'notes': []}]
+    (tmp_path / 'longterm-live.jsonl').write_text('\n'.join(json.dumps(e) for e in events))
+    items = dn.plan_items(set())
+    assert len(items) == 1 and items[0][2].startswith('🔔 적립 알림')
+    assert '379810' in items[0][2] and '23,315' in items[0][2] and '2주' in items[0][2] and '주문 없음' in items[0][2]

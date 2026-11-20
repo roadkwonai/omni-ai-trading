@@ -15,7 +15,8 @@ ENGINES = {'jev': 'Jev', 'vibe': 'vibe-trading'}
 COLORS = {'Jev': '#a855f7', 'vibe-trading': '#22c55e'}  # AI violet vs green; every mark also carries the engine name
 PATHS = {'watchlist_strength': '관심종목 강도', 'jev': 'Jev 후보', 'split': '분할 추가', 'ipo': '신규주', 'oversold': '낙폭과대 반등', 'oversold_v2': '낙폭과대 선별 v2', 'oversold_v2_add': '선별 v2 2차 매수', 'oversold_v2_reentry': '선별 v2 저점 재매수',
          'vibe-trading': 'vibe 점수', 'manual': '수동 정리', 'jev_fast': 'Jev 빠른 매수(vibe 보조)'}
-EXITS = {'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리',
+EXITS = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market_rebound': '지수 반등 인버스 청산',  # 2026-11-20
+    'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리',
          'jev_sell': 'Jev 매도 의견', 'regime': '국면 청산', 'risk': '위험 관리', 'manual_exit': '수동 정리',
          'split_take_profit': '분할 익절', 'vibe-trading': 'vibe 매도 점수', 'model': 'Jev 매도 판단',
          'regime_exit': '국면 청산', 'protective': '보호 매도', 'direction_switch': '방향 전환 매도',

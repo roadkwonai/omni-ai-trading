@@ -344,3 +344,54 @@ def test_assets_are_copied_only_when_they_differ(tmp_path):
     css.write_text('stale')
     rp.ensure_assets(tmp_path)
     assert css.read_bytes() == (rp.TEMPLATES / 'report.css').read_bytes()
+
+
+LIVE = """# 매매일지 · 2026-11-17 (화)
+
+> 요약 문단.
+
+## 1. 숫자로 보는 하루
+
+| 계좌 | 실현손익 | 매수 대비 |
+|---|---|---|
+| 모의 (Jev) | -54,328원 | -0.40% |
+| 장기투자 (vibe 가상) | +17,860원 | +0.80% |
+| 실계좌 1 | -1,413원 | -0.10% |
+| 실계좌 2 (장기투자) | +0원 | 0% |
+
+모의는 6,702주를 손절해 −90,802원을 잃었다.
+
+실계좌 1 — 미러, −1,413원. 197주 매도(1,339원), 496주를 팔고 17회 매수(137.9만 원), 운용금 100만 원.
+
+- 035760 · 실계좌 1 · 매수 1 · 매도 1 · 실현 -100원
+
+모의는 −12,000원, 실계좌 1은 −1,413원을 따라 잃었다. 모의 재진입은 −36,474원이었다.
+
+사실: 실계좌 1은 −1,413원이다. 496주 매도(1,329원)는 모의 손절을 따른 것이다.
+"""
+
+
+def test_public_pages_hide_live_account_money_and_quantities(tmp_path):
+    rt = runtime(tmp_path)
+    md = rt / 'nhplug/shared-etf-paper/reviews/journal-2026-11-17.md'
+    md.write_text(LIVE)
+    (md.with_suffix('.json')).write_text(json.dumps({'summary': 'Jev −54,328원, 실계좌 1은 −1,413원이다.',
+                                                     'top_issues': [{'title': '실계좌 1 −3,623원', 'stars': 3, 'why': '실계좌 2주 매수'}]}, ensure_ascii=False))
+    page, meta = rp.render('journal', '2026-11-17', md)
+    body = page.split('<article')[1]
+    for leaked in ('1,413원', '197주', '1,339원', '137.9만 원', '496주', '100만 원', '-100원', '3,623원', '실계좌 2주', '1,413원을', '1,329원'):
+        assert leaked not in page and leaked not in meta['text'] and leaked not in meta['summary'], leaked
+    assert '-54,328원' in body and '6,702주' in body and '−90,802원' in body  # paper numbers stay
+    assert '-0.10%' in body and '운용금 •••원' in body and '•••주 매도' in body  # units stay for the particles
+    assert '−54,328원' in meta['summary'] and '실계좌 1은 •••원이다' in meta['summary']  # only what follows 실계좌
+    assert '−36,474원' in body and '•••원을 따라' in body  # percentages stay, amounts say 비공개
+    assert rp.check(page) == []
+    assert any('실계좌' in i for i in rp.check('<html lang="ko"><h1>x</h1><p>실계좌 1은 −1,413원이다.</p>'))
+
+
+def test_live_account_columns_are_hidden_too():
+    html_in = ('<table><thead><tr><th>기간</th><th>모의 (Jev)</th><th>실계좌 1</th></tr></thead>'
+               '<tbody><tr><td>11-02 ~ 11-10</td><td>+9,996원</td><td>-1,413원</td></tr></tbody></table>')
+    out = rp.hide_live(html_in)
+    assert '+9,996원' in out and '-1,413원' not in out and '•••원' in out and '11-02 ~ 11-10' in out
+    assert rp.hide_live(out) == out

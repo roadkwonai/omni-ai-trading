@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from etf_regime import classify_regime
 from etf_universe import SYMBOLS
+from session_times import until_open
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
 
 KST = ZoneInfo('Asia/Seoul')
@@ -41,10 +42,11 @@ def _latest_decision(path):
     return next((row for row in reversed(rows) if isinstance(row, dict) and
                  (row.get('event') == 'decision' or
                   (row.get('event') == 'v2_holding_decision' and isinstance(row.get('market_bars'), dict)
-                   and set(row['market_bars']) == set(SYMBOLS)) or
+                   and set(SYMBOLS) <= set(row['market_bars'])) or
                   (row.get('event') == 'market_context' and row.get('universe') == 'etf7'
                    and row.get('context') in ('entry', 'holding') and isinstance(row.get('market_bars'), dict)
-                   and set(row['market_bars']) == set(SYMBOLS)))), None)
+                   # the runner logs watchlist stock charts beside ETF7 (11-20: an exact match never matched)
+                   and set(SYMBOLS) <= set(row['market_bars'])))), None)
 
 
 def _minute_bars(rows, event_time):
@@ -95,8 +97,9 @@ def _daily_bars(response, code, now):
     return sorted(converted, key=lambda row: row['time']), stamp
 
 
-def observe(reader, event_path, clock=lambda: datetime.now(KST), sleeper=lambda _: None):
-    """Observe latest recorded market state; unknown data produces WAIT, never orders."""
+def observe(reader, event_path, clock=lambda: datetime.now(KST), sleeper=lambda _: None, daily_cache=None):
+    """Observe latest recorded market state; unknown data produces WAIT, never orders. `daily_cache` ({(code, day):
+    (rows, stamp)}, kept by run()): the daily history drops today's row, so it is read from NH once a day (11-20)."""
     result = {'time': None, 'status': 'unavailable', 'minute_event_time': None,
               'source': SOURCE, 'symbols': {name: _empty(code, 'minute_data_unavailable')
                                              for name, code in SYMBOLS.items()}}
@@ -139,16 +142,22 @@ def observe(reader, event_path, clock=lambda: datetime.now(KST), sleeper=lambda 
                     raise ValueError('minute response unavailable')
                 minute = _minute_bars(valid_bars(minute_reply.get('data', {}), code, minute_stamp), minute_stamp)
                 minute_source = 'nh_direct'
-            sleeper(1)
-            reply = reader.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {
-                'market_cd': 'KRX', 'iem_cd': code, 'gubun': '1', 'today_cls_code': '0',
-                'view_main_yn': 'Y', 'array_cnt': '30'}})
+            cached = daily_cache.get((code, now.date())) if daily_cache is not None else None
+            if cached is None:
+                sleeper(1)
+                reply = reader.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {
+                    'market_cd': 'KRX', 'iem_cd': code, 'gubun': '1', 'today_cls_code': '0',
+                    'view_main_yn': 'Y', 'array_cnt': '30'}})
             as_of = _timestamp(clock())
             if not timedelta(0) <= as_of - minute_stamp <= timedelta(seconds=120):
                 raise ValueError('minute source stale')
-            daily, daily_stamp = _daily_bars(reply, code, as_of)
+            daily, daily_stamp = cached if cached is not None else _daily_bars(reply, code, as_of)
+            if daily_cache is not None and cached is None:
+                for old in [k for k in daily_cache if k[1] != now.date()]:
+                    del daily_cache[old]
+                daily_cache[(code, now.date())] = (daily, daily_stamp)
             result['symbols'][name] = {'symbol': code, **classify_regime(as_of, minute, daily),
-                                       'daily_quote_time': daily_stamp.isoformat(),
+                                       'daily_quote_time': daily_stamp.isoformat(), 'daily_history_cached': cached is not None,
                                        'minute_source': minute_source, 'minute_data_time': minute_stamp.isoformat()}
         except Exception:
             result['symbols'][name] = _empty(code, 'market_data_unavailable')
@@ -158,7 +167,7 @@ def observe(reader, event_path, clock=lambda: datetime.now(KST), sleeper=lambda 
         row = result['symbols'][name]
         stamp = row.get('daily_quote_time')
         minute_stamp = row.get('minute_data_time')
-        if stamp and (not timedelta(0) <= final - _timestamp(stamp) <= timedelta(seconds=120)
+        if stamp and ((not row.get('daily_history_cached') and not timedelta(0) <= final - _timestamp(stamp) <= timedelta(seconds=120))
                       or not minute_stamp or not timedelta(0) <= final - _timestamp(minute_stamp) <= timedelta(seconds=120)):
             result['symbols'][name] = _empty(code, 'market_data_stale')
     valid = sum(row['data_quality'] == 'valid' for row in result['symbols'].values())
@@ -206,7 +215,7 @@ def run(root, reader, *, watch=False, clock=lambda: datetime.now(KST), sleeper=c
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return 'already_running'
-        waiting_day = None
+        waiting_day, daily_cache = None, {}
         while True:
             try:
                 now = _timestamp(clock())
@@ -215,6 +224,9 @@ def run(root, reader, *, watch=False, clock=lambda: datetime.now(KST), sleeper=c
             if watch:
                 if waiting_day is not None and (now.date() != waiting_day or (root / 'STOP').exists()):
                     return 'outside_session' if now.date() != waiting_day else 'stopped'
+                if wait := until_open(now):  # started pre-open: wait for the bell instead of quitting
+                    sleeper(min(30, wait))
+                    continue
                 if now.weekday() >= 5 or not '09:00' <= now.strftime('%H:%M') < '15:00':
                     return 'outside_session'
                 if now.strftime('%H:%M') < '09:10':
@@ -240,7 +252,7 @@ def run(root, reader, *, watch=False, clock=lambda: datetime.now(KST), sleeper=c
                 status = 'rate_limited'
             if due:
                 try:
-                    result = observe(reader, root / 'events.jsonl', clock, sleeper)
+                    result = observe(reader, root / 'events.jsonl', clock, sleeper, daily_cache)
                 except Exception:
                     result = _unavailable(now, 'observer_error')
                 try:

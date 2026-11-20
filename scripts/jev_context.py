@@ -83,7 +83,7 @@ def _merge(bars):
             continue
         kept = _DAY['bars'].setdefault(name, {})
         for row in rows:
-            if isinstance(row, dict) and row.get('bsop_date') not in (None, _DAY['day']):
+            if isinstance(row, dict) and (row.get('bsop_date') not in (None, _DAY['day']) or row.get('market') == 'NXT'):
                 continue  # the opening review's previous-session rows (11-19) are charted, never kept as today's
             if isinstance(row, dict) and isinstance(row.get('bsop_time'), str) and all(k in row for k in FIELDS):
                 kept[row['bsop_time']] = {k: row[k] for k in FIELDS}
@@ -162,7 +162,8 @@ def context(bars, now=None, events=None):
     """(chart bars for plotting, state additions) for one Jev call."""
     remember(bars, now, events)
     # rows from another day (the opening review: today's few bars, then the previous session's) are charted as given
-    chart = {name: rows if any(isinstance(r, dict) and r.get('bsop_date') not in (None, _DAY['day']) for r in rows or [])
+    chart = {name: rows if any(isinstance(r, dict) and (r.get('bsop_date') not in (None, _DAY['day']) or r.get('market') == 'NXT')
+                               for r in rows or [])
              else chart_rows(name) or rows
              for name, rows in bars.items()}
     summaries = {name: s for name in bars if (s := summary(name))}

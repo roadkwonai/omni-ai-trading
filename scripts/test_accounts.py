@@ -216,3 +216,33 @@ class EngineChoiceTests(unittest.TestCase):
                    'live-2': {'kind': 'live', 'engine': 'longterm', 'label': '실계좌 2'},
                    'live-3': {'kind': 'live', 'engine': 'longterm', 'invalid': True}, 'odd': {'kind': 'paper', 'engine': 'longterm'}}
         self.assertEqual(a.longterm_accounts(records), {'live-2': records['live-2']})
+
+
+def test_the_paper_account_matches_a_live_accounts_capital_and_restores(tmp_path):  # user 2026-11-20 '분할 금액까지 맞추기'
+    import json
+    import accounts as A
+    path = tmp_path / 'accounts.json'
+    paper = {'kind': 'paper', 'engine': 'jev', 'auto': True, 'label': '모의', 'budget': {'first_buy_krw': 1_000_000, 'per_symbol_krw': 20_000_000},
+             'limits': {'order_max_krw': 10_000_000, 'daily_buy_krw': 1_000_000_000, 'held_max_krw': 1_000_000_000,
+                        'daily_new_symbols': 5, 'daily_loss_krw': 5_000_000}}
+    live = {'kind': 'live', 'engine': 'jev', 'auto': True, 'label': '실계좌 1', 'hash': 'h',
+            'budget': {'capital_krw': 1_490_000, 'order_price_max_krw': 400_000, 'daily_loss_krw': 20_000},
+            'limits': {'order_max_krw': 1_000_000, 'daily_new_symbols': 5}}
+    path.write_text(json.dumps({'version': 1, 'accounts': {'paper-shared': paper, 'live-1': live}}))
+    A.set_match('live-1', 2, True, path)
+    got = A.load(path)['paper-shared']
+    assert got['budget']['first_buy_krw'] == 248_333 and got['budget']['per_symbol_krw'] == 745_000  # 149만 ÷ 6, ÷ 2
+    assert A.paper_limits(got) == {'order_max_krw': 1_000_000, 'daily_buy_krw': 1_000_000_000, 'held_max_krw': 1_490_000,
+                                   'daily_new_symbols': 5, 'daily_loss_krw': 20_000}
+    A.save_one('live-1', {'budget': {**live['budget'], 'capital_krw': 3_000_000}}, path)  # the paper follows a new capital
+    assert A.load(path)['paper-shared']['limits']['held_max_krw'] == 3_000_000
+    A.save_one('paper-shared', {'budget': {'first_buy_krw': 300_000, 'per_symbol_krw': 900_000}}, path)  # set by hand
+    A.save_one('live-1', {'budget': {**live['budget'], 'capital_krw': 2_000_000}}, path)
+    kept = A.load(path)['paper-shared']
+    assert kept['budget'] == {'first_buy_krw': 300_000, 'per_symbol_krw': 900_000}  # the hand-set values stay
+    assert kept['match_live']['manual'] == {'first_buy_krw': 300_000, 'per_symbol_krw': 900_000}
+    A.set_match('live-1', 2, True, path)  # 다시 계산해 저장
+    assert A.load(path)['paper-shared']['budget']['first_buy_krw'] == 333_333 and not A.load(path)['paper-shared']['match_live'].get('manual')
+    A.set_match('live-1', on=False, path=path)
+    back = A.load(path)['paper-shared']
+    assert back['budget'] == paper['budget'] and back['limits'] == paper['limits'] and back.get('match_live') is None

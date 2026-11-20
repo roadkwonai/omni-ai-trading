@@ -37,10 +37,15 @@ class PaperModesTests(unittest.TestCase):
         from unittest.mock import patch as _patch
         self._confirm = _patch.object(runner, 'entry_confirmation', return_value=None); self._confirm.start()
         self._inverse = _patch.object(runner, 'inverse_gate', return_value=None); self._inverse.start()  # its own tests
+        self._tape = _patch.object(runner, 'inverse_tape', return_value=None); self._tape.start()
+        # the inverse tape check (confidence floor, no chasing; user 2026-11-20) is tested in test_nh_paper_isolated too
+        self._tape = _patch.object(runner, 'inverse_tape', return_value=None); self._tape.start()
 
     def tearDown(self):
         self._confirm.stop()
         self._inverse.stop()
+        self._tape.stop()
+        self._tape.stop()
 
     def test_settings_are_staged_during_runner_lock_and_applied_at_boundary(self):
         with tempfile.TemporaryDirectory() as temp:

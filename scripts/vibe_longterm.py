@@ -1370,7 +1370,7 @@ def close(root, read, now, execute=False, accounts=None):
     closes = {}  # code -> today's close, read once even when several books keep the same reservoir ETF
     close_of = lambda code: closes[code] if code in closes else closes.setdefault(code, _close_price(read, code))  # noqa: E731
     # by key at KOFR for the paper books (shadows, recipes: they started on it); the virtual account is valued by what it holds
-    prices = {k: close_of(code_of(k)) for k in ASSETS} | {c: close_of(c) for c in sorted(sleeve)}
+    prices = {k: close_of(code_of(k)) for k in ASSETS} | {c: close_of(code_of(c)) for c in sorted(sleeve)}  # a shadow's 여운봉 ETF is held by key
     contributed = (st.get('dca:actual') or {}).get('contributed_krw', 0)
     updates, latest = {'closed_day': day}, {}
     shadows = [('base', list(BASE_SET), None, None), ('auto', plan['recommended'], None, None)]

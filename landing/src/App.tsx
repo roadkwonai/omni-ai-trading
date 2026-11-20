@@ -5,12 +5,12 @@ import { Dialog, DialogBackdrop, DialogClose, DialogContent, DialogDescription, 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger } from '@ui-sdk/react/accordion'
 import {
   ArrowDown, ArrowRight, ArrowUpRight, Bank, BellRinging, CaretDown, Check, Copy, GithubLogo, List, ListChecks, MagnifyingGlassPlus,
-  ArrowsClockwise, CalendarCheck, ChatsCircle, Download, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TrendDown, UserCircle, Warning, X,
+  ArrowsClockwise, CalendarCheck, ChatsCircle, Download, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, Play, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TrendDown, UserCircle, Warning, X,
 } from '@phosphor-icons/react'
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
   AI_LOOP, AI_PAID, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
-  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK,
+  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEO,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
 // Charts load in their own chunk; the placeholder keeps the height so nothing jumps.
@@ -185,6 +185,52 @@ function Hero() {
           })}
         </ol>
       </nav>
+    </section>
+  )
+}
+
+const mmss = (t: number) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+
+// Click-to-load: the YouTube iframe (and its cookies/scripts) loads only after the visitor presses play.
+function Video() {
+  const [play, setPlay] = useState(false)
+  const [start, setStart] = useState(0)
+  const go = (t: number) => { setStart(t); setPlay(true) }
+  return (
+    <section id="video" className="section video" aria-labelledby="video-title">
+      <div className="container">
+        <div className="head">
+          <p className="kicker">서비스 소개 영상 · {VIDEO.length}</p>
+          <h2 id="video-title" className="heading-2">실제 화면으로 보는 <span className="accent-text">Omni AI Trading</span></h2>
+          <p className="lead">두 엔진이 어떻게 판단하고, 주문 가드가 무엇을 막고, 장이 끝나면 무엇을 남기는지 실제 대시보드로 보여 드립니다. 실계좌 금액은 가렸습니다.</p>
+        </div>
+        <div className="video-frame" data-reveal>
+          {play ? (
+            <iframe src={`https://www.youtube-nocookie.com/embed/${VIDEO.id}?autoplay=1&rel=0&start=${start}`}
+              title="Omni AI Trading 서비스 소개 영상" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+              allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+          ) : (
+            <button type="button" className="video-poster" onClick={() => go(0)} aria-label={`서비스 소개 영상 재생 (${VIDEO.length})`}>
+              <img src="./img/video-thumb.webp" width="1280" height="720" loading="lazy"
+                alt="영상 썸네일: 단타는 Jev가, 장기투자는 거장 원칙으로. 두 엔진으로 굴리는 국내 ETF 자동매매." />
+              <span className="video-play" aria-hidden><Play size={34} weight="fill" /></span>
+              <span className="video-len caption" aria-hidden>{VIDEO.length.replace('분 ', ':').replace('초', '')}</span>
+            </button>
+          )}
+        </div>
+        <ol className="video-chapters">
+          {VIDEO.chapters.map((c) => (
+            <li key={c.t}>
+              <button type="button" className="chip-btn small" onClick={() => go(c.t)}>
+                <span className="video-t">{mmss(c.t)}</span>{c.label}
+              </button>
+            </li>
+          ))}
+        </ol>
+        <p className="more-row" style={{ marginTop: 24 }}>
+          <a className="more button-md" href={VIDEO.url} target="_blank" rel="noopener noreferrer">YouTube에서 보기 <ArrowUpRight size={16} aria-hidden /></a>
+        </p>
+      </div>
     </section>
   )
 }
@@ -1032,6 +1078,7 @@ export default function App() {
       <main id="main">
         <span id="top" />
         <Hero />
+        <Video />
         <Why />
         <Principle />
         <AiOps />

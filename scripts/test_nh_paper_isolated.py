@@ -168,6 +168,7 @@ class IsolatedTests(unittest.TestCase):
                      patch.object(p, 'valid_bars', return_value=bars), patch('etf_news.headlines7', return_value=[{'title':'market','published':now_iso}]), \
                      patch.object(p, 'decision7', return_value=('WAIT', 0.9, {'response_time':now_iso})), \
                      patch.object(p, 'jev7', return_value=jev), patch.object(p, 'volatility', return_value=1), \
+                     patch.object(p, 'inverse_tape', return_value=None), \
                      patch.object(p, 'fresh_quote', return_value={'askp':1300, 'bidp':1295}), \
                      patch.object(p, 'journal_event') as events, patch.object(p, 'submit', return_value=('a'*32, 1)) as submit:
                     self.assertEqual(p.cycle(db, Reader(), object(), ALT, root, True, NOW, etf7=True), 'buy')
@@ -1224,7 +1225,7 @@ class MultiSymbolTests(unittest.TestCase):
         bars = [{'bsop_time': f'11{58-i:02d}00', 'stck_prpr': str(1400-i), 'vol': str(200 if i < 5 else 100)} for i in range(10)]
         jev = {'model':'jev-1.14.0','chart_sha256':'a'*64,'response_time':NOW.isoformat(),
                'candidate':{'type':'choice','choice':jev_choice,'confidence':0.9}}
-        with view_patch, patch.object(p, 'inverse_gate', return_value=gate), patch.object(p,'datetime',Clock), patch.object(p,'paper_pages',side_effect=pages), \
+        with view_patch, patch.object(p, 'inverse_gate', return_value=gate), patch.object(p, 'inverse_tape', return_value=gate), patch.object(p,'datetime',Clock), patch.object(p,'paper_pages',side_effect=pages), \
              patch.object(p,'valid_bars',return_value=bars), patch('etf_news.headlines7',return_value=[{'title':'m','published':NOW.isoformat()}]), \
              patch.object(p,'jev7',return_value=jev), patch.object(p,'fresh_quote',side_effect=quote), \
              patch.object(p,'etf7_protective_deadline',return_value=deadline), \
@@ -1648,11 +1649,11 @@ class MultiSymbolTests(unittest.TestCase):
         self.assertEqual(flows['K200'], {'last_close_day': {'date': '20261105', 'foreign': 5, 'institution': 6, 'individual': -11},
                                          'today_provisional': {'date': '20261106', 'foreign': -100000, 'institution': 0, 'individual': 0}})
         self.assertEqual(Reader.calls, 7)
-        p.investor_flows(Reader(), NOW + timedelta(seconds=60))
-        self.assertEqual(Reader.calls, 7)  # cached for five minutes
+        p.investor_flows(Reader(), NOW + timedelta(seconds=540))
+        self.assertEqual(Reader.calls, 7)  # cached for ten minutes
         class Broken:
             def call_tool(self, tool, params): return {'status': 'error'}
-        self.assertIsNone(p.investor_flows(Broken(), NOW + timedelta(seconds=301)))
+        self.assertIsNone(p.investor_flows(Broken(), NOW + timedelta(seconds=601)))
         p._INVESTOR_CACHE.clear()
 
     def test_minute_bar_read_is_retried_once(self):
@@ -1754,6 +1755,27 @@ class MultiSymbolTests(unittest.TestCase):
             p.strength_shadow(self.root, movers, {}, {}, {}, None, 'trend_not_rising', 'a' * 32)  # never raises
         self.assertEqual(again.call_args.kwargs['error_type'], 'KeyError')
 
+    def test_a_jev_wait_strength_pick_the_data_gate_refuses_leaves_the_cycle_to_a_new_listing(self):
+        # 11-20 180640: Jev waited, the strength path picked a same-day re-entry the careful tape refused three times
+        movers, view = self.strength_setup(0.69)
+        rows = [{'bsop_time': f'11{58-i:02d}00', 'stck_prpr': str(1400-i), 'vol': str(200 if i < 5 else 100)} for i in range(10)]
+        facts = {'name': '옵토닉스', 'listed': '20261117', 'sessions': 0, 'change_pct': 4.2, 'turnover_pct': 30.0}
+        gate = []
+        with patch.object(p, 'mover_candidates', return_value=movers), view, \
+             patch.object(p, 'entry_block', side_effect=lambda *a, **k: gate.append(a[1]) or ('careful_reentry_chase' if a[1] == '035900' else None)), \
+             patch.object(p, 'ipo_candidate', return_value=('493260', facts, rows)), patch.object(p, 'IPO_SIZE_PCT', 50), \
+             patch.object(p, 'ipo_entries_today', return_value=0):
+            status, submit, _, events = self.run_cycle(self.root, self.db, {}, jev_choice='WAIT', ask=1300)
+        self.assertEqual(status, 'buy')
+        self.assertEqual(submit.call_args.args[4:6], ('493260', 'BUY'))
+        self.assertNotIn('watchlist_strength', [c.args[1] for c in events.call_args_list])
+        self.assertEqual(gate.count('035900'), 1)
+        with patch.object(p, 'mover_candidates', return_value=movers), view, \
+             patch.object(p, 'entry_block', side_effect=lambda *a, **k: gate.append(a[1])) as block:
+            status, submit, _, _ = self.run_cycle(self.root, self.db, {}, jev_choice='WAIT')
+        self.assertEqual((status, submit.call_args.args[4:6]), ('buy', ('035900', 'BUY')))
+        self.assertEqual(block.call_count, 1)  # passed once before the pick, not again at the main gate
+
     def test_watchlist_strength_needs_the_jev_watchlist_confidence(self):
         movers, view = self.strength_setup(0.1)  # under the 0.15 floor
         with patch.object(p, 'mover_candidates', return_value=movers), view:
@@ -1803,7 +1825,7 @@ class MultiSymbolTests(unittest.TestCase):
              patch.object(p, 'exit_plans', return_value={}), patch.object(p, 'entry_block', return_value=None):  # the data gate has its own test
             slot = lambda owned: p.slot_entry(None, self.root, owned, movers, {'035900': rows}, None, {'114800'}, NOW)
             self.assertEqual(slot({})[:2], ('035900', 'watchlist_strength'))
-            self.assertIsNone(slot({'114800': 10}))                        # waits behind a held inverse
+            self.assertEqual(slot({'114800': 10})[:2], ('035900', 'watchlist_strength'))  # a held inverse no longer keeps stocks out (user 2026-11-20)
             self.assertIsNone(slot({'000001': 1, '000002': 1}))            # strength_slot_max (2) held
             with patch.object(p, 'entries_today', return_value=3):
                 self.assertIsNone(slot({}))                                 # strength_slot_daily (3) used
@@ -3156,7 +3178,8 @@ class InverseGuardTests(unittest.TestCase):
         self.assertEqual(p.inverse_gate(self.view(program_net_100m_krw={'전체': 0.0}), '코스피'), 'inverse_flows_not_selling')
         self.assertEqual(p.inverse_gate({**self.falling, 'global_last_daily_change_pct': {'나스닥100': 0.0}}, '코스피'),
                          'inverse_us_not_falling')
-        self.assertIsNone(p.inverse_gate({**self.falling, 'index_intraday': {'코스피': {'change_30m_pct': 0.0}}}, '코스피'))  # flat: not a rebound
+        self.assertEqual(p.inverse_gate({**self.falling, 'index_intraday': {'코스피': {'change_30m_pct': 0.0}}}, '코스피'),
+                         'inverse_index_not_falling_now')  # flat: not a rebound, but not falling now either (user 2026-11-20)
 
     def test_entry_block_refuses_an_inverse_pick_the_views_do_not_back(self):
         rows = [{'vol': '200'}] * 5 + [{'vol': '100'}] * 5
@@ -3325,3 +3348,136 @@ def test_each_new_listing_keeps_its_own_verdict_and_base_and_a_price_verdict_rea
     assert [(e['symbol'], e['why'], e['price'], e['base']) for e in seen] == [
         ('471800', 'below_base', 15000, 17600), ('493260', 'off_high', 100, 90), ('471800', 'off_high', 17700, 17600)]
     assert bar_reads == []  # all settled by the quote alone
+
+
+def test_entries_read_the_opening_bars_at_the_bell_and_six_bars_after():  # user 2026-11-20: 9:00~9:05 is the peak
+    import pytest
+    at = datetime(2026, 11, 6, 9, 0, 20, tzinfo=ZoneInfo('Asia/Seoul'))
+    data = _opening_response('069500', [], ['151900', '151800'])
+    rows = p.entry_rows(data, '069500', at, True)  # no settled bar of today yet: the previous session's
+    assert [(r['bsop_date'], r['bsop_time']) for r in rows] == [('20261105', '151900'), ('20261105', '151800')]
+    with pytest.raises(ValueError, match='insufficient bars'):
+        p.entry_rows(data, '069500', at, False)  # outside the opening window entries still need six bars of today
+    today, prior = p.opening_split({'K200': rows}, at)
+    assert (today, list(prior)) == ({}, ['K200'])  # nothing of yesterday is logged as today's market_bars
+
+
+def test_a_stock_opening_entry_charts_todays_nxt_premarket_instead_of_yesterday():  # user 2026-11-20 '키움으로 바꾸기'
+    at = datetime(2026, 11, 6, 9, 0, 20, tzinfo=ZoneInfo('Asia/Seoul'))
+    data = _opening_response('005930', [], ['151900', '151800'])
+    pre = [{'bsop_date': '20261106', 'market': 'NXT', 'bsop_time': t, 'stck_oprc': '100', 'stck_hgpr': '101',
+            'stck_lwpr': '99', 'stck_prpr': '100', 'vol': '5'} for t in ('084900', '084800')]
+    rows = p.entry_rows(data, '005930', at, True, lambda code: pre)
+    assert [r['bsop_time'] for r in rows] == ['084900', '084800']  # no previous-session rows
+    assert p.entry_rows(data, '005930', at, True, lambda code: [])[0]['bsop_date'] == '20261105'  # Kiwoom failed: yesterday's
+    today, prior = p.opening_split({'005930': rows}, at)
+    assert (today, list(prior)) == ({}, ['005930'])  # NXT rows are never logged as today's KRX market_bars
+    assert p.opening_series(rows, at)
+    with patch('kiwoom_data.nxt_premarket_bars', side_effect=RuntimeError('no key')):
+        p._NXT_PRE.clear()
+        assert p.nxt_premarket('005930', at) == []
+
+
+def test_opening_volume_check_compares_todays_minutes_with_the_rows_before():  # user 2026-11-20: strength at the bell
+    def row(t, vol, day='20261106', market=None):
+        r = {'bsop_date': day, 'bsop_time': t, 'stck_oprc': '1', 'stck_hgpr': '1', 'stck_lwpr': '1', 'stck_prpr': '1', 'vol': str(vol)}
+        return {**r, 'market': market} if market else r
+    nxt = [row(f'0849{i:02d}', 100, market='NXT') for i in range(5)]
+    with patch.object(p, 'ENTRY_VOLUME_RATIO', 1.2):
+        assert p.volume_check(nxt) is None  # 09:00: no settled KRX minute yet
+        assert p.volume_check([row('090100', 500), row('090000', 300)] + nxt) is None  # 400 a minute vs 100
+        assert p.volume_check([row('090000', 110)] + nxt) == 'volume_not_rising'
+        assert p.volume_check([row('090000', 500)] + [row('1519', 1000, day='20261105')] * 5) == 'volume_not_rising'
+
+
+def test_a_strength_pick_rides_its_own_trend_from_plus_one_percent(tmp_path):  # user 2026-11-20 '모의에 적용'
+    import trading_ledger
+    p.save_exit_plan(tmp_path, '180640', 'c1', 'defensive', source='watchlist_strength')
+    p.save_exit_plan(tmp_path, '005930', 'c2', 'defensive', source='jev')
+    plans = p.exit_plans(tmp_path)
+    assert plans['180640']['entry_source'] == 'watchlist_strength' and 'entry_source' not in plans['005930']
+    event = {'time': '2026-11-20T09:19:00+09:00', 'event': 'exit_plan', 'symbol': '180640', 'reason': 'strength_trend',
+             'profile': 'trend', 'stop_pct': 2.0, 'half_pct': 1.0, 'all_pct': 2.0, 'trend_half_pct': 2.0, 'trend_trail_pct': 1.5}
+    assert trading_ledger.sanitize(event)['reason'] == 'strength_trend'  # the ledger takes the new reason
+
+
+def test_a_kiwoom_priced_ranking_row_never_replaces_the_nh_figures_jev_reads():
+    # 2026-11-20 NH call plan P2 (option 1): only NH figures reach Jev
+    details = {'price': 110, 'change_pct': 10.0, 'volume': 5, 'value_mil': 1}
+    kiwoom = {'price': 109, 'change_pct': 9.0, 'volume': 4, 'value_mil': 1, 'source': 'kiwoom'}
+    assert p.with_latest_figures(details, kiwoom, '11:10') == details
+    nh = {'price': 111, 'change_pct': 11.0, 'volume': 6, 'value_mil': 2}
+    assert p.with_latest_figures(details, nh, '11:10')['price'] == 111
+
+
+def test_inverse_buys_only_early_in_a_fall_and_takes_a_moderate_profit():  # user 2026-11-20 (10:41 −4.4% late chase)
+    def view(change, recent):
+        return {'코스피': {'regime': '하락장', 'today_change_pct': change, 'program_net_100m_krw': {'전체': -1000}},
+                'index_intraday': {'코스피': {'change_30m_pct': recent}}, 'global_last_daily_change_pct': {'나스닥100': -1.0}}
+    assert p.inverse_gate(view(-1.2, -0.5), '코스피') is None
+    assert p.inverse_gate(view(-4.38, -0.3), '코스피') == 'inverse_too_late'  # the fall is already done
+    assert p.inverse_gate(view(-4.38, -0.6), '코스피') is None  # still falling fast: the strong-signal exception
+    assert p.inverse_late(view(-4.38, -0.6), '코스피') and not p.inverse_late(view(-1.2, -0.6), '코스피')
+    assert p.inverse_tape('INV', [], None, 0.7, 'jev', late=True) == 'inverse_low_confidence'  # 0.8 needed past −3%
+    assert p.inverse_gate(view(-1.2, -0.1), '코스피') == 'inverse_index_not_falling_now'
+    assert p.inverse_tape('INV', [], None, 0.5, 'jev') == 'inverse_low_confidence'
+    plan = p.new_plan('114800', 'inverse_crash')
+    assert (plan['half_pct'], plan['all_pct'], plan['stop_pct']) == (1.0, 1.0, 1.0) and 'inverse_crash' in p.OWN_EXIT_PROFILES
+    up = {'index_intraday': {'코스피': {'change_30m_pct': 0.4}}}
+    assert p.inverse_exit(plan, 1374.5, 1368, up, '코스피') == 'inverse_market_rebound'  # the index turns: out
+    held = {**plan, 'peak': 1385}
+    assert p.inverse_exit(held, 1374.5, 1370, {}, '코스피') == 'inverse_protect'  # was +0.76%, back at cost: out
+    assert p.inverse_exit({**plan, 'peak': 1378}, 1374.5, 1370, {}, '코스피') is None
+    assert p.inverse_exit({**plan, 'profile': 'trend'}, 1374.5, 1368, up, '코스피') is None
+    import trading_ledger
+    for reason in ('inverse_too_late', 'inverse_chase', 'inverse_low_confidence', 'inverse_index_not_falling_now', 'inverse_market_rebound', 'inverse_protect'):
+        assert trading_ledger.sanitize({'time': '2026-11-20T11:00:00+09:00', 'event': 'v2_entry_gate', 'reason': reason})['reason'] == reason
+
+
+def test_an_inverse_is_a_small_side_bet():  # user 2026-11-20: "인버스는 소액으로 들어가고 다른 종목도 함께"
+    assert p.INVERSE['size_pct'] == 50.0
+
+
+def test_a_gated_inverse_pick_hands_the_turn_to_the_strength_path():  # user 2026-11-20 12:27: Jev picked INV 36 times
+    import inspect
+    src = inspect.getsource(p.cycle)
+    assert "candidate, reason = None, 'jev_wait'" in src  # the inverse gate refusal counts as a Jev WAIT for the fallback
+
+
+def test_the_strength_reason_names_the_top_ranked_stock(tmp_path):  # 11-20: 180640 resting was reported as 005930's range
+    import json as _j
+    now = datetime(2026, 11, 20, 13, 0, tzinfo=ZoneInfo('Asia/Seoul'))
+    (tmp_path / 'watchlist.json').write_text(_j.dumps({'time': now.isoformat(), 'probabilities': {'180640': 0.54, '005930': 0.43}}))
+    up = [{'stck_prpr': str(240000 - i * 100)} for i in range(10)]
+    down = [{'stck_prpr': str(184000 - i * 100)} for i in range(10)]
+    movers = {'180640': {'price': 240000, 'change_pct': 10.0}, '005930': {'price': 184000, 'change_pct': -6.0}}
+    with patch.object(p, 'cooling', side_effect=lambda code, now: code == '180640'):
+        assert p.strength_candidate(tmp_path, movers, {'180640': up, '005930': down}, now) == (None, 'pick_cooldown')
+
+
+def test_a_low_confidence_inverse_pick_also_hands_the_turn_on():  # 11-20 13:22: INV 0.55 kept 한진칼 from being looked at
+    import inspect
+    with patch.object(p, 'market_view', return_value={}), patch.object(p, 'symbol_index', return_value='코스피'), \
+         patch.object(p, 'inverse_gate', return_value=None):
+        assert p.inverse_refusal(Path('.'), '114800', [], 'INV', None, 0.55, 'jev') == 'inverse_low_confidence'
+    with patch.object(p, 'market_view', return_value={}), patch.object(p, 'symbol_index', return_value='코스피'), \
+         patch.object(p, 'inverse_gate', return_value='inverse_too_late'):
+        assert p.inverse_refusal(Path('.'), '114800', [], 'INV', None, 0.9, 'jev') == 'inverse_too_late'
+    src = inspect.getsource(p.cycle)
+    assert "(gate := inverse_refusal(" in src and "candidate, reason = None, 'jev_wait'" in src
+
+
+def test_every_ranked_strength_stock_gets_its_own_reason(tmp_path):  # user 11-20 "한진칼 왜 안 샀는지도 기록"
+    import json as _j
+    now = datetime(2026, 11, 20, 13, 30, tzinfo=ZoneInfo('Asia/Seoul'))
+    (tmp_path / 'watchlist.json').write_text(_j.dumps({'time': now.isoformat(),
+                                                      'probabilities': {'005930': 0.43, '180640': 0.25, '128940': 0.11}}))
+    flat = [{'stck_prpr': str(240000)} for _ in range(10)]  # 한진칼 up 10% but not rising this minute
+    down = [{'stck_prpr': str(184000 - i * 100)} for i in range(10)]
+    movers = {'180640': {'price': 240000, 'change_pct': 10.0}, '005930': {'price': 184000, 'change_pct': -6.0}}
+    with patch.object(p, 'cooling', return_value=False), patch.object(p, 'RISING_CHECK', True):
+        assert p.strength_candidate(tmp_path, movers, {'180640': flat, '005930': down}, now)[0] is None
+    whys = p.strength_whys()
+    assert whys['005930'] == 'strength_change_out_of_range' and whys['180640'] == 'trend_not_rising'
+    assert whys['128940'] == 'not_in_movers'
+    assert p.strength_whys('180640', 'careful_reentry_chase')['180640'] == 'careful_reentry_chase'

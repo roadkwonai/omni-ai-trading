@@ -1,3 +1,4 @@
+import pytest
 import unittest
 import sqlite3
 import json
@@ -246,13 +247,13 @@ def test_the_tranche_amount_is_locked_under_share_sizing_and_an_example_shows_bo
     assert not ui.exception
     assert not any(n.key == 'sizing_test_live-t_tranche_off' for n in ui.number_input)  # amount: editable
     text = ' '.join(m.value for m in ui.markdown)
-    assert '이 계좌 예시' in text and '금액 기준 ◀ 지금' in text
-    assert all(word in ui.radio(key='sizing_test_live-t_sizing').help for word in ('1주 기준', '금액 기준', '이 계좌 예시'))
+    assert '이 계좌는 이렇게 따라 삽니다' in text and '금액 비율이면 ◀ 지금 설정' in text  # plain words (user 2026-11-20)
+    assert all(word in ui.radio(key='sizing_test_live-t_sizing').help for word in ('1주씩', '금액 비율', '100% = 모의 수량 그대로'))
     ui.radio(key='sizing_test_live-t_sizing').set_value('share').run()
     assert not ui.exception
     box = ui.number_input(key='sizing_test_live-t_tranche_off')
     assert box.disabled and box.value == 300_000  # the saved amount is kept for 금액 기준
-    assert '1주 기준 ◀ 지금' in ' '.join(m.value for m in ui.markdown)
+    assert '1주씩이면 ◀ 지금 설정' in ' '.join(m.value for m in ui.markdown)
 
 
 def _orders_page():
@@ -1343,6 +1344,26 @@ def test_display_quotes_run_together_but_start_at_most_five_a_second():
     assert app.display_quotes(read, codes, 30) == quotes and len(read.starts) == 7  # within the ttl: no new calls
 
 
+def test_display_prices_ask_kiwoom_once_and_nh_only_for_what_it_missed(monkeypatch):
+    # 2026-11-20 NH call plan P1: the sidebar quotes (every session, every refresh) were NH's second-largest display load
+    import kiwoom_data
+    asked, nh = [], []
+    answer = [{'stk_cd': '069500_AL', 'cur_prc': '-50120', 'base_pric': '51000'}, {'stk_cd': '005930', 'cur_prc': '+70100', 'base_pric': '70000'}]
+    monkeypatch.setattr(kiwoom_data, 'call', lambda api, body, key, max_pages=1: asked.append(body['stk_cd']) or answer)
+    monkeypatch.setattr(app, 'display_quotes', lambda read, codes, ttl: nh.extend(codes) or {c: {'iem_cd': c, 'stck_prpr': 9, 'stck_prdy_clpr': 9} for c in codes})
+    app._read_cache().clear()
+    quotes = app.display_prices(None, ['069500', '005930', '114800'], 30)
+    assert quotes['069500'] == ({'iem_cd': '069500', 'stck_prpr': 50120.0, 'stck_prdy_clpr': 51000.0, 'stck_oprc': 0,
+                                  'stck_hgpr': 0, 'acml_vol': 0}, 'kiwoom')
+    assert quotes['114800'][1] == 'nh' and nh == ['114800'] and asked == ['069500|005930|114800']
+    app.display_prices(None, ['069500', '005930', '114800'], 30)
+    assert len(asked) == 1  # within the ttl: Kiwoom is not asked again
+    monkeypatch.setattr(kiwoom_data, 'call', lambda *a, **k: (_ for _ in ()).throw(OSError('down')))
+    app._read_cache().clear()
+    assert {s for _, s in app.display_prices(None, ['069500'], 30).values()} == {'nh'}  # Kiwoom down: NH as before
+    app._read_cache().clear()
+
+
 def test_a_long_term_account_charts_its_own_etfs_not_jev_trading_symbols():
     # user 2026-11-18: 실계좌 2(장기투자) showed the inverse and Jev's watchlist; it trades the long-term ETFs only
     import app, vibe_longterm as L
@@ -1534,3 +1555,77 @@ def test_fill_rows_put_each_stock_on_its_own_line_by_trading_day_and_minute():
     assert [r['날짜'] for r in rows] == ['11/13(금)', '11/13(금)', '11/16(월)'] and days == ['11/13(금)', '11/16(월)']
     assert [r['장중 분'] for r in rows] == [31, 370, 60] and rows[0]['종목'] == 'KODEX 200' and rows[2]['종목'] == '005930'
     assert [r['금액'] for r in rows] == [100_000, 101_000, 200_000] and rows[1]['구분'] == '매도'
+
+
+def test_shared_snapshot_serves_other_sessions_until_a_refresh():
+    app._read_cache().pop(('broker-snapshot', 'live', 'acct-x'), None)
+    calls = []
+    fetch = lambda: calls.append(1) or {'n': len(calls)}
+    assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 1}
+    assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 1}  # a second tab within the window reuses it
+    assert app.shared_snapshot('live', 'acct-x', fetch, fresh=True) == {'n': 2}  # the refresh button reads again
+    with patch.object(app.time, 'monotonic', return_value=app.time.monotonic() + app.SHARED_SNAPSHOT_S + 1):
+        assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 3}
+
+
+def test_listing_quotes_take_prices_from_kiwoom_and_only_listing_fields_from_nh(monkeypatch):
+    # 2026-11-20 NH call audit: the new-listing panel read every listing's NH quote once a minute in every tab
+    import kiwoom_data
+    answer = [{'stk_cd': '471800', 'cur_prc': '9180', 'base_pric': '9000', 'open_pric': '9050', 'high_pric': '9300', 'trde_qty': '1200'}]
+    monkeypatch.setattr(kiwoom_data, 'call', lambda *a, **k: answer)
+    ttls = []
+    nh = {'iem_cd': '471800', 'iem_nm': '에이엘로봇', 'stck_prpr': 1, 'stck_lstn_date': '20261118', 'lstn_stcn_unit0': 5000}
+    monkeypatch.setattr(app, 'display_quotes', lambda read, codes, ttl: ttls.append(ttl) or {c: dict(nh) for c in codes})
+    app._read_cache().clear()
+    q = app.listing_quotes(None, ['471800'])['471800']
+    assert (q['stck_prpr'], q['stck_hgpr'], q['acml_vol'], q['stck_lstn_date'], q['lstn_stcn_unit0']) == (9180, 9300, 1200, '20261118', 5000)
+    assert ttls == [app.LISTING_FIELDS_S]  # NH only for the day-stable fields, kept for hours
+    app._read_cache().clear()
+
+
+def test_minute_charts_come_from_kiwoom_shifted_to_nh_stamps_and_fall_back_to_nh(monkeypatch):
+    # user 2026-11-20 '차트만 바꿔줘': display charts only; Kiwoom stamps a bar by its first minute, NH by its last
+    import kiwoom_data
+    rows = [{'cntr_tm': '20261120130000', 'open_pric': '+100', 'high_pric': '+102', 'low_pric': '-99', 'cur_prc': '+101', 'trde_qty': '7'},
+            {'cntr_tm': '20261120080500', 'open_pric': '100', 'high_pric': '100', 'low_pric': '100', 'cur_prc': '100', 'trde_qty': '1'}]  # NXT
+    monkeypatch.setattr(kiwoom_data, 'call', lambda *a, **k: rows)
+    app._read_cache().clear()
+    bars = app.period_bars(None, '069500', '1분')
+    assert len(bars) == 1 and bars[0]['close'] == 101 and bars[0]['volume'] == 7
+    assert datetime.fromtimestamp(bars[0]['time'], app.KST).strftime('%H:%M') == '13:01'
+    monkeypatch.setattr(kiwoom_data, 'call', lambda *a, **k: (_ for _ in ()).throw(OSError('down')))
+    app._read_cache().clear()
+    asked = []
+    monkeypatch.setattr(app, 'cached_tool', lambda read, tool, args, ttl=0: asked.append(args['operationId']) or {'status': 'error'})
+    with pytest.raises(ValueError):
+        app.period_bars(None, '069500', '1분')
+    assert asked == ['krstockQuotePeriod']  # Kiwoom down: NH as before
+    app._read_cache().clear()
+
+
+def test_block_rows_show_the_last_cycle_and_why_each_stock_waited():
+    # user 2026-11-20 '대시보드에서 차단 사유도 보이게 해줘'
+    day = datetime(2026, 11, 20, tzinfo=app.KST).date()
+    events = [
+        {'time': '2026-11-20T13:35:40+09:00', 'event': 'v2_entry_gate', 'choice': 'INV', 'permitted': False,
+         'reason': 'inverse_low_confidence', 'cycle_id': 'a'},
+        {'time': '2026-11-20T13:36:17+09:00', 'event': 'v2_entry_gate', 'choice': 'WAIT', 'permitted': False, 'reason': 'jev_wait',
+         'strength_reasons': {'005930': 'strength_change_out_of_range', '180640': 'trend_not_rising'}, 'ipo_reason': 'below_open', 'cycle_id': 'a'},
+        {'time': '2026-11-20T13:37:50+09:00', 'event': 'v2_entry_gate', 'choice': 'WAIT', 'permitted': False, 'reason': 'jev_wait',
+         'strength_reasons': {'180640': 'pick_cooldown'}, 'cycle_id': 'b'},
+        {'time': '2026-11-20T13:38:00+09:00', 'event': 'v2_entry_gate', 'choice': 'INV', 'permitted': True, 'cycle_id': 'c'}]
+    latest, stocks = app.block_rows(events, day)
+    assert [s.get('reason') for s in latest['steps']] == ['jev_wait']  # cycle b
+    hanjin = next(r for r in stocks if r['code'] == '180640')
+    assert (hanjin['count'], hanjin['last_why'], hanjin['reasons']) == (2, 'pick_cooldown', {'trend_not_rising': 1, 'pick_cooldown': 1})
+    assert next(r for r in stocks if r['code'] == 'INV')['last_why'] == 'inverse_low_confidence'
+    assert app.entry_reason_label('trend_not_rising') == '최근 분봉 상승 아님'
+
+
+def test_a_wait_after_a_refused_pick_reads_as_the_hand_off():  # user 2026-11-20 '인버스 막힌 회차 표기도 고쳐줘'
+    steps = [{'choice': 'INV', 'reason': 'inverse_too_late'}, {'choice': 'WAIT', 'reason': 'jev_wait'}]
+    names = {'INV': 'KODEX 인버스'}
+    assert app.step_line(steps[0], steps, names) == '**Jev 선택 KODEX 인버스** → 인버스: 지수가 이미 많이 빠짐'
+    assert app.step_line(steps[1], steps, names) == '**KODEX 인버스 막힘** → 강도·신규주 경로로 넘김'
+    alone = [{'choice': 'WAIT', 'reason': 'jev_wait'}]
+    assert app.step_line(alone[0], alone, names) == '**Jev 대기** → Jev 대기 의견'

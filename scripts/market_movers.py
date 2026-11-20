@@ -79,6 +79,57 @@ def scan(read, universe, gap=0.0, clock=time.monotonic, sleep=time.sleep):
     return rows
 
 
+def kiwoom_scan(universe):
+    """scan()'s rows from Kiwoom ka10095 (2026-11-20 NH call plan P2, docs/nh-call-reduction-plan.md): one call per 100
+    codes instead of one NH quote each. Same fields and units (value_mil in 백만원 like NH acml_tr_pbmn); a halted or
+    unpriced code is dropped as scan() drops it. Raises when Kiwoom fails, so the caller can fall back to NH."""
+    import kiwoom_data
+    codes, rows = list(universe), []
+    for i in range(0, len(codes), 100):
+        for s in kiwoom_data.call('ka10095', {'stk_cd': '|'.join(codes[i:i + 100])}, 'atn_stk_infr', max_pages=1):
+            code = str(s.get('stk_cd') or '').split('_')[0]  # '090430_AL' (KRX+NXT) -> '090430'
+            price, previous, volume, value = (kiwoom_data.num(s.get(k)) for k in ('cur_prc', 'base_pric', 'trde_qty', 'trde_prica'))
+            if code not in universe or None in (price, previous, volume, value):
+                continue
+            price, previous = abs(price), abs(previous)
+            if price <= 0 or previous <= 0 or volume <= 0:
+                continue
+            meta = universe[code]
+            rows.append({'code': code, 'name': meta['name'].lstrip('*'), 'index': meta['index'], 'price': int(price),
+                         'change_pct': round((price / previous - 1) * 100, 2), 'volume': int(volume), 'value_mil': int(value)})
+    return rows
+
+
+KIWOOM_MIN_SHARE = 0.9  # Kiwoom must price this share of the codes, else the NH scan answers
+
+
+def quote_rows(read, quoted, log=print):
+    """(rows, 'kiwoom' | 'nh'): Kiwoom first (11-20 same-moment bench: four top-10 rankings and the ten candidates
+    identical to NH's, 62 codes in one call, 0.1 s against 62 NH calls), NH scan() when Kiwoom fails or prices too few."""
+    try:
+        rows = kiwoom_scan(quoted)
+        if len(rows) >= KIWOOM_MIN_SHARE * len(quoted):
+            return rows, 'kiwoom'
+        log(json.dumps({'kiwoom_quotes': 'too_few', 'rows': len(rows), 'codes': len(quoted)}))
+    except Exception as exc:  # noqa: BLE001 - no key or Kiwoom down: NH as before
+        log(json.dumps({'kiwoom_quotes_error': type(exc).__name__}))
+    return scan(read, quoted, gap=SCAN_GAP), 'nh'
+
+
+def nh_candidates(read, universe, candidates, by_code):
+    """After a Kiwoom-priced rank(): the candidates (what Jev is offered) quoted again from NH, so every figure Jev reads
+    stays NH's (2026-11-20 NH call plan P2, option 1; ~10 NH calls a round instead of ~60). The other rows keep Kiwoom's
+    figures for the ranking tables, marked source 'kiwoom' (the runner never lays those over Jev's inputs)."""
+    for code in by_code:
+        by_code[code] = {**by_code[code], 'source': 'kiwoom'}
+    for row in scan(read, {c: universe[c] for c in candidates if c in universe}, gap=SCAN_GAP):
+        by_code[row['code']] = row
+        candidates[row['code']] = {**row, 'reasons': candidates[row['code']]['reasons']}
+    for code, entry in candidates.items():
+        if by_code.get(code, {}).get('source') == 'kiwoom':
+            candidates[code] = {**entry, 'source': 'kiwoom'}  # NH did not answer: Kiwoom's figures, marked
+
+
 PRESELECT = 20  # universe codes from each Kiwoom ranking; rank() keeps the top 10 of each from NH's own quotes (15 missed
 # a 10th riser at the cutoff on 2026-11-17: the order shifts between the Kiwoom read and the NH quotes)
 _RISE_FALL = {'mrkt_tp': '000', 'trde_qty_cnd': '0000', 'stk_cnd': '16', 'crd_cnd': '0', 'updown_incls': '1', 'pric_cnd': '0',
@@ -339,13 +390,16 @@ def main():
                 universe, universe_day = constituents(read), now.date()
             started = time.time()
             quoted, source = targets(universe, lambda line: print(line, flush=True))
-            rows = scan(read, quoted, gap=SCAN_GAP)
+            rows, quote_source = quote_rows(read, quoted, lambda line: print(line, flush=True))
             rankings, candidates, by_code = rank(rows)
+            if quote_source == 'kiwoom':
+                nh_candidates(read, universe, candidates, by_code)
             picks = theme_round(read, universe, candidates, datetime.now(KST), lambda line: print(line, flush=True))
             for pick in picks:
                 candidates[pick['code']] = pick
                 by_code[pick['code']] = {k: v for k, v in pick.items() if k not in ('reasons', 'theme_group')}
-            payload = {'time': datetime.now(KST).isoformat(), 'scanned': len(rows), 'source': source, 'universe': len(universe),
+            payload = {'time': datetime.now(KST).isoformat(), 'scanned': len(rows), 'source': source, 'quote_source': quote_source,
+                       'universe': len(universe),
                        'seconds': round(time.time() - started, 1), 'rankings': rankings,
                        'candidates': candidates, 'theme_picks': [{'code': p['code'], 'group': p['theme_group']} for p in picks],
                        'rows': {c: by_code[c] for c in [*(c for r in rankings.values() for c in r), *(p['code'] for p in picks)]}}

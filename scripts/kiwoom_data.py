@@ -148,3 +148,21 @@ def num(text):
         return float(s)
     except ValueError:
         return None
+
+
+def nxt_premarket_bars(code, now=None):
+    """Today's NXT pre-market (08:00~08:50) 1-minute bars of a stock from ka10080 with the `_NX` code, newest first:
+    [{'bsop_time', 'stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr', 'vol'}] (time = the bar's start minute, prices
+    without the direction sign). User 2026-11-20: the opening entry chart of a stock (NH Namuh Plug has no NXT pre-market
+    bars; checked 11-20). [] when none."""
+    now = now or datetime.now(KST)
+    day = f'{now:%Y%m%d}'
+    out = []
+    for r in call('ka10080', {'stk_cd': f'{code}_NX', 'tic_scope': '1', 'upd_stkpc_tp': '0'}, 'stk_min_pole_chart_qry', max_pages=1):
+        t = str(r.get('cntr_tm') or '')
+        values = [abs(num(r.get(f)) or 0) for f in ('open_pric', 'high_pric', 'low_pric', 'cur_prc')]
+        if t[:8] != day or not '080000' <= t[8:] < '085000' or not all(values):
+            continue
+        out.append({'bsop_time': t[8:], **{k: str(int(v)) for k, v in zip(('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr'), values)},
+                    'vol': str(int(abs(num(r.get('trde_qty')) or 0)))})
+    return sorted(out, key=lambda r: r['bsop_time'], reverse=True)

@@ -27,7 +27,7 @@ SERVICES = {
     'market-movers': (['scripts/market_movers.py'], 'shared-etf-paper', False, (8, 50, WEEKDAYS)),
     'premarket': (['scripts/premarket.py', '--once'], 'shared-etf-paper', False,
                   tuple((hour, minute, WEEKDAYS) for hour, minute in [(7, 40), *[(8, m) for m in range(0, 60, 5)], (9, 0), (9, 10)])),  # NXT pre-market every 5 min (2026-11-19)
-    'trading-day-start': (['scripts/trading_day_start.py'], 'shared-etf-paper', False, (9, 0, WEEKDAYS)),
+    'trading-day-start': (['scripts/trading_day_start.py'], 'shared-etf-paper', False, (8, 55, WEEKDAYS)),
     # 장전 사전 점검 (user 2026-11-18): read-only checks, failures to Discord; the 08:25 task 'trading-preflight' fixes them
     'preflight': (['scripts/preflight.py'], 'shared-etf-paper', False, ((8, 20, WEEKDAYS), (8, 53, WEEKDAYS))),
     # retired 2026-11-17 (user): vibe-advisor, vibe-paper, vibe-fast-exit-observer, vibe-event-advisor, vibe-event-replay and
@@ -49,9 +49,9 @@ SERVICES = {
     # armed with --execute (user request 2026-11-13); orders go out only while the dashboard's live-order switch
     # (accounts.json live_orders, default off) and the automation switch are on, otherwise the mirror only plans
     'live-follow-1': (['scripts/nh_live_follow.py', '--execute', '--account', 'live-1'], 'live-follow', False, (8, 58, WEEKDAYS)),
-    # 실계좌 2 on the long-term engine (user 2026-11-17, docs/longterm-live-account-plan.md): plans only (no --execute);
-    # real orders need --execute here plus the account's live-order switch, a separate user approval
-    'longterm-live-2': (['scripts/longterm_live.py', '--account', 'live-2'], 'longterm-live', False, (9, 35, WEEKDAYS)),
+    # 실계좌 2 on the long-term engine (user 2026-11-17, docs/longterm-live-account-plan.md); armed with --execute
+    # (user approval 2026-11-20): orders go out only while the account's live-order and automation switches are on
+    'longterm-live-2': (['scripts/longterm_live.py', '--execute', '--account', 'live-2'], 'longterm-live', False, (9, 35, WEEKDAYS)),
     # NXT close-bet strategy on virtual fills: the evening session decides, the morning session exits and labels.
     # run at load too (11/17): a reboot after 07:55 (11/13 08:07, 11/16 08:08) skipped the morning session; outside its
     # windows the script does nothing

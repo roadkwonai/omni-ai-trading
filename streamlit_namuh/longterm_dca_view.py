@@ -25,7 +25,7 @@ def auto_manual_rows(cfg, yeo=False, value=None):
     p = D.rule(cfg)
     what = (('수동 · 내가', f"고른 {len(cfg['picks'])}종목") if cfg['pick_on'] else ('자동 · 계좌 전략', '전략이 사는 종목(여운봉 계좌는 70:30 짝, 거장 모듈 계좌는 KOFR 뺀 목표)'))
     at = (('자동 · 거장', f'장중 전일 종가 이하일 때 · 늦어도 {D.TIMES[1]}') if cfg['time_mode'] == 'auto' else ('수동 · 내가', cfg['time']))
-    size = D.size_text(cfg, p, None, value=value, yeo=yeo) if cfg['size_by'] == 'master' else (f"종목별 {cfg['shares_n']}주" if cfg['size'] == 'shares' else f"1회 {cfg['amount_krw']:,}원")
+    size = D.size_text(cfg, p, None, value=value, yeo=yeo) if cfg['size_by'] == 'master' or cfg['frequency'] == 'deposit' else (f"종목별 {cfg['shares_n']}주" if cfg['size'] == 'shares' else f"1회 {cfg['amount_krw']:,}원")
     return [{'항목': name, '방식': way, '내용': text} for name, (way, text) in
             (('언제 사나', (D.BY[cfg['when_by']], D.when_text(cfg, p))), ('얼마나', (D.BY[cfg['size_by']], size)), ('무엇을', what), ('몇 시에', at))]
 
@@ -236,10 +236,19 @@ def render(root, settings):
     for key, label in books(records):
         cfg = settings['dca'].get(key) or D.clean({})
         state = book_state(root, key)
+        size_note = None  # the master's size caption of this card (a placeholder, filled once 주기 is known)
         with st.container(border=True):
             head, switch = st.columns([3, 1], vertical_alignment='center')
-            head.markdown(f"**{label}** · " + (f":green[켜짐] · {schedule_text(cfg)}" if cfg['on'] else ':gray[꺼짐]'))
+            head.markdown(f"**{label}** · " + (f":green[켜짐] · {schedule_text(cfg)}" if cfg['on'] else
+                                               f":orange[꺼짐 · 적립 알림만] · {schedule_text(cfg)}" if cfg['alert'] else ':gray[꺼짐]'))
             on = switch.toggle('적립식 켜기', value=cfg['on'], key=f'dca_on_{key}', help=G.tip('on'))
+            alert = cfg['alert']
+            if key != 'actual':  # 적립 알림 (2026-11-20): a live account only (the virtual book needs no reminder)
+                alert = switch.toggle('꺼져도 적립 알림', value=cfg['alert'], key=f'dca_alert_{key}', disabled=on, help=G.tip('alert'))
+                if alert and not on:
+                    st.info('적립식은 주문하지 않고, 아래 설정대로 거장이 사는 날마다 Discord 장기투자 채널로 **무엇을·몇 주·현재가·약 얼마**를 알립니다. '
+                            '다른 계좌에서 참고해 직접 사세요. 금액은 아래 1회 적립 금액(또는 들어오는 적립금) 기준이고, 입금할 때는 매일 그 금액으로 알립니다.',
+                            icon=':material/notifications_active:')
             st.caption(f"누적 적립 {state.get('contributed_krw', 0):,.0f}원 · 적립식 몫(아직 안 산 적립금) {state.get('waiting_krw', 0):,.0f}원 · "
                        f"마지막 적립 {state.get('last_contribution') or '—'} · 마지막 매수 {state.get('last_buy') or '—'}"
                        + (f" · {carry}" if (carry := carry_text(state, listed)) else '')
@@ -287,11 +296,7 @@ def render(root, settings):
                                                  key=f'dca_every_{key}', help=G.tip('buy_every')) or cfg['buy_every']
                     import longterm_inputs_guide as IG
                     IG.button(f'dca_inputs_{key}', '기능별 판단', label='거장은 무엇을 보나(국면·하락일·급락일·매수 시각)')
-                if size_by == 'master':
-                    st.caption("얼마나 · 거장: " + (f"장부 가치 × 주 {D.RATE:.2%}와 적립금 속도 × {D.PACE:.0%} 중 큰 값이 기본이고, 현금 하한 {p['floor']:.0%}까지만 씁니다(여운봉 계좌)." if yeo_book else
-                               f"들어오는 적립금 속도 × {D.PACE:.0%}가 기본입니다. 남는 적립금은 적립식 몫에 쌓이고, 적립 한 번 몫을 넘는 부분은 "
-                               "매수마다 1/8씩 더 씁니다(상한 기본의 1.5배). 그래서 국면 배수가 큰 날·거장일수록 더 빨리 들어갑니다.")
-                               + ' 한 번에 기본의 1.5배를 넘지 않습니다.')
+                size_note = st.empty()  # filled once 주기 is chosen below (입금할 때 sizes differently)
                 with st.expander('거장 값 미세 조정' + (f' · {D.tune_text(cfg["tune"])}' if cfg['tune'] else ''), expanded=bool(cfg['tune']),
                                  icon=':material/tune:'):
                     tune = EV.tune_editor(f'dca_tune_{key}', D.clean({**cfg, 'profile': profile, 'tune': cfg['tune'] if profile == cfg['profile'] else {}}),
@@ -302,23 +307,47 @@ def render(root, settings):
                                                key=f'dca_mewhen_{key}', help=G.tip('me_when')) or cfg['me_when']
             b, c = st.columns(2)
             amount, shares_n = cfg['amount_krw'], cfg['shares_n']
-            if size == 'shares' and size_by == 'me':
+            spread, share_pct = cfg['spread_weeks'], cfg['deposit_pct']
+            on_signal = size == 'shares' and when_by == 'master' and size_by == 'me'  # my N shares come in on the master's buy days
+            # 입금할 때 (2026-11-20): a live account only (the virtual book has no real deposit)
+            freqs = [f for f in D.FREQUENCIES if f != 'deposit' or key != 'actual']
+            if on_signal:
+                frequency = cfg['frequency']
+                c.caption('주기: 거장이 살 때마다(위 매수 빈도에 한 번까지)')
+            else:
+                frequency = c.segmented_control('주기', freqs, default=cfg['frequency'] if cfg['frequency'] in freqs else 'monthly',
+                                                format_func=D.FREQUENCIES.get, key=f'dca_freq_{key}', help=G.tip('frequency')) or cfg['frequency']
+            if frequency == 'deposit':
+                spread = b.number_input('입금 몫을 나눠 사는 기간(주)', *D.SPREAD_WEEKS, cfg['spread_weeks'], step=1, key=f'dca_spread_{key}',
+                                        help=G.tip('spread_weeks'))
+                share_pct = b.number_input('입금 중 적립식으로 살 비율(%)', *D.DEPOSIT_PCT, cfg['deposit_pct'], step=10, key=f'dca_deppct_{key}',
+                                           help=G.tip('deposit_pct'))
+                seen = (state or {}).get('capital_seen')
+                b.caption('입금한 뒤 계좌·자동매매에서 운용금을 올리면, 올린 금액의 위 비율이 적립식 몫이 됩니다(나머지는 계좌 전략의 저수지). '
+                          '지금 있는 돈과 매도 대금은 적립식이 쓰지 않습니다. '
+                          + (f'기준 운용금 {seen:,.0f}원 · 남은 입금 몫 {(state or {}).get("waiting_krw", 0):,.0f}원.' if type(seen) in (int, float)
+                             else '처음 확인 때 지금 운용금을 기준으로 잡습니다.'))
+            elif size == 'shares' and size_by == 'me':
                 shares_n = b.number_input('종목별 주식 수', D.SHARES_N[0], D.SHARES_N[1], cfg['shares_n'], step=1, key=f'dca_shares_{key}',
                                           help=G.tip('shares_n'))
             else:
                 amount = b.number_input('1회 적립 금액(원)' if size == 'amount' else '들어오는 적립금(원) · 거장이 이 안에서 수량을 정함',
                                         D.AMOUNT[0], D.AMOUNT[1], cfg['amount_krw'], step=100_000, key=f'dca_amount_{key}', help=G.tip('amount'))
-            on_signal = size == 'shares' and when_by == 'master' and size_by == 'me'  # my N shares come in on the master's buy days
-            if on_signal:
-                frequency = cfg['frequency']
-                c.caption('주기: 거장이 살 때마다(위 매수 빈도에 한 번까지)')
-            else:
-                frequency = c.segmented_control('주기', list(D.FREQUENCIES), default=cfg['frequency'], format_func=D.FREQUENCIES.get,
-                                                key=f'dca_freq_{key}', help=G.tip('frequency')) or cfg['frequency']
+            if size_by == 'master' and size_note is not None:
+                if frequency == 'deposit':
+                    size_note.caption('얼마나 · 거장 · 입금할 때: 입금 몫 ÷ (나눠 사는 주 수 × 매수 빈도)가 기본이고 국면 배수를 곱합니다. 입금 몫 안에서만 쓰고'
+                                      + (f", 현금 하한 {p['floor']:.0%}도 지킵니다(여운봉 계좌)." if yeo_book else '.') + ' 한 번에 기본의 1.5배를 넘지 않습니다.')
+                else:
+                    size_note.caption("얼마나 · 거장: " + (f"장부 가치 × 주 {D.RATE:.2%}와 적립금 속도 × {D.PACE:.0%} 중 큰 값이 기본이고, 현금 하한 {p['floor']:.0%}까지만 씁니다(여운봉 계좌)." if yeo_book else
+                                      f"들어오는 적립금 속도 × {D.PACE:.0%}가 기본입니다. 남는 적립금은 적립식 몫에 쌓이고, 적립 한 번 몫을 넘는 부분은 "
+                                      "매수마다 1/8씩 더 씁니다(상한 기본의 1.5배). 그래서 국면 배수가 큰 날·거장일수록 더 빨리 들어갑니다.")
+                                      + ' 한 번에 기본의 1.5배를 넘지 않습니다.')
             d, e = st.columns(2)
             day, weekday = cfg['day'], cfg['weekday']
             if on_signal:
                 pass
+            elif frequency == 'deposit':
+                d.caption('입금할 때: 정한 날이 없습니다. 입금 몫이 있는 동안 위 언제 규칙대로 삽니다.')
             elif frequency == 'monthly':
                 day = d.number_input('매월 며칠', 1, 28, cfg['day'], key=f'dca_day_{key}', help=G.tip('day'))
             elif frequency == 'weekly':
@@ -339,7 +368,8 @@ def render(root, settings):
             limits = limits_form(cfg, key, listed, ideas)
             new = {'on': on, 'style': style, 'profile': profile, 'when_by': when_by, 'size_by': size_by, 'me_when': me_when, 'buy_every': every,
                    'amount_krw': int(amount), 'size': size, 'shares_n': int(shares_n), 'frequency': frequency,
-                   'day': int(day), 'weekday': int(weekday), 'time': at, 'time_mode': time_mode, 'tune': tune, **limits}
+                   'day': int(day), 'weekday': int(weekday), 'time': at, 'time_mode': time_mode, 'tune': tune,
+                   'spread_weeks': int(spread), 'deposit_pct': int(share_pct), 'alert': bool(alert), **limits}
             with summary_box:  # what the card's values (saved or not) do: longterm_dca.effective, the same rule as the engine
                 head_, fill_ = st.columns([4, 1], vertical_alignment='center')
                 head_.markdown('**자동 · 수동 한눈에** :gray[(아래에서 항목마다 정함)]',

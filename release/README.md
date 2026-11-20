@@ -4,6 +4,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 | 릴리스 | 날짜 | 노트 |
 | --- | --- | --- |
+| v0.1.3 · 개장 즉시 진입과 인버스 규칙 강화 | 2026-11-20 | [2026-11-20-v0.1.3-opening-and-inverse.md](2026-11-20-v0.1.3-opening-and-inverse.md) |
 | v0.1.2 · 주도 테마 동반주와 수능일 시각 보정 | 2026-11-20 | [2026-11-20-v0.1.2-theme-companions.md](2026-11-20-v0.1.2-theme-companions.md) |
 | v0.1.1 · 투자 철학 소개와 알림 설정 안내 | 2026-11-19 | [2026-11-19-v0.1.1-investment-story.md](2026-11-19-v0.1.1-investment-story.md) |
 | v0.1.0 · 첫 공개 릴리스 | 2026-11-19 | [2026-11-19-v0.1.0-first-public-release.md](2026-11-19-v0.1.0-first-public-release.md) |

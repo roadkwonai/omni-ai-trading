@@ -106,6 +106,43 @@ class ObserverTest(unittest.TestCase):
                 self.assertEqual(len(reader.calls), 7)
                 self.assertTrue(all(row['minute_source'] == 'market_context' for row in result['symbols'].values()))
 
+    def test_market_context_with_watchlist_charts_still_lends_its_etf_bars(self):
+        # 11-20: the runner logs ETF7 plus watchlist stock charts; an exact-set match never matched, so every run read
+        # the seven minute charts from NH again
+        now = datetime(2026, 11, 11, 11, 10, tzinfo=KST)
+        event, days = fixture(now)
+        market = {**event, 'event': 'market_context', 'universe': 'etf7', 'context': 'entry',
+                  'market_bars': {**event['market_bars'], '005930': event['market_bars']['K200']}}
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'events.jsonl'
+            path.write_text(json.dumps(market) + '\n')
+            reader = Reader(now, days)
+            result = observe(reader, path, lambda: now)
+        self.assertEqual(result['status'], 'ready')
+        self.assertFalse([p for _, p in reader.calls if p['input']['gubun'] == '5'])
+
+    def test_the_daily_history_is_read_once_a_day_with_a_shared_cache(self):
+        # 11-20: today's daily row is dropped, so the history does not change intraday; it was read every two minutes
+        now = datetime(2026, 11, 11, 11, 10, tzinfo=KST)
+        event, days = fixture(now)
+        cache = {}
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / 'events.jsonl'
+            path.write_text(json.dumps(event) + '\n')
+            reader = Reader(now, days)
+            first = observe(reader, path, lambda: now, daily_cache=cache)
+            later = now + timedelta(minutes=2)
+            path.write_text(json.dumps(fixture(later)[0]) + '\n')
+            again = Reader(later, days)
+            second = observe(again, path, lambda: later, daily_cache=cache)
+            tomorrow = now + timedelta(days=1)
+            path.write_text(json.dumps(fixture(tomorrow)[0]) + '\n')
+            fresh = Reader(tomorrow, fixture(tomorrow)[1])
+            observe(fresh, path, lambda: tomorrow, daily_cache=cache)
+        self.assertEqual((first['status'], second['status']), ('ready', 'ready'))
+        self.assertEqual((len(reader.calls), len(again.calls), len(fresh.calls)), (7, 0, 7))
+        self.assertEqual(second['symbols']['K200']['daily_sma_gap_pct'], first['symbols']['K200']['daily_sma_gap_pct'])
+
     def test_invalid_market_context_falls_back_to_readonly_minutes(self):
         now = datetime(2026, 11, 11, 11, 10, tzinfo=KST)
         event, days = fixture(now)
@@ -247,7 +284,7 @@ class ObserverTest(unittest.TestCase):
             requests = []
             def sleep(seconds):
                 current[0] += timedelta(seconds=seconds)
-            def fake_observe(reader, path, clock, sleeper):
+            def fake_observe(reader, path, clock, sleeper, daily_cache=None):
                 requests.append(clock())
                 return {'time': clock().isoformat(), 'status': 'unavailable', 'symbols': {}}
             with patch('etf_regime_observer.observe', side_effect=fake_observe):
@@ -267,7 +304,7 @@ class ObserverTest(unittest.TestCase):
                 current[0] += timedelta(seconds=seconds)
                 if observations:
                     current[0] = current[0].replace(hour=15, minute=0)
-            def fake_observe(reader, path, clock, sleeper):
+            def fake_observe(reader, path, clock, sleeper, daily_cache=None):
                 observations.append(clock())
                 return {'time': clock().isoformat(), 'status': 'ready', 'symbols': {}}
             with patch('etf_regime_observer.observe', side_effect=fake_observe):
@@ -289,7 +326,7 @@ class ObserverTest(unittest.TestCase):
                 elif len(observations) == 2:
                     (root / 'STOP').unlink(missing_ok=True)
                     current[0] = current[0].replace(hour=15, minute=0)
-            def fake_observe(reader, path, clock, sleeper):
+            def fake_observe(reader, path, clock, sleeper, daily_cache=None):
                 observations.append(clock())
                 return {'time': clock().isoformat(), 'status': 'ready', 'symbols': {}}
             with patch('etf_regime_observer.observe', side_effect=fake_observe):
@@ -309,8 +346,20 @@ class ObserverTest(unittest.TestCase):
             self.assertFalse(reader.calls)
             self.assertFalse((root / 'regime-observation.json').exists())
 
+    def test_watch_before_nine_waits_for_the_bell(self):  # user 2026-11-20: started 08:55, ready at 09:00
+        now = datetime(2026, 11, 16, 8, 59, tzinfo=KST)
+        _, days = fixture(now)
+        with tempfile.TemporaryDirectory() as td:
+            slept, current = [], [now]
+            def sleep(seconds):
+                slept.append(seconds); current[0] += timedelta(seconds=seconds)
+                if current[0] >= now.replace(hour=9, minute=0):
+                    (Path(td) / 'STOP').write_text('')
+            run(Path(td), Reader(now, days), watch=True, clock=lambda: current[0], sleeper=sleep)
+            self.assertEqual(slept[:2], [30, 30])  # waited the minute before the open, in 30-second steps
+
     def test_watch_preopen_weekend_and_before_nine_exit(self):
-        for now in (datetime(2026, 11, 14, 9, 0, tzinfo=KST), datetime(2026, 11, 16, 8, 59, tzinfo=KST)):
+        for now in (datetime(2026, 11, 14, 9, 0, tzinfo=KST), datetime(2026, 11, 16, 7, 59, tzinfo=KST)):
             _, days = fixture(now)
             with self.subTest(now=now), tempfile.TemporaryDirectory() as td:
                 reader = Reader(now, days)
@@ -339,7 +388,7 @@ class ObserverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td); current = [now]; attempts = []
             def sleep(seconds): current[0] += timedelta(seconds=seconds)
-            def fake_observe(reader, path, clock, sleeper):
+            def fake_observe(reader, path, clock, sleeper, daily_cache=None):
                 attempts.append(clock())
                 if len(attempts) == 1:
                     raise TimeoutError('private detail')

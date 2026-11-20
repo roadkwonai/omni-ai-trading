@@ -19,10 +19,9 @@ class RenderTest(unittest.TestCase):
         self.assertNotIn('StartCalendarInterval', L.render('shared-etf-paper'))
         self.assertEqual([d['Weekday'] for d in L.render('exit-replay')['StartCalendarInterval']], [5])
         self.assertEqual(L.schedule_text('market-movers'), '평일 08:50')
-        self.assertEqual(L.schedule_text('trading-day-start'), '평일 09:00')
-        live2 = L.render('longterm-live-2')  # 실계좌 2 long-term: plans only until --execute is approved
-        self.assertEqual((L.schedule_text('longterm-live-2'), live2['ProgramArguments'][-2:]), ('평일 09:35', ['--account', 'live-2']))
-        self.assertNotIn('--execute', live2['ProgramArguments'])
+        self.assertEqual(L.schedule_text('trading-day-start'), '평일 08:55')
+        live2 = L.render('longterm-live-2')  # 실계좌 2 long-term: armed (user 2026-11-20)
+        self.assertEqual((L.schedule_text('longterm-live-2'), live2['ProgramArguments'][-3:]), ('평일 09:35', ['--execute', '--account', 'live-2']))
         retired = {'vibe-advisor', 'vibe-paper', 'vibe-fast-exit-observer', 'vibe-event-advisor', 'vibe-event-replay', 'live-follow-2', 'jev-virtual'}
         self.assertFalse(retired & set(L.SERVICES))  # user 2026-11-17: vibe moves to a long-term engine
         longterm = L.render('vibe-longterm')

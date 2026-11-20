@@ -63,8 +63,12 @@ ME_WHENS = {'cycle': '계속(정한 날마다)', 'dip': '하락일 우선(정한
 MAX_WAIT_DAYS = 7  # 하락일 우선 (mine): bought at the latest this many days after the contribution day
 BUY_EVERY = {'day': '매일', 'week': '매주', 'month': '매월'}
 BUYS_PER_MONTH = {'day': 21.0, 'week': 4.35, 'month': 1.0}
-PER_PERIOD = {'daily': 'day', 'weekly': 'week', 'monthly': 'month'}  # a contribution frequency's buy period
-FREQUENCIES = {'monthly': '매월', 'weekly': '매주', 'daily': '매일'}
+PER_PERIOD = {'daily': 'day', 'weekly': 'week', 'monthly': 'month', 'deposit': 'day'}  # a contribution frequency's buy period
+FREQUENCIES = {'monthly': '매월', 'weekly': '매주', 'daily': '매일', 'deposit': '입금할 때'}
+# 입금할 때 (user approval 2026-11-20, docs/longterm-dca-deposit-plan.md): a live account's raised 운용금 is the deposit; no
+# calendar. deposit_pct of it becomes the 적립식's money (the rest stays the strategy's reservoir), spread over spread_weeks.
+DEPOSIT_PCT, SPREAD_WEEKS = (10, 100), (1, 26)
+BUYS_PER_WEEK = {'day': 5.0, 'week': 1.0, 'month': 1 / 4.35}
 TIME_MODES = {'fixed': '정한 시각', 'auto': '거장 자동(장중 시황)'}
 AUTO_CHECK_MIN = 5  # the automatic time looks every 5 minutes (each look reads the quotes)
 WEEKDAYS = ('월', '화', '수', '목', '금')
@@ -80,7 +84,9 @@ DEFAULT = {'on': False, 'profile': 'dalio', 'when_by': 'me', 'size_by': 'me', 'm
            'pick_on': False, 'picks': [], 'pick_from': {}, 'max_symbols_on': False, 'max_symbols': 3,
            'max_per_symbol_on': False, 'max_per_symbol': 100, 'max_total_on': False, 'max_total': 500,
            # 적립 크기 (user request 2026-11-18): amount_krw a time, or N shares of each chosen ETF
-           'size': 'amount', 'shares_n': 1, 'tune': {}, 'time_mode': 'fixed'}
+           'size': 'amount', 'shares_n': 1, 'tune': {}, 'time_mode': 'fixed', 'deposit_pct': 100, 'spread_weeks': 4,
+           # 적립 알림 (user 2026-11-20): with the 적립식 off, still say on its buy days what it would buy (no order)
+           'alert': False}
 SIZES = {'amount': '금액 기준', 'shares': '종목별 수량 기준'}
 SHARES_N = (1, 1_000)
 LIMITS = {'max_symbols': (1, 26),  # six engine ETFs + a full 관심목록 (longterm_watchlist.MAX)
@@ -159,11 +165,15 @@ def clean(cfg):
     out['picks'] = [k for i, k in enumerate(picks) if ok(k) and k not in picks[:i]]
     came = cfg.get('pick_from') if isinstance(cfg.get('pick_from'), dict) else {}
     out['pick_from'] = {k: v[:120] for k, v in came.items() if k in ASSETS and k in out['picks'] and isinstance(v, str) and v}
-    for key in ('pick_on', 'max_symbols_on', 'max_per_symbol_on', 'max_total_on'):
+    for key in ('pick_on', 'max_symbols_on', 'max_per_symbol_on', 'max_total_on', 'alert'):
         out[key] = cfg.get(key) is True
     for key, (lo, hi) in LIMITS.items():
         out[key] = clamp(cfg.get(key), lo, hi, DEFAULT[key])
     out['shares_n'] = clamp(cfg.get('shares_n'), *SHARES_N, DEFAULT['shares_n'])
+    out['deposit_pct'] = clamp(cfg.get('deposit_pct'), *DEPOSIT_PCT, DEFAULT['deposit_pct'])
+    out['spread_weeks'] = clamp(cfg.get('spread_weeks'), *SPREAD_WEEKS, DEFAULT['spread_weeks'])
+    if out['frequency'] == 'deposit' and out['size'] == 'shares' and out['size_by'] == 'me':  # my N shares need a calendar
+        out['size_by'] = 'master'
     out['tune'] = clean_tune(tune)
     out['time_mode'] = cfg.get('time_mode') if cfg.get('time_mode') in TIME_MODES else 'fixed'
     return out
@@ -203,9 +213,12 @@ def tune_text(tune):
     return ' · '.join(parts)
 
 
-def base_amount(cfg, p, every, value=None, yeo=False):
+def base_amount(cfg, p, every, value=None, yeo=False, state=None):
     """KRW one buy of the master's size starts from: the incoming 적립금 pace x p['pace'], or on a 여운봉 book the larger of that
-    and the book's value x the weekly rate, converted to one buy at frequency `every` (day / week / month)."""
+    and the book's value x the weekly rate, converted to one buy at frequency `every` (day / week / month). 입금할 때: the
+    deposit spread over spread_weeks (take_deposit), never the book's value (that is the reservoir, not a deposit)."""
+    if cfg['frequency'] == 'deposit':
+        return float((state or {}).get('deposit_base') or 0.0)
     inflow = cfg['amount_krw'] * BUYS_PER_MONTH[PER_PERIOD[cfg['frequency']]] * p['pace'] / BUYS_PER_MONTH[every]
     if yeo:  # the larger, so a small account still spends its 적립금 (50만 원 x 0.25% is 1,250원 a week)
         return max((value or 0) * p['rate'] * BUYS_PER_MONTH['week'] / BUYS_PER_MONTH[every], inflow)
@@ -347,6 +360,8 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
         buy = bool(want)
     elif by_master['when']:
         buy = bool(want) and master_day(cfg, p, state, now, ind, want, prices)
+    elif cfg['frequency'] == 'deposit':  # my day on a deposit: whenever deposit money waits (계속) or its first down day
+        buy = state['waiting_krw'] >= 1_000 and (cfg['me_when'] == 'cycle' or (bool(state.get('since')) and dip_now()))
     elif quantity:
         buy = due_now and (cfg['me_when'] == 'cycle' or dip_now())
     elif cfg['me_when'] == 'cycle':
@@ -375,16 +390,19 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
     elif buy and by_master['size']:
         every = cfg['buy_every'] if by_master['when'] else PER_PERIOD[cfg['frequency']]
         value = cash + sum((values or {}).values())
-        base = base_amount(cfg, p, every, value, yeo)
+        base = base_amount(cfg, p, every, value, yeo, state)
         mult, crash = multiplier(p, regime, ind)
         today = base * mult
+        deposit = cfg['frequency'] == 'deposit'
         # 덜 산 몫, caught up an eighth a buy: a module book's pool beyond today's buy and one contribution (what the 적립금
         # pace above the base left waiting, so no 적립금 waits forever), a 여운봉 book what its buys fell short of the base
-        behind = state['catch_krw'] if yeo else max(0.0, state['waiting_krw'] - today - cfg['amount_krw'])
+        behind = 0.0 if deposit else state['catch_krw'] if yeo else max(0.0, state['waiting_krw'] - today - cfg['amount_krw'])
         extra = behind * CATCH_SHARE if today < CAP * base else 0.0
         room = (cash - (reserved(state) - state['waiting_krw']) - p['floor'] * value) if yeo else min(state['waiting_krw'], free + state['waiting_krw'])
+        if deposit:  # only the deposit's money, and still above a 여운봉 book's cash floor
+            room = min(room, state['waiting_krw'])
         spend = max(0.0, min(today + extra, CAP * base, room))
-        if yeo and spend >= 1_000:  # only a real buy moves it (a day the cash floor blocks is not a buy)
+        if yeo and not deposit and spend >= 1_000:  # only a real buy moves it (a day the cash floor blocks is not a buy)
             state['catch_krw'] = max(0.0, behind - max(0.0, spend - today) + max(0.0, base - today))
         notes.append(f"{seen}: 기본 {base:,.0f}원 × {mult:g}배" + (' (급락일)' if crash else '') + (f" + 따라잡기 {extra:,.0f}원" if extra >= 1 else '')
                      + f" → {spend:,.0f}원" + (f" · 현금 하한 {p['floor']:.0%}" if yeo else f" · 적립식 몫 {state['waiting_krw']:,.0f}원 안에서"))
@@ -407,6 +425,11 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
         orders = {k: v for k, v in orders.items() if k not in unpriced and k not in small}
         if unpriced:
             notes.append(f"시세가 없어 {', '.join(map(name, unpriced))} {sum(unpriced.values()):,.0f}원은 사지 않음(현금으로 남음)")
+        # the part over whole shares is carried too (D5, 2026-11-20: 58,800원 at 23,315 bought 2 shares and 12,170원 left the 적립식)
+        rest = {k: v - share_cost(prices[k], int(v // (prices[k] * (1 + FEE)))) for k, v in orders.items()}
+        rest = {k: r for k, r in rest.items() if r >= 1}
+        orders = {k: v - rest.get(k, 0) for k, v in orders.items()}
+        small |= {k: small.get(k, 0) + r for k, r in rest.items()}
         if small:
             state['carry'] = {**state['carry'], **{k: state['carry'].get(k, 0) + v for k, v in small.items()}}
             notes.append('1주 미만이라 다음 적립 때 합쳐 사도록 이월: ' + ', '.join(f'{name(k)} {v:,.0f}원' for k, v in small.items()))
@@ -423,6 +446,10 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
 
 def size_text(cfg, p, regime, ind=None, value=None, yeo=False):
     """'다음 회차 약 23만 원(기본 16만 × 1.4배)' or my amount / shares, for the views and the chart."""
+    if cfg['frequency'] == 'deposit':
+        if cfg['size_by'] == 'me':
+            return '입금 몫 전부를 한 번에'
+        return f"입금 몫의 {cfg['deposit_pct']}%를 {cfg['spread_weeks']}주에 나눠 · 국면 배수 {multiplier(p, regime, ind)[0]:g}배"
     if cfg['size_by'] == 'me':
         return f"종목별 {cfg['shares_n']:,}주" if cfg['size'] == 'shares' else f"{cfg['amount_krw']:,}원"
     every = cfg['buy_every'] if cfg['when_by'] == 'master' else PER_PERIOD[cfg['frequency']]
@@ -435,7 +462,9 @@ def size_text(cfg, p, regime, ind=None, value=None, yeo=False):
 def when_text(cfg, p):
     if cfg['when_by'] == 'master':
         how = '하락일 우선(최대 ' + f"{p['wait']}일)" if p['when'] == 'dip' else '주기마다'
-        return f"거장이 매 거래일 확인 · {how} · {BUY_EVERY[cfg['buy_every']]} 한 번까지"
+        return f"거장이 매 거래일 확인 · {how} · {BUY_EVERY[cfg['buy_every']]} 한 번까지" + (' · 입금 몫이 있을 때' if cfg['frequency'] == 'deposit' else '')
+    if cfg['frequency'] == 'deposit':
+        return f"입금 몫이 있을 때 · {ME_WHENS[cfg['me_when']]}"
     cycle = {'monthly': f"매월 {cfg['day']}일", 'weekly': f"매주 {WEEKDAYS[cfg['weekday']]}요일", 'daily': '매일'}[cfg['frequency']]
     return f"{cycle} · {ME_WHENS[cfg['me_when']]}"
 
@@ -480,10 +509,15 @@ def effective(cfg, regime, ind, want, prices, cash=None, state=None, values=None
         return out
     at = (now or datetime.now(KST)).replace(hour=int(cfg['time'][:2]), minute=int(cfg['time'][3:]), second=0, microsecond=0)
     sim = {**(state or {}), 'last_check': None, 'last_buy': None}
+    if cfg['frequency'] == 'deposit':  # the deposit money waiting now, else a sample deposit of 1,000,000원
+        amount = (state or {}).get('waiting_krw', 0) if (state or {}).get('waiting_krw', 0) >= 1_000 else 1_000_000 * cfg['deposit_pct'] / 100
+        sim = {**sim, 'waiting_krw': amount, 'deposit_base': amount / deposit_buys(cfg)}  # already in, nothing arrives
     room = amount + reserved(sim) if cash is None else cash
-    orders, after, notes = plan({**cfg, 'on': True}, sim, at, ind, regime, want, values or {}, room, arrived=amount, shares=shares, prices=prices,
+    arrived = 0 if cfg['frequency'] == 'deposit' else amount
+    orders, after, notes = plan({**cfg, 'on': True}, sim, at, ind, regime, want, values or {}, room, arrived=arrived, shares=shares, prices=prices,
                                 yeo=yeo, force=True)
-    out.update(orders=orders, waiting=after['waiting_krw'], notes=['예시: 오늘이 사는 날이라고 가정한 계산입니다. 금액은 그날 계좌 가치·국면·적립식 몫으로 달라집니다.', *notes],
+    out.update(orders=orders, waiting=after['waiting_krw'], notes=['예시: 오늘이 사는 날이라고 가정한 계산입니다. 금액은 그날 계좌 가치·국면·적립식 몫으로 달라집니다.'
+                                                                   + (f' 입금할 때: 입금 몫 {amount:,.0f}원 기준.' if cfg['frequency'] == 'deposit' else ''), *notes],
                after=after)
     before_carry = (sim.get('carry') or {})
     for k in dict.fromkeys([*want, *picked, *orders]):
@@ -506,7 +540,8 @@ def buy_levels(cfg, ind, regime, state, price, close=None, value=None, yeo=False
     size = size_text(cfg, p, regime, ind, value, yeo)
     who = p['label'] if cfg['style'] == 'master' else '수동'
     dip = (cfg['when_by'] == 'master' and p['when'] == 'dip') or (cfg['when_by'] == 'me' and cfg['me_when'] == 'dip')
-    nxt = '거장이 매 거래일 확인' if cfg['when_by'] == 'master' else f"다음 적립일 {next_day(cfg, today or date.today()).isoformat()}"
+    nxt = ('입금 몫이 있을 때' if cfg['frequency'] == 'deposit' else '거장이 매 거래일 확인' if cfg['when_by'] == 'master'
+           else None) or f"다음 적립일 {next_day(cfg, today or date.today()).isoformat()}"
     out = []
     if dip and close:
         out.append({'price': close, 'status': 'waiting', 'kind': 'dip', 'label': f"{who} 적립 · 하락일(전일 종가 이하) · {size} · {nxt}"})
@@ -571,6 +606,59 @@ def reserved(state):
     the money an order did not buy (retry)."""
     state = state or {}
     return state.get('waiting_krw', 0) + sum((state.get('carry') or {}).values()) + sum((state.get('retry') or {}).values())
+
+
+def alert(cfg, state, now, ind, regime, want, prices):
+    """적립 알림 (user 2026-11-20): (rows [{key, KRW}], new alert state, notes) of what this 적립식 would buy today while it is
+    off, for the user to buy in another account. The same plan() on its own imaginary book (state 'dca_alert'): its
+    calendar or its master's day, its master's multiplier, the account strategy's ETFs, whole shares at today's prices,
+    the 1,000,000원-a-month way sized by amount_krw (입금할 때 alerts as 매일 of that amount). Never an order."""
+    cfg = clean(cfg)
+    if not cfg['alert'] or cfg['on']:
+        return {}, state or {}, []
+    as_on = {**cfg, 'on': True, 'frequency': 'daily' if cfg['frequency'] == 'deposit' else cfg['frequency']}
+    return plan(as_on, state or {}, now, ind, regime, want, {}, float('inf'), prices=prices)
+
+
+def deposit_buys(cfg):
+    """How many buys a deposit is spread over: spread_weeks of the master's buy_every (my day: every trading day)."""
+    every = cfg['buy_every'] if cfg['when_by'] == 'master' else 'day'
+    return max(1.0, cfg['spread_weeks'] * BUYS_PER_WEEK[every])
+
+
+def take_deposit(cfg, state, capital, day, logged=True):
+    """(new state, Korean note or '') for 입금할 때: the 운용금 a live account last saw (capital_seen) against its 운용금 now.
+    The first look only sets it (the money already there is the strategy's reservoir); a raise adds deposit_pct of it to
+    the 적립식's money and sets the per-buy base (the waiting money over deposit_buys); a cut takes it out of what the
+    적립식 has not spent (never below zero, nothing is sold). logged False (no settings-history row for this 운용금): not
+    taken, the note says so and the next look tries again."""
+    cfg = clean(cfg)
+    state = {'waiting_krw': 0.0, 'contributed_krw': 0.0, 'carry': {}, 'retry': {}, 'catch_krw': 0.0, **(state or {})}
+    if cfg['frequency'] != 'deposit' or not cfg['on'] or type(capital) not in (int, float):
+        return state, ''
+    seen = state.get('capital_seen')
+    if type(seen) not in (int, float):
+        state['capital_seen'] = capital
+        return state, f'입금 기준 운용금 {capital:,.0f}원 · 지금 있는 돈은 계좌 전략(저수지) 몫, 운용금을 올린 만큼부터 적립식 몫'
+    delta = capital - seen
+    if not delta:
+        return state, ''
+    if not logged:
+        return state, f'운용금이 {seen:,.0f}원 → {capital:,.0f}원으로 바뀌었지만 설정 변경 이력이 없어 입금으로 반영하지 않음'
+    state['capital_seen'] = capital
+    if delta < 0:
+        cut = min(state['waiting_krw'], -delta)
+        state['waiting_krw'] -= cut
+        state['deposit_base'] = state['waiting_krw'] / deposit_buys(cfg) if state['waiting_krw'] >= 1 else 0.0
+        return state, f'운용금 {seen:,.0f}원 → {capital:,.0f}원: 남은 적립식 몫에서 {cut:,.0f}원 뺌(보유는 팔지 않음)'
+    add = delta * cfg['deposit_pct'] / 100
+    state['waiting_krw'] += add
+    state['contributed_krw'] += add
+    state['last_contribution'] = day
+    state.setdefault('since', day)
+    state['deposit_base'] = state['waiting_krw'] / deposit_buys(cfg)
+    return state, (f"입금 반영: 운용금 {seen:,.0f}원 → {capital:,.0f}원 · 적립식 몫 +{add:,.0f}원(남은 몫 {state['waiting_krw']:,.0f}원, "
+                   f"{cfg['spread_weeks']}주에 나눠 회당 약 {state['deposit_base']:,.0f}원)")
 
 
 def add_unfilled(state, sent):
@@ -654,7 +742,7 @@ def due(cfg, state, now):
     """The contribution of this period has not been made and its day and time have come: the set day, or the period's
     last trading day when no trading day is left on or after the set day (February 27~28, a holiday Friday), so no
     period passes without its contribution."""
-    if not cfg['on'] or now.strftime('%H:%M') < start_time(cfg):
+    if not cfg['on'] or now.strftime('%H:%M') < start_time(cfg) or cfg['frequency'] == 'deposit':  # 입금할 때: take_deposit
         return False
     last = state.get('last_contribution')
     if last and period(cfg, date.fromisoformat(last)) == period(cfg, now):
@@ -681,7 +769,7 @@ def down_day(ind, want, prices):
 def next_day(cfg, today):
     """The next set contribution day on or after `today` (calendar only; a holiday moves it to the period's next trading day)."""
     cfg = clean(cfg)
-    if cfg['frequency'] == 'daily':
+    if cfg['frequency'] in ('daily', 'deposit'):  # 입금할 때: whenever deposit money waits (the next trading day)
         return today + timedelta(days=max(0, 7 - today.weekday()) if today.weekday() >= 5 else 0)
     if cfg['frequency'] == 'weekly':
         return today + timedelta(days=(cfg['weekday'] - today.weekday()) % 7)

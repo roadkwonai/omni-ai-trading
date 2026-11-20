@@ -280,3 +280,8 @@ state/raw/
 # Release notes and the version file are public (scripts/release.py, release/README.md)
 !/release/
 !/VERSION
+
+# Portfolio video production (2026-11-20, user request): recordings, renders, HyperFrames/Remotion projects,
+# installed video tools and model weights (~13GB) stay local. History: docs/portfolio-video-plan.md "제작 이력".
+.scratch/video/
+/output/

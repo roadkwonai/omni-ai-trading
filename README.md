@@ -11,11 +11,36 @@
 <p align="center">
   <a href="https://roadkwonai.github.io/omni-ai-trading/"><strong>소개 페이지 보기 →</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://roadkwonai.github.io/omni-ai-trading/reports/"><strong>리포트 목록 보기 →</strong></a> &nbsp;&middot;&nbsp;
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases"><strong>릴리스 노트 →</strong></a>
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases"><strong>릴리스 노트 →</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://youtu.be/c4FZw6AYRAg"><strong>소개 영상 보기 →</strong></a>
 </p>
 
+<a id="서비스-소개-영상"></a>
 <p align="center">
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.2"><img src="https://img.shields.io/badge/release-v0.1.2-ff6600?style=flat-square" alt="Release v0.1.2"></a>
+  <a href="https://youtu.be/c4FZw6AYRAg"><img src="assets/readme-video.jpg" alt="Omni AI Trading 서비스 소개 영상(3분 33초) — 단타는 Jev가, 장기투자는 거장 원칙으로. 누르면 YouTube에서 재생됩니다" width="720"></a>
+</p>
+<p align="center"><sub><strong>서비스 소개 영상 · 3분 33초</strong> — 두 엔진, AI는 의견·규칙이 주문, 종합 현황, Jev 실시간 판단, 안전장치, 장기투자, 복기와 리포트를 실제 화면으로 보여 줍니다. 실계좌 금액은 가렸습니다.</sub></p>
+
+<details>
+<summary><strong>영상 챕터</strong> (누르면 그 장면부터 재생)</summary>
+
+| 시각 | 내용 |
+| --- | --- |
+| [0:00](https://youtu.be/c4FZw6AYRAg?t=0) | 왜 망설이면 지는가 |
+| [0:15](https://youtu.be/c4FZw6AYRAg?t=15) | 왜 AI인가 — 개인 투자자의 숫자 |
+| [0:36](https://youtu.be/c4FZw6AYRAg?t=36) | 시스템 한눈에 — 두 엔진, AI는 의견·규칙이 주문 |
+| [1:01](https://youtu.be/c4FZw6AYRAg?t=61) | 종합 현황 대시보드 |
+| [1:24](https://youtu.be/c4FZw6AYRAg?t=84) | Jev 실시간 판단과 진입 관문 |
+| [1:49](https://youtu.be/c4FZw6AYRAg?t=109) | 안전장치 — 여러 겹의 가드와 실주문 스위치 |
+| [2:18](https://youtu.be/c4FZw6AYRAg?t=138) | 장기투자 — 국면 판단과 여운봉 저수지 매매법 |
+| [2:45](https://youtu.be/c4FZw6AYRAg?t=165) | 복기와 리포트 — 매매일지·장 마감 개선안 |
+| [3:08](https://youtu.be/c4FZw6AYRAg?t=188) | AI와 함께 운영 — 예약 작업과 대화 |
+| [3:22](https://youtu.be/c4FZw6AYRAg?t=202) | 마무리 |
+
+</details>
+
+<p align="center">
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.3"><img src="https://img.shields.io/badge/release-v0.1.3-ff6600?style=flat-square" alt="Release v0.1.3"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1c20?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-1a1c20?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/broker-NH%20%EB%82%98%EB%AC%B4%20PLUG-ff6600?style=flat-square" alt="NH 나무 PLUG OpenAPI">
@@ -27,6 +52,7 @@
 </p>
 
 <p align="center">
+  <a href="#서비스-소개-영상"><strong>소개 영상</strong></a> &middot;
   <a href="#왜-ai로-투자해야-할까요"><strong>왜 AI인가</strong></a> &middot;
   <a href="#claude-codecodex로-운영합니다">AI로 운영</a> &middot;
   <a href="#바로-설치하기"><strong>바로 설치하기</strong></a> &middot;

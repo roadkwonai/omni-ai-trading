@@ -21,13 +21,17 @@ EVENT_TYPES = {'started', 'stopped', 'decision', 'market_context', 'jev_shadow',
                'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown', 'ipo_seen'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
 
 REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_reentry_no_session', 'careful_reentry_jev_wait',
-    'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
+    'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'strength_trend', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
     'add_count_limit', 'add_not_better', 'scale_signal_disabled', 'projected_exit', 'engine_unavailable', 'manual_after_flatten',
     'market_not_falling', 'opening_observation_only', 'quote_unavailable', 'regime_reversal', 'take_profit_history_unavailable',
     'oversold_hold_days',
     'inverse_regime_not_falling', 'inverse_index_not_falling', 'inverse_index_rebounding', 'inverse_flows_not_selling',
-    'inverse_us_not_falling', 'inverse_market_unknown', 'add_cutoff', 'reentry_disabled', 'reentry_market_unconfirmed',
+    'inverse_us_not_falling', 'inverse_market_unknown', 'inverse_index_not_falling_now', 'inverse_low_confidence', 'inverse_chase', 'inverse_too_late', 'inverse_market_rebound', 'inverse_protect', 'add_cutoff', 'reentry_disabled', 'reentry_market_unconfirmed',
     'losing_streak_history_unavailable', 'oversold_limit', 'ipo_limit', 'direction_switch'))  # every code the runner journals (test: runner_codes)
+
+
+STRENGTH_WHYS = {'no_strength_candidate', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit',
+                 'one_share_over_buy', 'pick_cooldown', 'not_in_movers', 'held', 'jev_below_min', 'bars_missing', 'picked'}
 
 
 def sanitize(event):
@@ -70,7 +74,7 @@ def sanitize(event):
         result['reason'] = event['reason']
     if type(event.get('permitted')) is bool: result['permitted'] = event['permitted']
     # 2026-11-12 audit: plan profile, split tranche, stop reason and internal error text were being dropped
-    if event.get('profile') in ('defensive', 'trend', 'ipo', 'inverse_quick', 'oversold'): result['profile'] = event['profile']
+    if event.get('profile') in ('defensive', 'trend', 'ipo', 'inverse_quick', 'inverse_crash', 'oversold'): result['profile'] = event['profile']
     for key in ('weak_caps', 'reconciliation_required'):
         if type(event.get(key)) is bool: result[key] = event[key]
     if type(event.get('tranche')) is int and 1 <= event['tranche'] <= 10: result['tranche'] = event['tranche']
@@ -82,6 +86,12 @@ def sanitize(event):
     if event.get('trigger') in ('risk', 'take_profit', 'manual', 'vibe', 'model'): result['trigger'] = event['trigger']
     if event.get('strength_reason') in ('no_strength_candidate', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit', 'one_share_over_buy', 'pick_cooldown'):
         result['strength_reason'] = event['strength_reason']
+    if isinstance(event.get('strength_reasons'), dict):  # every ranked stock's reason (user 2026-11-20 '한진칼 왜 안 샀는지')
+        known = STRENGTH_WHYS | set(REASONS)
+        kept = {c: r for c, r in event['strength_reasons'].items()
+                if isinstance(c, str) and re.fullmatch(CODE_PATTERN, c) and r in known}
+        if kept:
+            result['strength_reasons'] = kept
     if event['event'] == 'strength_shadow':  # observation only: what the strength path would pick when Jev's pick is blocked
         if event.get('blocked') in REASONS:  # the refusal that kept Jev's pick, the same codes as reason
             result['blocked'] = event['blocked']

@@ -1,4 +1,5 @@
-"""Start the shared paper observation day at 09:00 (launchd job com.vibetrading.trading-day-start).
+"""Start the shared paper day at 08:55 (launchd job com.vibetrading.trading-day-start): the runners start before the bell,
+connect and check, then wait for 09:00 themselves (session_times.until_open; user 2026-11-20, "장전 준비 다 해 달라").
 
 Checks, then starts only what is needed: a KRX trading day (weekend and the KRX holiday table; an unreadable table
 is logged and the start goes ahead, because the runner itself cannot trade without live quotes), no STOP file, and
@@ -86,9 +87,6 @@ def start_services(states, *, kick, alive, wait=time.sleep):
 
 def main():
     now = datetime.now(KST)
-    if now.strftime('%H:%M') < '09:00':
-        time.sleep(max(0.0, (now.replace(hour=9, minute=0, second=5, microsecond=0) - now).total_seconds()))
-        now = datetime.now(KST)
     day_ok, note = trading_day(now)
     states = {label: running(label) for label in SERVICES}
     decision = decide(day_ok, (ROOT / 'STOP').exists(), states[SERVICES[0]])

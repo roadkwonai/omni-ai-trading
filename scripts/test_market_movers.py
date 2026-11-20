@@ -230,3 +230,46 @@ def test_a_failed_quote_of_the_busiest_riser_tries_the_next_one():
         return [] if codes == ['090430'] else quoted(codes)
     picks = m.theme_picks(groups, UNIVERSE, {}, MEMBERS.get, figures, flaky)
     assert tried[0] == '090430' and len(picks) == 1 and picks[0]['code'] != '090430'
+
+
+def test_kiwoom_scan_gives_the_nh_scan_row_shape_in_one_call_per_hundred(monkeypatch):
+    # 2026-11-20 NH call plan P2: the ranking figures from one Kiwoom ka10095 call instead of ~65 NH quotes
+    import kiwoom_data
+    asked = []
+    answer = [{'stk_cd': '005930', 'cur_prc': '-186900', 'base_pric': '196900', 'trde_qty': '4352032', 'trde_prica': '814604'},
+              {'stk_cd': '090430_AL', 'cur_prc': '+120000', 'base_pric': '110000', 'trde_qty': '1000', 'trde_prica': '120'},
+              {'stk_cd': '000660', 'cur_prc': '0', 'base_pric': '0', 'trde_qty': '0', 'trde_prica': '0'}]  # halted: dropped
+    monkeypatch.setattr(kiwoom_data, 'call', lambda api, body, key, max_pages=1: asked.append((api, body['stk_cd'])) or answer)
+    universe = {'005930': {'name': '삼성전자', 'index': 'KOSPI200'}, '090430': {'name': '*아모레퍼시픽', 'index': 'KOSPI200'},
+                '000660': {'name': 'SK하이닉스', 'index': 'KOSPI200'}}
+    rows = m.kiwoom_scan(universe)
+    assert asked == [('ka10095', '005930|090430|000660')]
+    assert rows == [{'code': '005930', 'name': '삼성전자', 'index': 'KOSPI200', 'price': 186900, 'change_pct': -5.08,
+                     'volume': 4352032, 'value_mil': 814604},
+                    {'code': '090430', 'name': '아모레퍼시픽', 'index': 'KOSPI200', 'price': 120000, 'change_pct': 9.09,
+                     'volume': 1000, 'value_mil': 120}]
+
+
+def test_quote_rows_use_kiwoom_and_fall_back_to_nh_when_it_fails_or_prices_too_few(monkeypatch):
+    quoted = {f'00000{i}': {'name': 'n', 'index': 'KOSPI200'} for i in range(10)}
+    nh = lambda read, q, gap=0: [{'code': c} for c in q]  # noqa: E731
+    monkeypatch.setattr(m, 'scan', nh)
+    monkeypatch.setattr(m, 'kiwoom_scan', lambda q: [{'code': c} for c in q])
+    assert m.quote_rows(None, quoted, lambda line: None)[1] == 'kiwoom'
+    monkeypatch.setattr(m, 'kiwoom_scan', lambda q: [{'code': c} for c in list(q)[:8]])  # 80%: too few
+    assert m.quote_rows(None, quoted, lambda line: None)[1] == 'nh'
+    monkeypatch.setattr(m, 'kiwoom_scan', lambda q: (_ for _ in ()).throw(OSError('down')))
+    rows, source = m.quote_rows(None, quoted, lambda line: None)
+    assert source == 'nh' and len(rows) == 10
+
+
+def test_kiwoom_ranked_candidates_are_quoted_again_from_nh_and_the_rest_marked(monkeypatch):
+    universe = {c: {'name': c, 'index': 'KOSPI200'} for c in ('A00001', 'A00002', 'A00003')}
+    kw = lambda c: {'code': c, 'name': c, 'index': 'KOSPI200', 'price': 99, 'change_pct': 1.0, 'volume': 1, 'value_mil': 1}  # noqa: E731
+    by_code = {c: kw(c) for c in universe}
+    candidates = {'A00001': {**kw('A00001'), 'reasons': ['급상승']}, 'A00002': {**kw('A00002'), 'reasons': ['거래대금 상위']}}
+    monkeypatch.setattr(m, 'scan', lambda read, q, gap=0: [{**kw('A00001'), 'price': 100}])  # NH missed A00002
+    m.nh_candidates(None, universe, candidates, by_code)
+    assert by_code['A00001']['price'] == 100 and 'source' not in by_code['A00001']
+    assert candidates['A00001'] == {**kw('A00001'), 'price': 100, 'reasons': ['급상승']}
+    assert by_code['A00003']['source'] == 'kiwoom' and candidates['A00002']['source'] == 'kiwoom'

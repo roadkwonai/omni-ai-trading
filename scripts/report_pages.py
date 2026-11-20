@@ -94,6 +94,77 @@ def mask(text):
     return text
 
 
+LIVE_HIDDEN = '•••'
+LIVE_WORD = '실계좌'
+OTHER_BOOK = re.compile(r'\s*(?:[가-힣]{1,4}\s*[:—-]\s*)?(?:모의|Jev|vibe|가상|장기투자 \(vibe)')  # a sentence that starts with another book keeps its numbers
+# money (원·만 원·억 원) and share counts keep their unit so Korean particles still read right; a percentage alone
+# does not reveal the account's size and stays
+LIVE_AMOUNT = re.compile(r'(?:[+−-]\s?)?\d[\d,]*(?:\.\d+)?\s*(?:조|억|만|천)?\s*(원)|\d[\d,]*\s*(주)(?!문|간|식|가|일|기|말|차|년)')
+BLOCK = re.compile(r'(</?(?:p|li|tr|h[1-6]|ul|ol|blockquote|table|thead|tbody|div|figure|figcaption|section|details|summary|dt|dd)\b[^>]*>)')
+SENTENCE = re.compile(r'(?<=[.!?])(\s+)')
+
+
+def _hide(text):
+    return LIVE_AMOUNT.sub(lambda m: LIVE_HIDDEN + (m.group(1) or m.group(2)), text)
+
+
+def _hide_pieces(pieces):
+    """Plain-text pieces of one block (text nodes in order): from the first 실계좌 to the end of the block every
+    amount is hidden, except whole sentences that name another book (모의·Jev·vibe·가상) and not a 실계좌."""
+    on, out = False, []
+    for piece in pieces:
+        parts = SENTENCE.split(piece)
+        for i, s in enumerate(parts):
+            if i % 2:
+                continue
+            if LIVE_WORD in s:
+                at = s.index(LIVE_WORD) if not on else 0
+                parts[i], on = s[:at] + _hide(s[at:]), True
+            elif on and not OTHER_BOOK.match(s):
+                parts[i] = _hide(s)
+        out.append(''.join(parts))
+    return out
+
+
+def hide_live_text(text):
+    """Public pages never show live-account money or share counts (user 2026-11-20). The local markdown and the
+    dashboard keep the full numbers."""
+    return _hide_pieces([str(text or '')])[0]
+
+
+def _hide_live_columns(m):
+    """A table whose header names a 실계좌 (the period journal: one column per account) hides that column's amounts."""
+    table = m.group(0)
+    heads = re.findall(r'<th\b[^>]*>(.*?)</th>', table.split('</thead>', 1)[0], flags=re.S)
+    live = {i for i, h in enumerate(heads) if LIVE_WORD in htmllib.unescape(re.sub(r'<[^>]+>', '', h))}
+    if not live or '</thead>' not in table:
+        return table
+
+    def row(r):
+        cells = iter(range(10 ** 6))
+        return re.sub(r'(<td\b[^>]*>)(.*?)(</td>)', lambda c: c.group(1) + (
+            re.sub(r'(?<=>)[^<]+|^[^<]+', lambda t: htmllib.escape(_hide(htmllib.unescape(t.group())), quote=False), c.group(2))
+            if next(cells) in live else c.group(2)) + c.group(3), r.group(0), flags=re.S)
+    head, body = table.split('</thead>', 1)
+    return head + '</thead>' + re.sub(r'<tr\b.*?</tr>', row, body, flags=re.S)
+
+
+def hide_live(html_text):
+    """hide_live_text for every block (paragraph, list item, table row, heading) of an HTML body.
+    shortcut: a live sentence in a block that never names a 실계좌 is not caught (check() cannot see it either),
+    so the writer skills keep naming the account."""
+    html_text = re.sub(r'<table\b.*?</table>', _hide_live_columns, html_text, flags=re.S)
+    parts = BLOCK.split(html_text)
+    for i in range(0, len(parts), 2):
+        if LIVE_WORD not in htmllib.unescape(parts[i]):
+            continue
+        nodes = re.split(r'(<[^>]+>)', parts[i])
+        texts = _hide_pieces([htmllib.unescape(n) for n in nodes[0::2]])
+        nodes[0::2] = [htmllib.escape(t, quote=False) if t != htmllib.unescape(n) else n for t, n in zip(texts, nodes[0::2])]
+        parts[i] = ''.join(nodes)
+    return ''.join(parts)
+
+
 # ---------- records ----------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -384,21 +455,21 @@ def render(kind, key, path, url='', out_dir=None):
         except ValueError:
             extra = {}
     extra = extra if isinstance(extra, dict) else {}
-    summary = mask(str(extra.get('summary') or lede or '').strip())
+    summary = hide_live_text(mask(str(extra.get('summary') or lede or '').strip()))
     listed = lambda name: extra.get(name) if isinstance(extra.get(name), list) else []  # noqa: E731 - a string is not a list of items
-    extra = {'top_issues': [{k: mask(v) for k, v in i.items()} for i in listed('top_issues') if isinstance(i, dict) and i.get('title')],
-             'watch_next': [mask(w) for w in listed('watch_next') if isinstance(w, (str, int, float))],
-             'scenarios': [{k: mask(v) for k, v in sc.items()} for sc in listed('scenarios') if isinstance(sc, dict) and sc.get('name')]}
+    extra = {'top_issues': [{k: hide_live_text(mask(v)) for k, v in i.items()} for i in listed('top_issues') if isinstance(i, dict) and i.get('title')],
+             'watch_next': [hide_live_text(mask(w)) for w in listed('watch_next') if isinstance(w, (str, int, float))],
+             'scenarios': [{k: hide_live_text(mask(v)) for k, v in sc.items()} for sc in listed('scenarios') if isinstance(sc, dict) and sc.get('name')]}
     for issue in extra['top_issues']:
         try:
             issue['stars'] = max(0, min(5, int(float(issue.get('stars') or 0))))
         except ValueError:
             issue['stars'] = 0
     body, toc = decorate(markdown(rest))
-    body = F.table_charts(F.marks(F.callouts(body)))
+    body = F.table_charts(F.marks(F.callouts(hide_live(body))))  # hidden before the bars are drawn from the table
     for token, html_figure in figures.items():
         body = body.replace(f'<p>{token}</p>', html_figure)
-    title = mask(title or f"{spec['name']} · {period_label(kind, key)}")
+    title = hide_live_text(mask(title or f"{spec['name']} · {period_label(kind, key)}"))
     page = environment().get_template(spec['template']).render(
         title=title, description=summary or title, summary=summary, body=body, toc=toc, extra=extra, url=url,
         kind_name=spec['name'], period_label=period_label(kind, key), channel_label=CHANNELS[spec['channel']],
@@ -425,6 +496,8 @@ def check(html_text):
     text = re.findall(r'>([^<]+)<', html_text)
     if any(mask(htmllib.unescape(t)) != htmllib.unescape(t) for t in text):
         issues.append('계좌번호·계좌 해시처럼 보이는 값이 본문에 있음')
+    if hide_live(html_text) != html_text:
+        issues.append('실계좌 금액·수량이 공개 페이지에 있음')
     if re.search(r'(ghp_|github_pat_|discord(app)?\.com/api/webhooks)', html_text):
         issues.append('토큰·웹훅 주소가 들어 있음')
     if len(re.findall(r'<h1', html_text)) != 1:

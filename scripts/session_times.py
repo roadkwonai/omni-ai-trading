@@ -18,6 +18,18 @@ MARKET_OPEN = '09:00'      # KRX regular session opens; runners observe from her
 FIRST_ORDER = '09:00'      # user 2026-11-19: orders from the open (was 09:10, 09:00~09:09 observation); prep is done pre-open
 
 
+PRE_OPEN = '08:00'  # user 2026-11-20: runners start before the bell and wait, so the first cycle runs at 09:00
+
+
+def until_open(now):
+    """Seconds from `now` (aware KST datetime) to MARKET_OPEN on a weekday pre-open (PRE_OPEN..MARKET_OPEN), else 0:
+    a runner started early sleeps this long instead of quitting as 'outside session'."""
+    if now.weekday() >= 5 or not PRE_OPEN <= now.strftime('%H:%M') < MARKET_OPEN:
+        return 0.0
+    hour, minute = map(int, MARKET_OPEN.split(':'))
+    return (now.replace(hour=hour, minute=minute, second=0, microsecond=0) - now).total_seconds()
+
+
 def shift_min(day):
     """Minutes the exchange clock runs late on `day` (a date), 0 on an ordinary day: the one table is
     src.tools.nhplug_calendar.SHIFTED_DAYS (수능 day opens 10:00 and closes 16:30), which the order guards read too."""

@@ -117,15 +117,131 @@ def bench(need, runs, universe, sleep=time.sleep):
             'union': len(union - {None}), 'ranking': scored, 'not_candidates': spec['not_candidates'], 'rubric': RUBRIC}
 
 
+def mover_agreement(read, universe, codes, sleep=time.sleep):
+    """need mover_quotes (2026-11-20 NH call plan P2): the ranking service's figures from NH (one quote per code) or Kiwoom
+    (ka10095, 100 codes a call). Each code is asked of NH and then of Kiwoom at once, so the two answers are the same
+    moment; both row sets go through market_movers.rank() and the rankings and candidates are compared. Also times one
+    whole answer of each source."""
+    from market_movers import SCAN_GAP, kiwoom_scan, rank, scan
+    nh, kw = {}, {}
+    for code in codes:
+        one = {code: universe[code]}
+        for row in scan(read, one):
+            nh[code] = row
+        for row in kiwoom_scan(one):
+            kw[code] = row
+        sleep(SCAN_GAP)
+    both = sorted(set(nh) & set(kw))
+    diff = lambda f, rel: [abs(kw[c][f] - nh[c][f]) / (abs(nh[c][f]) or 1) if rel else abs(kw[c][f] - nh[c][f]) for c in both]  # noqa: E731
+    fields = {'price_equal': round(sum(kw[c]['price'] == nh[c]['price'] for c in both) / max(len(both), 1), 3),
+              'change_pct_max_diff': round(max(diff('change_pct', False), default=0), 3),
+              'volume_max_rel_diff': round(max(diff('volume', True), default=0), 4),
+              'value_max_rel_diff': round(max(diff('value_mil', True), default=0), 4)}
+    a, b = rank([nh[c] for c in both]), rank([kw[c] for c in both])
+    top = {k: {'same': a[0][k] == b[0][k], 'overlap': len(set(a[0][k]) & set(b[0][k]))} for k in a[0]}
+    started = time.monotonic()
+    kiwoom_scan({c: universe[c] for c in codes})
+    kiwoom_s = round(time.monotonic() - started, 2)
+    return {'need': 'mover_quotes', 'time': datetime.now(KST).isoformat(timespec='seconds'), 'codes': len(codes),
+            'nh_rows': len(nh), 'kiwoom_rows': len(kw), 'compared': len(both), 'fields': fields, 'top10': top,
+            'candidates_same': list(a[1]) == list(b[1]), 'candidates_overlap': len(set(a[1]) & set(b[1])),
+            'whole_answer': {'kiwoom_seconds': kiwoom_s, 'kiwoom_calls': -(-len(codes) // 100),
+                             'nh_seconds_at_scan_gap': round(len(codes) * SCAN_GAP, 1), 'nh_calls': len(codes)},
+            'only_nh': sorted(set(nh) - set(kw)), 'only_kiwoom': sorted(set(kw) - set(nh))}
+
+
+def bar_agreement(nh_rows, kw_bars, today):
+    """Compare NH 1-minute rows (krstockQuotePeriod Output_1) with Kiwoom bars (kiwoom_data.day_bars) of the same moment.
+    The two may stamp a bar by its start or its end minute, so each offset of -1/0/+1 minute is tried and the best kept.
+    Only bars both have and NH calls finished (not its newest minute) are compared."""
+    nh = {}
+    for r in nh_rows or []:
+        if isinstance(r, dict) and r.get('bsop_date') == today and r.get('bsop_time'):
+            nh[r['bsop_time'][:4]] = tuple(float(r[k]) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr', 'vol'))
+    if nh:
+        nh.pop(max(nh))  # NH's newest minute is still forming
+    kw = {}
+    for t, o, h, l, c, v in kw_bars or []:
+        kw[f'{t:%H%M}'] = (float(o), float(h), float(l), float(c), float(v))
+    best = None
+    for offset in (-1, 0, 1):
+        def shifted(hhmm):
+            m = int(hhmm[:2]) * 60 + int(hhmm[2:]) + offset
+            return f'{m // 60:02d}{m % 60:02d}'
+        pairs = [(nh[k], kw[shifted(k)]) for k in nh if shifted(k) in kw]
+        if not pairs:
+            continue
+        price = sum(a[:4] == b[:4] for a, b in pairs) / len(pairs)
+        close = sum(a[3] == b[3] for a, b in pairs) / len(pairs)
+        volume = max(abs(a[4] - b[4]) / (a[4] or 1) for a, b in pairs)
+        got = {'offset_min': offset, 'bars': len(pairs), 'ohlc_equal': round(price, 3), 'close_equal': round(close, 3),
+               'volume_max_rel_diff': round(volume, 3)}
+        if best is None or (got['ohlc_equal'], got['bars']) > (best['ohlc_equal'], best['bars']):
+            best = got
+    return best or {'offset_min': None, 'bars': 0}
+
+
+def minute_agreement(read, codes, sleep=time.sleep):
+    """need minute_bars (2026-11-20 NH call audit): the runner's NH 1-minute bars (755 calls in 85 minutes) against
+    Kiwoom ka10080 for the same codes at the same moment, with each source's seconds per code."""
+    import kiwoom_data
+    from nh_paper_isolated import minute_bars
+    now = datetime.now(KST)
+    out, nh_s, kw_s = {}, [], []
+    for code in codes:
+        started = time.monotonic()
+        response = minute_bars(read, code)
+        nh_s.append(time.monotonic() - started)
+        started = time.monotonic()
+        try:
+            kw = kiwoom_data.day_bars(code, now.date(), now=now)['bars']
+        except Exception as exc:  # noqa: BLE001 - recorded as this code's answer
+            kw = None
+            out[code] = {'kiwoom_error': type(exc).__name__}
+        kw_s.append(time.monotonic() - started)
+        rows = ((response.get('data') or {}).get('Output_1') if response.get('status') == 'ok' else None)
+        if kw is not None:
+            out[code] = {**bar_agreement(rows, kw, f'{now:%Y%m%d}'), 'kiwoom_bars_today': len(kw),
+                         'nh_rows': len(rows or [])}
+        sleep(0.6)
+    median = lambda xs: round(sorted(xs)[len(xs) // 2], 3) if xs else None  # noqa: E731
+    return {'need': 'minute_bars', 'time': now.isoformat(timespec='seconds'), 'codes': out,
+            'nh_median_s': median(nh_s), 'kiwoom_median_s': median(kw_s)}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('need', choices=sorted(NEEDS))
+    parser.add_argument('need', choices=sorted([*NEEDS, 'mover_quotes', 'minute_bars']))
     parser.add_argument('--runs', type=int, default=3)
     args = parser.parse_args()
     from market_movers import constituents
     from src.config.loader import load_agent_config
     from src.tools.mcp import MCPServerAdapter
     universe = constituents(MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly']))
+    if args.need == 'minute_bars':
+        from nh_paper_isolated import SYMBOLS
+        from watchlist import account_watchlist
+        read = MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly'])
+        codes = list(dict.fromkeys([*SYMBOLS.values(), *(c for c, _, _ in account_watchlist('paper-shared'))]))
+        result = minute_agreement(read, codes)
+        OUT.mkdir(parents=True, exist_ok=True)
+        path = OUT / f"minute_bars-{datetime.now(KST):%Y%m%d-%H%M}.json"
+        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        path.chmod(0o600)
+        print(json.dumps(result, ensure_ascii=False))
+        print(path)
+        return
+    if args.need == 'mover_quotes':
+        from market_movers import targets
+        read = MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly'])
+        result = mover_agreement(read, universe, list(targets(universe)[0]))
+        OUT.mkdir(parents=True, exist_ok=True)
+        path = OUT / f"mover_quotes-{datetime.now(KST):%Y%m%d-%H%M}.json"
+        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        path.chmod(0o600)
+        print(json.dumps({k: v for k, v in result.items() if k not in ('only_nh', 'only_kiwoom')}, ensure_ascii=False))
+        print(path)
+        return
     result = bench(args.need, args.runs, universe)
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{args.need}-{datetime.now(KST):%Y%m%d-%H%M}.json"

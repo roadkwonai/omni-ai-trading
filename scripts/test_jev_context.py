@@ -134,3 +134,14 @@ def test_rows_dated_today_still_get_the_session_chart():
     c.context({'K200': [row(f'10{m:02d}00') for m in range(29, -1, -1)]}, now=now, events='/nonexistent')
     chart, _ = c.context({'K200': [row('102900'), row('102800')]}, now=now, events='/nonexistent')
     assert len(chart['K200']) == 30
+
+
+def test_nxt_premarket_rows_are_charted_but_never_kept_as_todays_bars():
+    import jev_context as J
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime(2026, 11, 20, 9, 0, 20, tzinfo=ZoneInfo('Asia/Seoul'))
+    row = {'bsop_date': '20261120', 'market': 'NXT', 'bsop_time': '084900', 'stck_oprc': '1', 'stck_hgpr': '1',
+           'stck_lwpr': '1', 'stck_prpr': '1', 'vol': '1'}
+    chart, _ = J.context({'005930': [row]}, now, events=None)
+    assert chart['005930'] == [row] and '084900' not in J._DAY['bars'].get('005930', {})

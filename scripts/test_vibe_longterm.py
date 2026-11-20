@@ -746,12 +746,13 @@ def test_a_part_under_one_share_is_carried_on_the_virtual_book_and_bought_next_t
                                                                      'time': '10:00', 'pick_on': True, 'picks': ['NDX', 'QUANT']}}})
     assert L.dca(tmp_path, Read(), now) == 'dca_traded'  # NDX 23,684 buys 2 shares; QUANT 6,316 is under one 10,000 share
     state = L.read_state(tmp_path)['dca:actual']
-    assert state['carry'] == {'QUANT': pytest.approx(30_000 * 0.08 / 0.38)} and state['contributed_krw'] == 30_000
+    assert state['carry']['QUANT'] == pytest.approx(30_000 * 0.08 / 0.38) and state['contributed_krw'] == 30_000
+    assert state['carry']['NDX'] == pytest.approx(30_000 * 0.30 / 0.38 - L.longterm_dca.share_cost(10_000, 2), abs=1)  # over whole shares
     assert L.broker_for(tmp_path, Read()).cash() >= L.longterm_dca.reserved(state)
     L.put_state(L.connect(tmp_path), plan={**L.read_state(tmp_path)['plan'], 'day': '2026-12-18'})
     assert L.dca(tmp_path, Read(), now.replace(month=12)) == 'dca_traded'
     assert L.broker_for(tmp_path, Read()).holdings()['0023A0'][0] == 1  # 6,316 carried + 6,316 = one share
-    assert not L.read_state(tmp_path)['dca:actual']['carry'].get('QUANT')
+    assert L.read_state(tmp_path)['dca:actual']['carry']['QUANT'] < 10_000  # only the part over that one share is carried again
 
 
 def test_the_days_buys_never_spend_carried_money(tmp_path, monkeypatch):
@@ -963,3 +964,19 @@ def test_the_automatic_buy_time_waits_on_a_rising_day_and_buys_at_the_last_check
     assert L.dca(tmp_path, Read(), now) == 'waiting'                      # 10:00, above yesterday's close
     assert L.dca(tmp_path, Read(), now.replace(minute=3)) == 'waiting'   # not a look minute: no quotes read
     assert L.dca(tmp_path, Read(), now.replace(hour=14, minute=20)) == 'dca_traded'  # the last check buys anyway
+
+
+class KrxOnlyRead(Read):
+    """NH answers only real KRX codes: an order key such as 'NDXMIX' is no stock code."""
+    def call_tool(self, tool, params):
+        if params['stock_code'] in L.yeo_method.EXTRA:
+            return {'status': 'error', 'data': {}}
+        return super().call_tool(tool, params)
+
+
+def test_close_prices_a_shadow_holding_a_yeo_etf_by_its_code(tmp_path, monkeypatch):
+    # 2026-11-20 15:40: shadow:dca_auto (여운봉 매매법) held 'NDXMIX' and the close asked NH for the key -> whole close failed
+    now = decided(tmp_path, monkeypatch)
+    db = L.connect(tmp_path)
+    L.put_state(db, **{'shadow:dca_auto': {'book': {'cash': 1_000_000.0, 'qty': {'NDXMIX': 10}, 'cost': {'NDXMIX': 100_000.0}}}})
+    assert L.close(tmp_path, KrxOnlyRead(), now.replace(hour=15, minute=40)) == 'closed'

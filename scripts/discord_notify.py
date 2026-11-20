@@ -88,7 +88,8 @@ def won(value):
     return f'{round(value):,}'
 
 
-EXIT_KO = {'breakeven_stop': '본전 손절', 'take_profit': '익절', 'stop_loss': '손절', 'trailing_stop': '추적 손절',
+EXIT_KO = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market_rebound': '지수 반등 인버스 청산',  # 2026-11-20
+    'breakeven_stop': '본전 손절', 'take_profit': '익절', 'stop_loss': '손절', 'trailing_stop': '추적 손절',
            'session_flatten': '장 마감 정리', 'regime_trim': '국면 절반 매도', 'ipo_time_stop': '신규주 시간 손절',
            'direction_switch': '방향 전환 매도'}
 
@@ -329,9 +330,19 @@ def plan_items(seen):
             e = json.loads(line)
         except ValueError:
             continue
-        if e.get('action') not in ('PLAN', 'DCA') or not e.get('orders'):
+        if e.get('action') not in ('PLAN', 'DCA', 'DCA_ALERT') or not e.get('orders'):
             continue
         day = str(e.get('time', ''))[:10]
+        if e['action'] == 'DCA_ALERT':  # 적립 알림 (2026-11-20): the 적립식 is off; what it would buy, for another account
+            ident = f"alert:{e.get('account')}:{day}"
+            if ident in seen or any(i[1] == ident for i in items):
+                continue
+            body = '\n'.join(f"🟢 {o.get('name') or o.get('code')}({o.get('code')}) {o.get('qty')}주 · 현재가 {o.get('price', 0):,}원 · 약 {o.get('krw', 0):,}원"
+                             for o in e['orders'])
+            why = '\n'.join(e.get('notes') or [])[:600]
+            items.append(('longterm', ident, f"🔔 적립 알림 · {e.get('account')} · {day} · 주문 없음(적립식 꺼짐, 다른 계좌 참고용)\n{body}"
+                          + (f'\n{why}' if why else '')))
+            continue
         # once per kind and mode a day: a plan made live after a dry one is sent too, and so is the day's 적립식
         ident = f"{e['action'].lower()}:{e.get('account')}:{day}:{e.get('execution', '')}"
         if ident in seen or any(i[1] == ident for i in items):

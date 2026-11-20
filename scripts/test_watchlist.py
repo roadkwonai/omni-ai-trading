@@ -152,3 +152,21 @@ def test_the_watchlist_files_follow_vibe_trading_home(tmp_path, monkeypatch):
     finally:
         monkeypatch.delenv('VIBE_TRADING_HOME')
         importlib.reload(w)
+
+
+def test_enrich_gives_jev_the_nh_figures_not_the_ranking_sources():
+    # 2026-11-20 NH call plan P2 (option 1): the ranking service may price from Kiwoom; what Jev reads for a candidate is
+    # NH's quote, which enrich() reads anyway
+    class Quoting(Reader):
+        def call_tool(self, tool, params):
+            if tool == 'get_stock_price':
+                return {'status': 'ok', 'data': {'Output_0': {'iem_cd': params['stock_code'], 'stck_prpr': 110, 'stck_prdy_clpr': 100,
+                                                              'acml_vol': 5000, 'acml_tr_pbmn': 55}}}
+            return super().call_tool(tool, params)
+    kiwoom = {'000001': {'name': 'A', 'index': 'KOSPI200', 'reasons': ['급상승'], 'price': 109, 'change_pct': 9.0,
+                         'volume': 4999, 'value_mil': 54, 'source': 'kiwoom'}}
+    with patch('nh_etf_paper_runner.valid_bars', return_value=BARS), patch('nh_paper_isolated.fresh_series', return_value=True), \
+            patch.object(w, 'fresh_stock_news', return_value=[]):
+        stocks, _ = w.enrich(Quoting(), kiwoom, NOW)
+    assert {k: stocks['000001'][k] for k in ('price', 'change_pct', 'volume', 'value_mil')} == \
+        {'price': 110, 'change_pct': 10.0, 'volume': 5000, 'value_mil': 55}

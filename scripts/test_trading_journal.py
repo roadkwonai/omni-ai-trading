@@ -288,3 +288,18 @@ class ReviewFixTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_live_rows_carry_the_holding_after_each_fill_like_the_engine_journal():
+    # 11-20: the first long-term live fills broke 종합 현황 (engine_compare.positions read r['after'], KeyError)
+    import engine_compare as ec
+    fills = [{'time': '2026-11-20T09:40:01+09:00', 'symbol': '379810', 'side': 'BUY', 'qty': 5, 'price': 20000},
+             {'time': '2026-11-20T09:41:01+09:00', 'symbol': '379810', 'side': 'SELL', 'qty': 2, 'price': 21000}]
+    with patch('live_fills.rows', return_value=fills):
+        rows = tj._live_rows('live-2', '장기투자')
+    assert [(r['after'], r['avg']) for r in rows] == [(5, 20000.0), (3, 20000.0)]
+    assert rows[1]['cost'] == 40000.0 and rows[1]['pnl'] == 2000.0
+    assert ec.positions(rows)['379810']['qty'] == 3 and ec.summary(rows)['sells'] == 1
+    import engine_compare
+    shape = set(engine_compare.journal.__doc__.split('[{')[1].split('}]')[0].replace(' ', '').split(','))
+    assert shape <= set(rows[0])  # every key the engine journal promises (11-20: 'after', then 'basis')

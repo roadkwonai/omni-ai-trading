@@ -411,6 +411,8 @@ class StrengthShadowTests(unittest.TestCase):
   self.assertEqual((r['blocked'],r['opposite_held'],r['symbol'],r['confidence'],r['change_pct']),('trend_not_rising',True,'399720',0.4,12.5))
   self.assertEqual(t.sanitize({**e,'symbol':None,'strength_reason':'no_strength_candidate'})['strength_reason'],'no_strength_candidate')
   self.assertEqual(t.sanitize({**e,'symbol':None,'strength_reason':'one_share_over_buy'})['strength_reason'],'one_share_over_buy')  # 11-19
+  kept=t.sanitize({**e,'strength_reasons':{'180640':'trend_not_rising','005930':'careful_reentry_chase','x':'bad','128940':'made up'}})
+  self.assertEqual(kept['strength_reasons'],{'180640':'trend_not_rising','005930':'careful_reentry_chase'})  # 11-20 every ranked stock
   cooled=t.sanitize({'time':'2026-11-19T14:50:00+09:00','event':'pick_cooldown','symbol':'009150','source':'watchlist_strength','status':'wait','until':'2026-11-19T15:00:00+09:00'})
   self.assertEqual((cooled['event'],cooled['symbol'],cooled['source']),('pick_cooldown','009150','watchlist_strength'))  # a refused pick rests (11-19)
   self.assertEqual(t.sanitize({**e,'symbol':None,'strength_reason':'pick_cooldown'})['strength_reason'],'pick_cooldown')

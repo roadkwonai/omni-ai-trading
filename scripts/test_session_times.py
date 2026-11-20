@@ -77,3 +77,15 @@ def test_long_term_engine_windows_follow_the_exchange_clock():
     late = dict((names, (a, b)) for names, a, b in L.windows(date(2026, 11, 19)))
     assert normal[('trade', 'dca')] == ('09:40', '14:30') and late[('trade', 'dca')] == ('10:40', '15:30')
     assert late[('close',)] == ('16:40', '17:30') and late[('decide',)] == normal[('decide',)]  # the plan is made before the open
+
+
+class UntilOpenTest(unittest.TestCase):
+    def test_pre_open_waits_to_the_bell_else_zero(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from session_times import until_open
+        kst = ZoneInfo('Asia/Seoul')
+        self.assertEqual(until_open(datetime(2026, 11, 20, 8, 55, 30, tzinfo=kst)), 270.0)  # Friday 08:55:30 -> 09:00
+        self.assertEqual(until_open(datetime(2026, 11, 20, 9, 0, 1, tzinfo=kst)), 0.0)
+        self.assertEqual(until_open(datetime(2026, 11, 20, 7, 30, tzinfo=kst)), 0.0)  # too early: the old 'outside session'
+        self.assertEqual(until_open(datetime(2026, 11, 21, 8, 55, tzinfo=kst)), 0.0)  # Saturday

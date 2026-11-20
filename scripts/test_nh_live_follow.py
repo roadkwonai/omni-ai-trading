@@ -297,6 +297,34 @@ class Step(unittest.TestCase):
             op, fields = send.call_args.args[3], send.call_args.args[4]
             self.assertEqual((op, fields['iem_cd'], fields['orr_qty'], fields['orr_pr']), ('krstockOrderCashBuy', '005930', 1, 50_100))
 
+    def test_a_quiet_account_asks_nh_every_five_minutes_not_every_cycle(self):
+        # 2026-11-20 NH call plan P3: nothing held, open or to mirror -> the balance, order and P&L reads (3+ NH calls a
+        # cycle) are rechecked every five minutes; anything to do (a paper buy, a holding, a request) reads every cycle
+        from datetime import timedelta
+        calls = []
+
+        def snap(*a, **k):
+            calls.append(k.get('symbol'))
+            return snapshots(self.held, 0)
+        record = {'kind': 'live', 'engine': 'jev', 'auto': True, 'budget': RECORD['budget'], 'rules': {}}
+        self.held = ()
+        with tempfile.TemporaryDirectory() as d, \
+                patch('nh_live_shadow.effective_rules', return_value={'stop_loss_pct': 2.0}), \
+                patch('nh_live_broker.collect_snapshots', side_effect=snap), patch('accounts.live_price_cap', return_value=300_000), \
+                patch('src.live.halt.halt_flag_set', return_value=False), patch.object(f, 'mac_notify'), \
+                patch('nh_guarded_live.execute', return_value='intent-1'):
+            paper(Path(d) / 'shared-etf-paper', [])
+            go = lambda minutes: f.step(reader(50_000, 50_100), A, {}, record, root=Path(d), now=NOW + timedelta(minutes=minutes), key='live-1')  # noqa: E731
+            first, quiet, later = go(0), go(1), go(5)
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(quiet.get('idle') and not first.get('idle') and not later.get('idle'))
+            paper(Path(d) / 'shared-etf-paper', [('005930', 'BUY', 4, 50_000, '06T11:05:30')])  # the paper buys
+            go(6)
+            self.assertEqual(len(calls), 3)  # something to mirror: read at once
+            self.held = (('005930', 1, 50_000),)
+            go(7), go(8)
+            self.assertEqual(len(calls), 5)  # holding something: every cycle
+
     def test_a_v2_paper_buy_after_the_cutoff_is_followed_the_same_day(self):
         fills = [('005930', 'BUY', 4, 50_000, '06T14:51:00')]
         late = NOW.replace(hour=14, minute=52)
@@ -1280,3 +1308,18 @@ class HandTrades(unittest.TestCase):
         self.assertEqual(len(alerts), 1)
         review(NOW.replace(day=9))  # the next session alerts again
         self.assertEqual(len(alerts), 2)
+
+
+def test_amount_sizing_uses_the_ratio_the_user_set():  # user 2026-11-20: 한진칼 2 paper shares -> 1 live share at 9.9%
+    import nh_live_follow as F
+    from accounts import problems
+    paper = {'budget': {'first_buy_krw': 1_000_000}, 'limits': {'daily_new_symbols': 5}}
+    record = {'kind': 'live', 'budget': {'capital_krw': 1_490_000, 'order_price_max_krw': 400_000},
+              'rules': {'sizing': 'amount', 'tranche_krw': 500_000}}
+    ratio, shares = F.amount_shares(record, paper)
+    assert float(ratio) < 1 and shares(226_000, 2) < 2  # 자동: 운용금 ÷ 모의 하루 계획
+    manual = {**record, 'rules': {**record['rules'], 'follow_pct': 100}}
+    ratio, shares = F.amount_shares(manual, paper)
+    assert float(ratio) == 1.0 and shares(226_000, 2) == 2  # 모의 수량 그대로
+    assert shares(226_000, 3) < 3  # still capped by 체결 1건당 최대 50만
+    assert any('모의 대비 비율' in i for i in problems({**manual, 'name': 'x', 'rules': {**manual['rules'], 'follow_pct': 150}}))

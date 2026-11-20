@@ -139,6 +139,35 @@ def values_of(held, quotes, res=None):
     return out | {L.key_of(c): q * quotes[L.key_of(c)][0] for c, q in held.items() if L.key_of(c) in yeo_method.EXTRA and L.key_of(c) in quotes}
 
 
+def capital_logged(key, capital):
+    """This account's 운용금 now is the newest one the settings history recorded (accounts kind, <key>.budget.capital_krw):
+    입금할 때 takes only a 운용금 change saved through config_store as a deposit (docs/longterm-dca-deposit-plan.md 3-1)."""
+    import sqlite3
+    import config_store
+    from sqlite_ro import ro_connect
+    try:
+        with ro_connect(config_store.history_path()) as db:
+            row = db.execute("SELECT new FROM changes WHERE kind='accounts' AND key=? ORDER BY rowid DESC LIMIT 1",
+                             (f'{key}.budget.capital_krw',)).fetchone()
+    except (OSError, sqlite3.Error):
+        return False
+    try:
+        return row is not None and json.loads(row[0]) == capital
+    except (TypeError, ValueError):
+        return False
+
+
+def take_deposit(cfg, dca, record, key, day):
+    """(the 적립식 state, notes) after 입금할 때 reads this account's 운용금 (longterm_dca.take_deposit); unchanged otherwise."""
+    if not cfg or cfg.get('frequency') != 'deposit':
+        return dca, []
+    capital = record['budget']['capital_krw']
+    seen = (dca or {}).get('capital_seen')
+    logged = seen == capital or type(seen) not in (int, float) or capital_logged(key, capital)
+    new, note = longterm_dca.take_deposit(cfg, dca, capital, day, logged=logged)
+    return new, [note] if note else []
+
+
 def dca_want(day_state, plan, yeo=None):
     """What this account's 적립식 buys: its strategy's invested part (L.dca_targets: a 여운봉 account its pair, else the
     day's target without KOFR)."""
@@ -250,12 +279,14 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
     cfg = cfg and longterm_watchlist.for_dca(cfg, engine_root)
     dca_due = bool(cfg and cfg['on'] and hhmm >= longterm_dca.start_time(cfg) and longterm_dca.auto_look(cfg, now)
                    and state.get('dca_check') != day and 'dca_next' not in state)
+    alert_due = bool(cfg and not cfg['on'] and cfg.get('alert') and hhmm >= longterm_dca.start_time(cfg) and longterm_dca.auto_look(cfg, now)
+                     and state.get('alert_check') != day and state.get('day') == day)  # 적립 알림 (2026-11-20): after the day's plan
     sendable = execute_orders and any(o['status'] == 'planned' for o in state.get('orders') or [])
     idle = 'today done' if state.get('execute') else 'plan only (dry run)'
     guard = LiveOrderGuard(account, root, symbols=set(L.CODE_KEY) | set(longterm_dca.sleeve(cfg) if cfg else ()) | {L.code_of(k) for k in yeo_keys})
     if not auto and not open_order(guard):
         return {'action': 'WAIT', 'reason': 'automation off'}
-    if hhmm <= end and not (fresh or sendable or dca_due) and not open_order(guard):
+    if hhmm <= end and not (fresh or sendable or dca_due or alert_due) and not open_order(guard):
         return {'action': 'HOLD', 'reason': idle, **info}  # nothing to reconcile, plan, check or send: no broker reads
     snapshots = collect_snapshots(reader, account, now)
     record_fills(root, key, snapshots['history'], now)
@@ -277,7 +308,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
     outside = sum(r['rsdl_qty'] * next((v for v in (r.get('now_pr'), r.get('phs_pr')) if type(v) in (int, float) and v > 0), 0)
                   for r in rows if r.get('iem_cd') in held and r['iem_cd'] not in L.CODE_KEY and r['iem_cd'] not in {L.code_of(k) for k in yeo_keys})
     res = L.reservoir_code(L.load_settings(engine_root), key, record['budget']['capital_krw'], held)  # 저수지 ETF (11-19)
-    if fresh or dca_due:
+    if fresh or dca_due or alert_due:
         quotes = {}
         def ask_again(code):
             quote = bid_ask(reader, code)
@@ -302,16 +333,20 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             book = settle_sold(root, key, state, book)
             if owed := yeo_owed(root, key, state, yeo):
                 book = {**book, 'yeo_owed': owed}
+        dca, deposit = take_deposit(cfg, dca, record, key, day)  # 입금할 때: a raised 운용금 is the 적립식's, not the strategy's
         waiting = longterm_dca.reserved(dca)  # the 적립식's money: waiting for a drawdown step, carried parts under one share
         settings = L.load_settings(engine_root)  # 계좌별 전략: this account's master modules; regime, stories and indicators are the engine's
         orders, plan_info, new_book = day_orders(plan, stories, book, held, quotes, cash - waiting,
                                                  capital - outside - waiting, day, L.book_modules(settings, key, plan), yeo, res)
         plan_info['strategy'] = '이 계좌 전략: ' + L.book_strategy_label(settings, key)
         plan_info['reservoir'] = res
+        if deposit:
+            plan_info['deposit'] = deposit
         if not execute_orders:
             for order in orders:
                 order['status'] = 'dry_run'
-        state = {'day': day, 'execute': execute_orders, 'orders': orders, 'info': plan_info, 'book': book, 'dca': dca}
+        state = {'day': day, 'execute': execute_orders, 'orders': orders, 'info': plan_info, 'book': book, 'dca': dca,
+                 'dca_alert': state.get('dca_alert') or {}}
         if 'sold' in new_book:  # the month's sell room counts the sells as they are sent (below), not as planned
             prior = book.get('sold') or {}
             new_book['sold'] = dict(prior) if prior.get('month') == day[:7] else {'month': day[:7], 'krw': 0}
@@ -319,10 +354,25 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             state['book_next' if orders else 'book'] = new_book
         save_state(root, key, state)
         return {'action': 'PLAN', 'orders': orders, **plan_info, **info, 'execution': execution}
+    if alert_due and not sendable:  # 적립 알림: what the 적립식 would buy today, logged for Discord; never an order
+        prices = {k: q[1] for k, q in quotes.items()}
+        if not longterm_dca.ready(cfg, plan.get('indicators') or {}, dca_want(state, plan, yeo), prices, now):
+            return {'action': 'WAIT', 'reason': 'dca alert: automatic time waits for a price at or under yesterday close', **info}
+        planned, new_alert, notes = longterm_dca.alert(cfg, state.get('dca_alert') or {}, now, plan.get('indicators') or {}, plan.get('regime'),
+                                                       dca_want(state, plan, yeo), prices)
+        state['dca_alert'], state['alert_check'] = new_alert, day
+        save_state(root, key, state)
+        rows = [{'key': k, 'code': L.code_of(k, res), 'name': L.asset_name(k), 'krw': round(v), 'price': prices[k],
+                 'qty': int(v // (prices[k] * (1 + L.FEE)))} for k, v in planned.items() if prices.get(k)]
+        rows = [r for r in rows if r['qty'] > 0]
+        if rows:
+            return {'action': 'DCA_ALERT', 'orders': rows, 'notes': notes, **info, 'execution': 'ALERT'}
+        return {'action': 'HOLD', 'reason': 'dca alert: not a buy day', 'notes': notes, **info}
     if dca_due and not longterm_dca.ready(cfg, plan.get('indicators') or {}, dca_want(state, plan, yeo),
                                           {k: q[1] for k, q in quotes.items()}, now):
         return {'action': 'WAIT', 'reason': 'dca: automatic time waits for a price at or under yesterday close', **info}
     if dca_due:  # 적립식, once a day at its time: what is short of money or under one share waits for the next trading day
+        state['dca'], deposit = take_deposit(cfg, state.get('dca') or {}, record, key, day)  # a 운용금 raised during the day
         merged, new_dca, notes, skipped = dca_orders(cfg, state, now, plan, held, quotes, cash, capital - outside, yeo,
                                                      (L.read_state(engine_root, ('story',)).get('story') or {}).get('stories'), res)
         for order in merged:
@@ -336,7 +386,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
         save_state(root, key, state)
         if skipped:  # said once: the rest of the day reads nothing from the broker for it
             return {'action': 'SKIP', 'reason': skipped, 'notes': notes, **info}
-        return {'action': 'DCA', 'orders': merged, 'notes': notes, **info, 'execution': execution}
+        return {'action': 'DCA', 'orders': merged, 'notes': deposit + notes, **info, 'execution': execution}
     order = next((o for o in state.get('orders') or [] if o.get('status') == 'planned'), None)
     if order is None or not execute_orders:
         return {'action': 'HOLD', 'reason': idle, **info}

@@ -964,6 +964,9 @@ class MCPServerAdapter:
                     raise_on_error=False,
                 )
 
+        if 'nhplug' in (self.server_name or ''):  # one NH app key, many processes: wait for a slot (orders never wait)
+            from src.tools.nh_budget import take
+            await asyncio.to_thread(take, remote_name, arguments)
         # Remote MCP tools are arbitrary and may mutate external state. If a
         # timeout / connection drop happens after the server has already
         # committed the action, retrying here would duplicate the side effect.

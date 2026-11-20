@@ -135,6 +135,10 @@ def enrich(read, candidates, now):
         if not rows or not fresh_series(rows, now) or quote_data.get('iem_cd') != code:
             continue
         info = {k: details.get(k) for k in ('name', 'index', 'reasons', 'price', 'change_pct', 'volume', 'value_mil')}
+        # what Jev reads is NH's quote (2026-11-20 NH call plan P2, option 1): the ranking service may price from Kiwoom
+        price, previous, volume, value = (quote_data.get(k) for k in ('stck_prpr', 'stck_prdy_clpr', 'acml_vol', 'acml_tr_pbmn'))
+        if all(type(v) in (int, float) for v in (price, previous, volume, value)) and price > 0 and previous > 0:
+            info.update(price=int(price), change_pct=round((price / previous - 1) * 100, 2), volume=int(volume), value_mil=int(value))
         info['facts'] = {label: quote_data.get(key) for key, label in FACTS.items() if quote_data.get(key) not in (None, '')}
         info['investor_daily_net_qty'] = investor_days(read, code, today)
         info['news'] = fresh_stock_news(code, info['name'], now) or []  # the shared 5-minute cache the runner reads too

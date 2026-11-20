@@ -15,6 +15,7 @@ from paper_ai_modes import read_modes
 from paper_learning import evaluate
 from paper_online_model import train, train_jev
 from sqlite_ro import ro_connect
+from session_times import until_open
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
 
 
@@ -61,6 +62,9 @@ def main(argv=None):
     while True:
         now = datetime.now(ZoneInfo('Asia/Seoul'))
         end = review_time(root)
+        if wait := until_open(now):  # started pre-open: wait for the bell instead of quitting
+            time.sleep(wait)
+            continue
         if now.weekday() >= 5 or not '09:00' <= now.strftime('%H:%M') < end:
             if args.shared_default and now.weekday() < 5 and now.strftime('%H:%M') >= end:
                 try:  # after-close review once the day's settlements are final; a failure must not hide the stop

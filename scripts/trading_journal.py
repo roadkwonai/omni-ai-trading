@@ -75,8 +75,10 @@ def _live_rows(key, path='미러'):
     for r in live_fills.rows(RUNTIME, key):
         h, a, cost, pnl, ret = ec.apply_fill(held.get(r['symbol'], 0), avg.get(r['symbol'], 0.0), r['side'], r['qty'], r['price'])
         held[r['symbol']], avg[r['symbol']] = h, a
+        # the engine journal's row shape (engine_compare.journal): positions()/summary() read after, avg and cost
         out.append({'time': r['time'], 'symbol': r['symbol'], 'side': r['side'], 'qty': r['qty'], 'price': r['price'],
-                    'amount': r['qty'] * r['price'], 'pnl': pnl, 'return_pct': ret, 'path': path})
+                    'amount': r['qty'] * r['price'], 'avg': a if r['side'] == 'BUY' else (cost / r['qty'] if cost else None),
+                    'pnl': pnl, 'cost': cost, 'return_pct': ret, 'after': h, 'path': path, 'basis': ''})
     return out
 
 
@@ -834,7 +836,8 @@ def main():
 
 # ── the day's report ────────────────────────────────────────────────────────
 WEEKDAYS = T.WEEKDAYS
-ROUTE_EXITS = {'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리',
+ROUTE_EXITS = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market_rebound': '지수 반등 인버스 청산',  # 2026-11-20
+    'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리',
                'jev_sell': 'Jev 매도 의견', 'manual_exit': '수동 정리', 'split_take_profit': '분할 익절'}
 
 

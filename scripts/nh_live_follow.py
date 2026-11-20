@@ -29,7 +29,7 @@ import os
 import threading
 import time
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 import sqlite3
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -229,7 +229,9 @@ def amount_shares(record, paper_record=None):
     if paper_record is None:
         paper_record = load().get('paper-shared') or {}
     first_buy = int((paper_record.get('budget') or {}).get('first_buy_krw') or 1_000_000)
-    ratio = Decimal(capital) / Decimal(first_buy * SPLIT_TRANCHES * paper_limits(paper_record)['daily_new_symbols'])
+    follow = rules.get('follow_pct')  # 직접 정한 모의 대비 비율 (user 2026-11-20); None = 자동
+    ratio = (Decimal(str(follow)) / 100 if type(follow) in (int, float) and 0 < follow <= 100
+             else Decimal(capital) / Decimal(first_buy * SPLIT_TRANCHES * paper_limits(paper_record)['daily_new_symbols']))
     amount, cap = rules['tranche_krw'], min(budget.get('order_price_max_krw', 0), rules['tranche_krw'])
 
     def shares(price, qty=1):
@@ -239,23 +241,58 @@ def amount_shares(record, paper_record=None):
     return ratio, shares
 
 
-def sizing_example(record, paper_record=None, prices=(10_000, 50_000, 200_000, 800_000)):
-    """For the dashboard: one paper tranche (first_buy_krw) bought at each price, and the live shares each basis
-    buys for it (rounded as mirror_target does; the share basis is still held to the 1-share price cap by the guard)."""
+def follow_quote(record, price, qty, paper_record=None):
+    """{'amount': (shares, why), 'share': (shares, why)} the live account buys when the paper buys `qty` at `price`,
+    with this account's own caps (1주 가격 상한, 한 번에 따라 살 최대 금액, 회당 매수 한도, 금액 비율) — the dashboard
+    calculator and example table (user 2026-11-20: "내 한도에 맞춰 계산되게")."""
+    from accounts import live_limits
+    budget = record.get('budget') or {}
+    price_cap = int(budget.get('order_price_max_krw', 0))
+    order_max = int(live_limits(record=record)['order_max_krw'])
+    ratio, shares = amount_shares(record, paper_record)
+    out = {}
+    if not 0 < price <= price_cap:
+        why = f'1주 {price:,}원이 1주 가격 상한 {price_cap:,}원보다 비쌈'
+        return {'amount': (0, why), 'share': (0, why)}
+    units = shares(price, qty)
+    if not units:
+        out['amount'] = (0, '1주가 한 번에 따라 살 최대 금액보다 비쌈')
+    else:
+        n = max(1, int(Decimal(units).to_integral_value(ROUND_HALF_UP)))
+        why = f'모의 {qty * price:,}원 × {float(ratio):.1%} = {int(Decimal(qty * price) * ratio):,}원'
+        if Decimal(qty * price) * ratio > Decimal(live_rules_of(record)['tranche_krw']):
+            why += f' → 한 번 최대 {live_rules_of(record)["tranche_krw"]:,}원까지'
+        if n * price > order_max:
+            n, why = order_max // price, why + f' → 회당 매수 한도 {order_max:,}원까지'
+        out['amount'] = (n, why if n else f'1주도 회당 매수 한도 {order_max:,}원을 넘음')
+    out['share'] = (1, '모의가 몇 주를 사든 1주') if price <= order_max else (0, f'1주가 회당 매수 한도 {order_max:,}원을 넘음')
+    return out
+
+
+def live_rules_of(record):
+    from accounts import live_rules
+    return live_rules(record)
+
+
+def sizing_example(record, paper_record=None, prices=None):
+    """For the dashboard: one paper tranche (first_buy_krw) bought at each price, and the live shares each basis buys
+    for it with this account's caps (follow_quote). Prices around the account's own 1-share cap unless given."""
     from accounts import load
     if paper_record is None:
         paper_record = load().get('paper-shared') or {}
     first_buy = int((paper_record.get('budget') or {}).get('first_buy_krw') or 1_000_000)
     price_cap = int((record.get('budget') or {}).get('order_price_max_krw', 0))
-    ratio, shares = amount_shares(record, paper_record)
+    if prices is None:
+        prices = sorted({10_000, 50_000, max(10_000, price_cap // 2 // 10_000 * 10_000), max(10_000, price_cap),
+                         max(20_000, price_cap * 3 // 2 // 10_000 * 10_000)})
+    ratio, _ = amount_shares(record, paper_record)
     rows = []
     for price in prices:
         qty = max(1, first_buy // price)
-        units = shares(price, qty)
-        rows.append({'price': price, 'paper_qty': qty, 'paper_krw': qty * price,
-                     'live_krw': int(Decimal(qty * price) * ratio),
-                     'amount': max(1, int(Decimal(units).to_integral_value(ROUND_HALF_UP))) if units else 0,
-                     'share': 1 if 0 < price <= price_cap else 0})
+        quote = follow_quote(record, price, qty, paper_record)
+        rows.append({'price': price, 'paper_qty': qty, 'paper_krw': qty * price, 'live_krw': int(Decimal(qty * price) * ratio),
+                     'amount': quote['amount'][0], 'amount_why': quote['amount'][1],
+                     'share': quote['share'][0], 'share_why': quote['share'][1]})
     return ratio, rows
 
 
@@ -702,6 +739,10 @@ def pending_step(reader, guard, credentials, account, snapshots, info, may_cance
     return None
 
 
+QUIET_RECHECK = timedelta(minutes=5)
+_QUIET = {}  # (runtime root, account key) -> when a full read last found nothing held, open, halted or to mirror
+
+
 def step(reader, account, credentials, record, *, execute_orders=False, root, now=None, key=None, may_cancel=None):
     from etf_universe import SYMBOLS
     from nh_guarded_live import execute
@@ -734,6 +775,16 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
     probe = LiveOrderGuard(account, root)
     hand = set(manual_state(root, record)['offsets']) | set(requests['buy'])  # hand-traded codes (user 2026-11-17)
     guard = LiveOrderGuard(account, root, symbols=set(SYMBOLS.values()) | set(target) | ledger_symbols(probe) | hand)
+    # 2026-11-20 NH call plan P3: a quiet account (nothing held, open, halted or to mirror at the last full read, and
+    # still nothing to mirror, no request and nothing this runner owns) re-reads the broker every QUIET_RECHECK instead
+    # of every cycle; any of those changing reads at once, and every order still reads the broker right before it
+    quiet_key, owned_now = (str(root), key), {c for c in guard.symbols if guard.owned(c)}
+    since = _QUIET.get(quiet_key) if key else None
+    if (since is not None and timedelta(0) <= now - since < QUIET_RECHECK and book is not None and not any(target.values())
+            and not owned_now and not hand and not requests['exit'] and not requests['buy']):
+        return {'action': 'HOLD', 'reason': 'quiet: broker re-read every 5 minutes',
+                'idle': True, 'paper_ledger': source.parent.name if source else None, 'paper': {}, 'target': {}, 'owned': {}, 'held': {},
+                'quiet_since': since.isoformat(timespec='seconds')}
     snapshots = collect_snapshots(reader, account, now, symbol=None)  # no quotes here: the cycle quotes its own symbols once
     if key:  # confirmed fills kept past today (live_fills; keyed by the accounts.json key, never the number)
         from live_fills import record as record_fills
@@ -748,6 +799,13 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
             held[r['iem_cd']] = held.get(r['iem_cd'], 0) + r['rsdl_qty']
             avg[r['iem_cd']] = r.get('phs_pr')
     owned = {c: n for c in guard.symbols if (n := guard.owned(c))}
+    if key:
+        quiet = (not held and not owned and not risk['halted'] and book is not None and not any(target.values())
+                 and not broker_open(snapshots['history']['Output_0']))
+        if quiet:
+            _QUIET[quiet_key] = now  # the next QUIET_RECHECK may skip the broker reads
+        else:
+            _QUIET.pop(quiet_key, None)
     info = {'paper_ledger': source.parent.name if source else None, 'paper': {c: p['qty'] for c, p in (book or {}).items()},
             'target': target, 'owned': owned,
             'held': {c: held.get(c, 0) for c in set(owned) | set(target)}, 'loss': risk['loss'], 'halted': risk['halted']}

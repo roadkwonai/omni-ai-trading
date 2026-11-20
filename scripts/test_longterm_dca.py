@@ -104,14 +104,21 @@ def limited(state=None, shares=None, **limits):
                   5_000_000, shares=shares or {}, prices=PRICES)
 
 
+def spent(result):
+    """KRW a plan put to work per ETF: its whole-share orders plus the part over whole shares it carried (D5 2026-11-20)."""
+    orders, state = result[0], result[1]
+    keys = set(orders) | set(state.get('carry') or {})
+    return {k: orders.get(k, 0) + (state.get('carry') or {}).get(k, 0) for k in keys}
+
+
 def test_limits_are_off_by_default_and_change_nothing():
     cfg = D.clean(CFG)
     assert not any(cfg[k] for k in ('pick_on', 'max_symbols_on', 'max_per_symbol_on', 'max_total_on'))
-    assert limited()[0] == plan(CFG, {}, AT(18))[0]
+    assert spent(limited()) == pytest.approx(plan(CFG, {}, AT(18))[0])
 
 
 def test_only_the_chosen_etfs_are_bought_in_their_target_proportion():
-    orders, _, notes = limited(pick_on=True, picks=['NDX', 'SEMI'])
+    orders = spent(limited(pick_on=True, picks=['NDX', 'SEMI']))
     assert set(orders) == {'NDX', 'SEMI'} and round(orders['NDX'] / orders['SEMI'], 6) == 3.0
     assert round(sum(orders.values())) == 1_000_000
     assert D.clean({**CFG, 'pick_on': True, 'picks': ['NDX', 'TSLA', 'NDX']})['picks'] == ['NDX']  # unknown and repeated dropped
@@ -139,8 +146,8 @@ def test_a_share_limit_without_a_price_buys_nothing_of_that_etf():
 
 
 def test_a_limit_that_does_not_bind_adds_no_note():
-    orders, _, notes = limited(max_per_symbol_on=True, max_per_symbol=10_000)
-    assert orders == plan(CFG, {}, AT(18))[0] and not any('주식 수 제한' in n for n in notes)
+    result = limited(max_per_symbol_on=True, max_per_symbol=10_000)
+    assert spent(result) == pytest.approx(plan(CFG, {}, AT(18))[0]) and not any('주식 수 제한' in n for n in result[2])
 
 
 # ---- user approval 2026-11-18 (docs/longterm-account-settings-plan.md 2-A, 4-B②): 관심목록 sleeve, 1주 미만 몫 이월 ----
@@ -161,14 +168,14 @@ def test_watchlist_codes_are_kept_as_picks_but_engine_codes_and_junk_are_not():
 
 
 def test_a_watchlist_code_gets_the_average_weight_of_the_chosen_equity_etfs():
-    orders, _, _ = sleeve(['NDX', 'SEMI', '005930'])
+    orders = spent(sleeve(['NDX', 'SEMI', '005930']))
     assert set(orders) == {'NDX', 'SEMI', '005930'}
     assert orders['005930'] == pytest.approx(1_000_000 * 0.20 / 0.60)  # (0.30 + 0.10) / 2 next to 0.30 and 0.10
     assert round(sum(orders.values())) == 1_000_000
 
 
 def test_only_watchlist_codes_split_the_contribution_equally_and_never_take_the_waiting_money():
-    orders, state, _ = sleeve(['005930', '000660'])
+    orders = spent(sleeve(['005930', '000660']))
     assert orders == {'005930': pytest.approx(500_000), '000660': pytest.approx(500_000)}
     orders, state, _ = sleeve(['005930', '000660'], profile='yeo', state={'waiting_krw': 600_000, 'last_contribution': '2026-11-02'})
     assert orders == {} and state['waiting_krw'] == 600_000  # drawdown money is for the engine's equity ETFs only
@@ -184,11 +191,12 @@ def test_an_order_under_one_share_is_carried_and_joins_the_next_contribution():
     cfg = {**CFG, 'pick_on': True, 'picks': ['NDX', '000660']}  # 000660 at 120,000: its 500,000 half is 4 shares
     prices = {**SLEEVE_PRICES, 'NDX': 600_000}  # NDX's 500,000 is under one share
     orders, state, notes = D.plan(D.clean(cfg), {}, AT(18), {'dd': -0.02}, 'correction', WANT, {}, 5_000_000, shares={}, prices=prices)
-    assert set(orders) == {'000660'} and state['carry'] == {'NDX': 500_000}
+    assert set(orders) == {'000660'} and state['carry'] == {'NDX': 500_000, '000660': pytest.approx(500_000 - D.share_cost(120_000, 4))}
     assert state['contributed_krw'] == 1_000_000 and any('이월' in n for n in notes)
     december = datetime(2026, 12, 18, 10, 0, tzinfo=KST)
     orders, state, _ = D.plan(D.clean(cfg), state, december, {'dd': -0.02}, 'correction', WANT, {}, 5_000_000, shares={}, prices=prices)
-    assert orders['NDX'] == pytest.approx(1_000_000) and not state['carry'].get('NDX')  # 500,000 carried + 500,000 = 1 share
+    assert orders['NDX'] == D.share_cost(600_000, 1)  # 500,000 carried + 500,000 = 1 share, the rest carried again
+    assert state['carry']['NDX'] == pytest.approx(1_000_000 - D.share_cost(600_000, 1))
 
 
 def test_carried_money_is_reserved_like_waiting_money():
@@ -200,7 +208,7 @@ def test_carried_money_is_reserved_like_waiting_money():
 
 def test_the_carry_of_an_etf_no_longer_chosen_goes_back_to_cash_on_the_next_contribution():
     orders, state, notes = limited(state={'carry': {'SEMI': 100_000}, 'last_contribution': '2026-10-18'}, pick_on=True, picks=['NDX'])
-    assert set(orders) == {'NDX'} and not state['carry'] and any('이월' in n and '해제' in n for n in notes)
+    assert set(orders) == {'NDX'} and 'SEMI' not in state['carry'] and any('이월' in n and '해제' in n for n in notes)
 
 
 def test_without_prices_nothing_is_carried():
@@ -216,17 +224,18 @@ def judged(profile='yeo', every='day', **cfg):
 
 
 def test_master_timing_keeps_the_limits_and_the_carry():
-    orders, _, _ = limited(pick_on=True, picks=['NDX', 'SEMI'], timing='master', buy_every='day')
+    orders = spent(limited(pick_on=True, picks=['NDX', 'SEMI'], timing='master', buy_every='day'))
     assert set(orders) == {'NDX', 'SEMI'} and round(sum(orders.values())) == 1_000_000
     cfg = D.clean(judged('dalio', 'day'))
     prices = {**PRICES, 'NDX': 500_000}  # NDX's 300,000 share of a contribution is under one share
     go = lambda state, when: D.plan(cfg, state, when, {'dd': -0.02}, 'correction', WANT, {}, 5_000_000, shares={}, prices=prices)
     orders, state, _ = go({}, AT(18))
-    assert 'NDX' not in orders and state['carry'] == {'NDX': pytest.approx(300_000)}
+    assert 'NDX' not in orders and state['carry']['NDX'] == pytest.approx(300_000)
     orders, state, _ = go(state, AT(19))
-    assert orders == {} and state['carry'] == {'NDX': pytest.approx(300_000)}  # nothing to buy: the carry waits for a buy
+    assert orders == {} and state['carry']['NDX'] == pytest.approx(300_000)  # nothing to buy: the carry waits for a buy
     orders, state, _ = go(state, datetime(2026, 12, 18, 10, 0, tzinfo=KST))
-    assert orders['NDX'] == pytest.approx(600_000) and not state['carry'].get('NDX')
+    assert orders['NDX'] == D.share_cost(500_000, 1)  # 300,000 carried + 300,000 = one share, the rest carried again
+    assert state['carry']['NDX'] == pytest.approx(600_000 - D.share_cost(500_000, 1))
 
 
 def test_a_master_profile_gets_a_grade_for_the_regime():
@@ -617,9 +626,9 @@ def test_the_master_sizes_a_shares_book_in_whole_shares_not_my_one_share():
     prices = {'NDX': 24_000, 'SPX': 22_000}
     orders, state, notes = D.plan(cfg, {}, AT(18), {'dd': -0.02, 'day_ret': -0.01}, 'correction', WANT, {}, 5_000_000,
                                   prices=prices)
-    spent = sum(orders.values())
+    put = sum(orders.values()) + sum(state['carry'].values())  # whole shares + the part over them carried
     # the master's amount (1,000,000 a month x 0.7, one monthly buy, x 1.2 in a correction), not 1 share of each (46,000)
-    assert spent == pytest.approx(1_000_000 * D.PACE * 1.2, rel=0.01)
+    assert put == pytest.approx(1_000_000 * D.PACE * 1.2, rel=0.01)
     assert {k: int(v // (prices[k] * (1 + L.FEE))) for k, v in orders.items()} == {'NDX': 17, 'SPX': 19}
     assert any('주' in n and '나스닥100' in n for n in notes if '이번 수량' in n)  # the shares it buys are shown
 
@@ -645,3 +654,85 @@ def test_the_masters_share_count_note_is_what_is_bought_after_the_limits():
     orders, _, notes = D.plan(cfg, {}, AT(18), {'dd': -0.02, 'day_ret': -0.01}, 'correction', WANT, {}, 5_000_000, prices=prices)
     note = next(n for n in notes if n.startswith('이번 수량'))
     assert '5주' in note and '17주' not in note and '19주' not in note
+
+
+# 입금할 때만 사는 적립식 (user approval 2026-11-20, docs/longterm-dca-deposit-plan.md D1~D5)
+YEO_WANT = {'NDX': 0.7, 'NDXMIX': 0.3}
+DEP = {**D.DEFAULT, 'on': True, 'style': 'master', 'profile': 'yeo', 'when_by': 'master', 'size_by': 'master',
+       'frequency': 'deposit', 'buy_every': 'day', 'size': 'shares', 'time_mode': 'fixed', 'time': '10:00'}
+
+
+def test_deposit_frequency_is_kept_with_its_spread_and_share():
+    cfg = D.clean({**DEP, 'spread_weeks': 99, 'deposit_pct': 5})
+    assert (cfg['frequency'], cfg['spread_weeks'], cfg['deposit_pct']) == ('deposit', 26, 10)
+    assert (D.clean(DEP)['spread_weeks'], D.clean(DEP)['deposit_pct']) == (4, 100)
+    assert D.clean({**DEP, 'size_by': 'me', 'size': 'shares'})['size_by'] == 'master'  # my N shares need a calendar
+
+
+def test_first_look_sets_the_capital_seen_and_adds_nothing():
+    state, note = D.take_deposit(DEP, {}, 500_000, '2026-11-20', logged=True)
+    assert state['capital_seen'] == 500_000 and state.get('waiting_krw', 0) == 0
+    assert '기준' in note
+
+
+def test_a_raised_capital_is_the_deposit_and_is_spread():
+    state, note = D.take_deposit(DEP, {'capital_seen': 500_000}, 800_000, '2026-11-23', logged=True)
+    assert state['waiting_krw'] == 300_000 and state['contributed_krw'] == 300_000 and state['capital_seen'] == 800_000
+    assert state['deposit_base'] == pytest.approx(300_000 / 20)  # 4 weeks x 5 trading days
+    assert '300,000' in note
+    half, _ = D.take_deposit({**DEP, 'deposit_pct': 50}, {'capital_seen': 500_000}, 800_000, '2026-11-23', logged=True)
+    assert half['waiting_krw'] == 150_000
+
+
+def test_a_lowered_capital_cuts_only_the_unspent_part():
+    state, _ = D.take_deposit(DEP, {'capital_seen': 800_000, 'waiting_krw': 100_000}, 600_000, '2026-11-24', logged=True)
+    assert state['waiting_krw'] == 0 and state['capital_seen'] == 600_000
+
+
+def test_a_capital_change_without_history_is_not_taken():
+    state, note = D.take_deposit(DEP, {'capital_seen': 500_000}, 800_000, '2026-11-23', logged=False)
+    assert state.get('waiting_krw', 0) == 0 and state['capital_seen'] == 500_000 and '이력' in note
+
+
+def test_no_deposit_no_buy_even_on_a_yeo_book_with_cash():
+    orders, _, _ = D.plan(DEP, {'capital_seen': 500_000}, AT(20), {'day_ret': -0.01}, 'correction', YEO_WANT, {}, 500_000,
+                          prices={'NDX': 23_300, 'NDXMIX': 9_750}, yeo=True)
+    assert orders == {}
+
+
+def test_deposit_buys_spread_never_more_than_the_deposit():
+    state = {'capital_seen': 800_000, 'waiting_krw': 300_000, 'contributed_krw': 300_000, 'deposit_base': 15_000}
+    orders, after, _ = D.plan(DEP, state, AT(20), {'day_ret': -0.01}, 'correction', YEO_WANT, {}, 800_000,
+                              prices={'NDX': 23_300, 'NDXMIX': 9_750}, yeo=True)
+    spent = sum(orders.values()) + sum(after['carry'].values())
+    assert spent == pytest.approx(15_000 * 1.2, abs=2)  # base x the correction multiplier
+    assert after['waiting_krw'] == pytest.approx(300_000 - 18_000, abs=2)
+    small = {**state, 'waiting_krw': 5_000}
+    orders, after, _ = D.plan(DEP, small, AT(20), {'day_ret': -0.01}, 'correction', YEO_WANT, {}, 800_000,
+                              prices={'NDX': 23_300, 'NDXMIX': 9_750}, yeo=True)
+    assert sum(orders.values()) + sum(after['carry'].values()) <= 5_000 + 1
+
+
+def test_my_size_on_deposit_buys_the_whole_deposit_at_once():
+    cfg = {**DEP, 'size_by': 'me', 'size': 'amount', 'when_by': 'me', 'me_when': 'cycle'}
+    state = {'capital_seen': 800_000, 'waiting_krw': 300_000, 'contributed_krw': 300_000}
+    orders, after, _ = D.plan(cfg, state, AT(20), {}, 'correction', YEO_WANT, {}, 800_000,
+                              prices={'NDX': 23_300, 'NDXMIX': 9_750}, yeo=True)
+    assert sum(orders.values()) + sum(after['carry'].values()) == pytest.approx(300_000, abs=2) and after['waiting_krw'] == 0
+
+
+def test_the_part_over_whole_shares_is_carried_not_lost():
+    """11-20 실계좌 2: 58,800원 for 379810 at 23,315 bought 2 shares and 12,170원 fell out of the 적립식 (D5)."""
+    cfg = {**CFG, 'pick_on': True, 'picks': ['NDX'], 'amount_krw': 58_800, 'frequency': 'daily'}
+    orders, after, _ = D.plan(cfg, {}, AT(20), {}, 'correction', WANT, {}, 5_000_000, prices={'NDX': 23_315})
+    assert orders['NDX'] == D.share_cost(23_315, 2)
+    assert after['carry']['NDX'] == pytest.approx(58_800 - D.share_cost(23_315, 2))
+    assert D.reserved(after) == pytest.approx(58_800 - D.share_cost(23_315, 2))
+
+
+def test_the_views_example_for_a_deposit_book_buys_one_spread_part():
+    out = D.effective(DEP, 'correction', {'day_ret': -0.01}, YEO_WANT, {'NDX': 23_300, 'NDXMIX': 9_750}, cash=500_000, yeo=True)
+    put = sum(out['orders'].values()) + sum((out['after'].get('carry') or {}).values())
+    assert put == pytest.approx(1_000_000 / 20 * 1.2, abs=2)  # 1,000,000 sample over 4 weeks of daily buys x 1.2
+    assert any('입금' in f['value'] for f in out['fields'] if f['key'] == 'size')
+    assert D.next_day(DEP, date(2026, 11, 21)) == date(2026, 11, 23)

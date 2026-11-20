@@ -664,7 +664,12 @@ def new_plan(symbol, profile='defensive', peak=None, target=None, basis=None):
     half, all_ = float((SPLIT_TAKE_PROFIT - 1) * 100), float((TAKE_PROFIT_ALL - 1) * 100)
     if target is not None:
         half = all_ = float(target)
-    return {'opened': datetime.now(KST).isoformat(), 'profile': profile, 'stop_pct': float((1 - STOP_LOSS) * 100),
+    if profile == 'inverse_crash':  # user 2026-11-20: a crash-day inverse takes a moderate profit, never a trailing trend
+        half, all_ = float(INVERSE['crash_half_pct']), float(INVERSE['crash_all_pct'])
+    stop = float((1 - STOP_LOSS) * 100)
+    if profile in ('inverse_crash', 'inverse_quick'):
+        stop = min(stop, float(INVERSE['stop_pct']))
+    return {'opened': datetime.now(KST).isoformat(), 'profile': profile, 'stop_pct': stop,
             'half_pct': half, 'all_pct': all_, 'target_basis': basis,
             'trend_half_pct': round(TREND_HALF_PCT * scale, 3), 'trend_trail_pct': round(TREND_TRAIL_PCT * scale, 3),
             'peak': peak, 'breakeven_after_half': True, 'flatten_at': FLATTEN_AT}
@@ -857,8 +862,9 @@ def latest_mover_rows(root, now, max_age=timedelta(minutes=12)):
 
 
 def with_latest_figures(details, row, as_of):
-    """The candidate's price, change and turnover from the latest ranking quote when there is one, with its time."""
-    if not isinstance(row, dict) or type(row.get('change_pct')) not in (int, float):
+    """The candidate's price, change and turnover from the latest ranking quote when there is one, with its time. A row the
+    ranking service priced from Kiwoom (source 'kiwoom', 2026-11-20 NH call plan P2) is not laid over Jev's NH figures."""
+    if not isinstance(row, dict) or type(row.get('change_pct')) not in (int, float) or row.get('source') == 'kiwoom':
         return details
     return {**details, **{k: row[k] for k in ('price', 'change_pct', 'volume', 'value_mil') if row.get(k) is not None},
             'figures_as_of': as_of}
@@ -1039,8 +1045,23 @@ def careful_review(root, db, day, name, code, bars, news, investor, regime, summ
 # Inverse ETFs (user 2026-11-18): bought only when every view agrees the market is falling, and off a crash day the
 # position takes a small profit whole. Replay of 8 round trips 11/11~11/18: +93,833 as traded vs +161,642 with both rules
 # (the one crash day, KOSPI200 -3.35%, made +154,553; the rest lost about 60,000).
-INVERSE = {'min_drop_pct': 0.5, 'crash_pct': 1.5, 'quick_tp_pct': 0.3}
-OWN_EXIT_PROFILES = ('trend', 'ipo', 'oversold', 'inverse_quick')  # plans the tape never upgrades to a trend plan
+INVERSE = {'min_drop_pct': 0.5, 'crash_pct': 1.5, 'quick_tp_pct': 0.3,
+           # user 2026-11-20 ("인버스는 조건을 더 강화", 10:41 −4.4% 뒤 고가 근처 0.50 진입): the index still falling over the
+           # last 30 minutes, Jev at least 0.6, the inverse not chased (≤ VWAP +1%, under 80% of today's range)
+           'falling_30m_pct': -0.3, 'jev_min_conf': 0.6, 'vwap_pct': 1.0, 'range_pct': 80.0,
+           # and not after the fall is done (user "이미 하락하고 따라 들어가는 건 위험"): the index down at most 3% today
+           'late_drop_pct': 3.0,
+           # a small side bet beside the stocks (user 2026-11-20 "인버스는 소액으로, 다른 종목도 함께"): this share of a tranche
+           'size_pct': 50.0,
+           # past late_drop_pct only a strong signal buys (user 2026-11-20 '강한 신호 예외'): the index still falling 0.5%+
+           # over 30 minutes, Jev 0.8+, the inverse not above its VWAP, and a quarter of a tranche
+           'late_fall_30m_pct': -0.5, 'late_jev_min_conf': 0.8, 'late_size_pct': 25.0,
+           # and on a crash day it takes a moderate profit (user "적당히 수익내면 끊고"): half +1%, the rest +2%
+           'crash_half_pct': 1.0, 'crash_all_pct': 1.0,  # 11:40 user: "적당히 수익내면 전량" — all at +1%
+           # held: "시황 잘 보고 손실 안 보게" — out when the index rebounds (+0.3% over 30 minutes), once +0.5% is reached
+           # it never turns into a loss (sold back at the average), and a 1% stop instead of 2%
+           'rebound_exit_pct': 0.3, 'protect_at_pct': 0.5, 'stop_pct': 1.0}
+OWN_EXIT_PROFILES = ('trend', 'ipo', 'oversold', 'inverse_quick', 'inverse_crash')  # plans the tape never upgrades to a trend plan
 
 
 def inverse_gate(view, index):
@@ -1062,8 +1083,12 @@ def inverse_gate(view, index):
         return 'inverse_market_unknown'
     if change > -INVERSE['min_drop_pct']:
         return 'inverse_index_not_falling'
+    if change < -INVERSE['late_drop_pct'] and recent > INVERSE['late_fall_30m_pct']:
+        return 'inverse_too_late'
     if recent > 0:
         return 'inverse_index_rebounding'
+    if recent > INVERSE['falling_30m_pct']:
+        return 'inverse_index_not_falling_now'
     if program >= 0:
         return 'inverse_flows_not_selling'
     if nasdaq >= 0:
@@ -1071,7 +1096,46 @@ def inverse_gate(view, index):
     return None
 
 
-def entry_block(root, code, owned, source, rows, closed_today, short, name=None, read=None, review=None):
+def inverse_late(view, index):
+    """The index is past INVERSE['late_drop_pct'] today: only the strong-signal exception buys, smaller."""
+    change = ((view or {}).get(index) or {}).get('today_change_pct')
+    return type(change) in (int, float) and change < -INVERSE['late_drop_pct']
+
+
+def inverse_tape(name, rows, quote=None, confidence=None, source=None, late=False):
+    """Block reason or None for an inverse buy beyond inverse_gate (user 2026-11-20): a Jev pick needs confidence
+    INVERSE['jev_min_conf'], and the inverse ETF must not be chased (at most INVERSE['vwap_pct'] % over today's VWAP and
+    under INVERSE['range_pct'] % of today's range; an unknown session does not buy)."""
+    floor = INVERSE['late_jev_min_conf'] if late else INVERSE['jev_min_conf']
+    if source == 'jev' and not (type(confidence) in (int, float) and confidence >= floor):
+        return 'inverse_low_confidence'
+    import jev_context
+    jev_context.remember({name: rows})
+    jev_context.note_quote(name, quote)
+    summary = jev_context.summary(name)
+    if not summary or summary.get('vs_vwap_pct') is None or summary.get('range_position_pct') is None:
+        return 'inverse_market_unknown'
+    if summary['vs_vwap_pct'] > (0 if late else INVERSE['vwap_pct']) or summary['range_position_pct'] >= INVERSE['range_pct']:
+        return 'inverse_chase'
+    return None
+
+
+def inverse_refusal(root, code, rows, name=None, read=None, confidence=None, source=None):
+    """Why an inverse buy is refused now (inverse_gate, then inverse_tape on NH's fresh quote), or None. The cycle asks it
+    before a Jev inverse pick takes the turn, so every refusal hands the turn on (11-20 13:22: a low-confidence INV pick
+    was refused only in entry_block and 한진칼, the strength candidate, was never looked at)."""
+    view, index = market_view(root), symbol_index(root, code)
+    if gate := inverse_gate(view, index):
+        return gate
+    try:
+        quoted = read.call_tool('get_stock_price', {'stock_code': code}) if read else {}
+        quote = fresh_quote(quoted.get('data', {}), code, datetime.now(KST)) if quoted.get('status') == 'ok' else None
+    except ValueError:
+        quote = None
+    return inverse_tape(name or code, rows, quote, confidence, source, late=inverse_late(view, index))
+
+
+def entry_block(root, code, owned, source, rows, closed_today, short, name=None, read=None, review=None, confidence=None):
     """Why the data refuses this pick now, or None; the cycle runs it on every pick and slot_entry before a slot takes
     the cycle. User 2026-11-17: a stock whose round trip closed today is bought again only with re-entry allowed, and a
     watchlist-strength re-entry also needs the index moving its way; then the data must confirm the pick (user choice
@@ -1082,8 +1146,8 @@ def entry_block(root, code, owned, source, rows, closed_today, short, name=None,
     if blocked or source == 'oversold' or source in V2_SOURCES:
         return blocked
     view, index = market_view(root), symbol_index(root, code)
-    if short and (gate := inverse_gate(view, index)):
-        return gate
+    if short and (refused := inverse_refusal(root, code, rows, name, read, confidence, source)):
+        return refused
     if regime := careful_due(code, owned, source, closed_today, view, index):
         try:
             quoted = read.call_tool('get_stock_price', {'stock_code': code}) if read else {}
@@ -1170,12 +1234,23 @@ def entry_confirmation(view, index, short, rows, own_strength=False):
 
 
 def volume_check(rows):
-    """None when the last 5 one-minute volumes are at least ENTRY_VOLUME_RATIO x the 5 before (always None when it is 0)."""
+    """None when the last 5 one-minute volumes are at least ENTRY_VOLUME_RATIO x the 5 before (always None when it is 0).
+    Opening rows (user 2026-11-20, strength path at the bell): today's settled KRX minutes, then NXT pre-market or the
+    previous session's; today's average minute volume must be ENTRY_VOLUME_RATIO x that of the 5 rows before it, and
+    before the first KRX minute settles (about 09:02) there is no volume to compare, so price, trend and Jev decide."""
     if ENTRY_VOLUME_RATIO <= 0:
         return None
     try:
+        if any(isinstance(r, dict) and r.get('bsop_date') for r in rows):
+            today = max(str(r.get('bsop_date') or '') for r in rows)
+            krx = [float(r['vol']) for r in rows if r.get('bsop_date') == today and r.get('market') != 'NXT']
+            before = [float(r['vol']) for r in rows if not (r.get('bsop_date') == today and r.get('market') != 'NXT')][:5]
+            if krx and before:
+                return None if sum(krx) / len(krx) >= ENTRY_VOLUME_RATIO * sum(before) / len(before) else 'volume_not_rising'
+            if not krx:
+                return None
         volumes = [float(row['vol']) for row in rows[:10]]
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return 'volume_not_rising'
     if len(volumes) < 10 or sum(volumes[:5]) < ENTRY_VOLUME_RATIO * sum(volumes[5:]):
         return 'volume_not_rising'
@@ -1234,6 +1309,18 @@ def strength_shares(root, code, price, owned=(), closed_today=None):
     return qty
 
 
+_STRENGTH_WHYS = {}  # the last strength_candidate call: every ranked stock -> why it was not picked ('picked' for the one)
+
+
+def strength_whys(refused_code=None, refused=None):
+    """{code: reason} of the last strength look, in Jev's ranking order, for the cycle's records (user 2026-11-20 '한진칼 왜
+    안 샀는지도 기록'): before, only the top-ranked stock's reason was written."""
+    out = dict(_STRENGTH_WHYS)
+    if refused_code and refused:
+        out[refused_code] = refused  # picked, then refused by entry_block (careful re-entry, reentry rules)
+    return out
+
+
 def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=None):
     """(code, facts) of the best watchlist stock among Jev's top STRENGTH_TOP_N picks today (probability >=
     STRENGTH_JEV_MIN) that is up STRENGTH_CHANGE% on its previous close right now and rising on its last minute bars;
@@ -1248,36 +1335,47 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=Non
         probabilities = {}
     ranked = sorted((c for c, v in probabilities.items() if c != 'NONE' and type(v) in (int, float)),
                     key=lambda c: probabilities[c], reverse=True)[:STRENGTH_TOP_N]
-    best, why = None, 'no_strength_candidate'
+    best, why, whys = None, 'no_strength_candidate', {}  # whys: each ranked stock's refusal (the top one is reported)
+    _STRENGTH_WHYS.clear()
+    _STRENGTH_WHYS.update({code: 'not_in_movers' for code in ranked if code not in movers})
     for code, details in movers.items():
         probability = probabilities.get(code)
         price, change = details.get('price'), details.get('change_pct')
         rows = bars.get(code) or []
-        if code not in ranked or probability < STRENGTH_JEV_MIN or code in owned:
+        if code not in ranked:
+            continue
+        if probability < STRENGTH_JEV_MIN or code in owned:
+            _STRENGTH_WHYS[code] = 'held' if code in owned else 'jev_below_min'
             continue
         if cooling(code, now):
-            why = 'pick_cooldown'
+            whys[code] = 'pick_cooldown'
             continue
         try:
             previous = price / (1 + change / 100)
             now_change = (float(rows[0]['stck_prpr']) / previous - 1) * 100
             rising = float(rows[0]['stck_prpr']) > float(rows[5]['stck_prpr'])
         except (TypeError, ValueError, KeyError, IndexError, ZeroDivisionError):
+            _STRENGTH_WHYS[code] = 'bars_missing'
             continue
         if floors and code in floors and float(rows[0]['stck_prpr']) <= floors[code]:
-            why = 'reentry_below_last_exit'
+            whys[code] = 'reentry_below_last_exit'
             continue
         if not STRENGTH_CHANGE[0] <= now_change <= STRENGTH_CHANGE[1]:
-            why = 'strength_change_out_of_range'
+            whys[code] = 'strength_change_out_of_range'
             continue
         if RISING_CHECK and not rising:
-            why = 'trend_not_rising'
+            whys[code] = 'trend_not_rising'
             continue
         if sized is not None and sized(code, float(rows[0]['stck_prpr'])) < 1:
-            why = 'one_share_over_buy'
+            whys[code] = 'one_share_over_buy'
             continue
         if best is None or probability > best[1]['jev_watchlist_confidence']:
             best = (code, {'jev_watchlist_confidence': probability, 'change_pct': round(now_change, 2)})
+    # 11-20: the last stock looked at used to name the reason (삼성전자 out of range hid 한진칼 resting after a refusal)
+    why = next((whys[c] for c in ranked if c in whys), why)
+    _STRENGTH_WHYS.update(whys)
+    if best:
+        _STRENGTH_WHYS[best[0]] = 'picked'
     return best if best else (None, why)
 
 
@@ -1291,6 +1389,7 @@ def strength_shadow(root, movers, bars, owned, symbols, floors, blocked, cycle_i
         short_codes = {symbols[name] for name in SHORT if name in symbols}
         fields = ({'symbol': code, 'confidence': facts['jev_watchlist_confidence'], 'change_pct': facts['change_pct']}
                   if code else {'strength_reason': facts})
+        fields['strength_reasons'] = strength_whys()
         journal_event(root, 'strength_shadow', blocked=blocked, opposite_held=any(c in short_codes for c in owned),
                       cycle_id=cycle_id, **fields)
     except Exception as exc:  # an observation must never stop the runner or its stop-loss watch
@@ -1339,8 +1438,7 @@ def slot_entry(read, root, owned, movers, bars, closed_today, short_codes, now, 
         held = sum(1 for code in owned if code not in ETF7_SYMBOLS.values()
                    and (plans.get(code) or {}).get('profile') not in ('ipo', 'oversold') and not is_v2(plans.get(code) or {}))
         today = entries_today(root, now, 'watchlist_strength')
-        blocked = OPPOSITE_GUARD and any(code in short_codes for code in owned)
-        if not blocked and held < STRENGTH_SLOT_MAX and today is not None and today < STRENGTH_SLOT_DAILY:
+        if held < STRENGTH_SLOT_MAX and today is not None and today < STRENGTH_SLOT_DAILY:
             code, facts = strength_candidate(root, movers, bars, now, owned, closed_today if REENTRY_GUARD else None,
                                              sized=lambda c, pr: strength_shares(root, c, pr, owned, closed_today))
             if code is not None and not entry_block(root, code, owned, 'watchlist_strength', bars.get(code) or [],
@@ -1849,6 +1947,8 @@ def entry_plan(root, read, symbol, short):
     change = ((view or {}).get(index) or {}).get('today_change_pct')
     if short and not (type(change) in (int, float) and change <= -INVERSE['crash_pct']):
         return 'inverse_quick', INVERSE['quick_tp_pct'], {'index_change_pct': change, 'crash_pct': INVERSE['crash_pct']}
+    if short:  # a crash day: a moderate profit, half and then all (user 2026-11-20), never a trailing trend plan
+        return 'inverse_crash', None, {'index_change_pct': change, 'crash_pct': INVERSE['crash_pct']}
     if trend_mode(view, index, short):
         return 'trend', None, None
     regime = ((view or {}).get(index) or {}).get('regime')
@@ -1858,9 +1958,16 @@ def entry_plan(root, read, symbol, short):
     return 'defensive', target, basis
 
 
-def save_exit_plan(root, symbol, cycle_id=None, profile='defensive', target=None, basis=None):
-    """Record the exit levels in force at entry; later setting changes do not move an open position's levels."""
+STRENGTH_TREND_AT = 1.0  # user 2026-11-20 (replay .scratch/strength_trend_replay.py): a strength pick at +1% rides its own trend
+
+
+def save_exit_plan(root, symbol, cycle_id=None, profile='defensive', target=None, basis=None, source=None):
+    """Record the exit levels in force at entry; later setting changes do not move an open position's levels.
+    `source` watchlist_strength is kept on the plan (entry_source): such a position switches to the trend plan at
+    +STRENGTH_TREND_AT% whatever the index regime (track)."""
     plan = new_plan(symbol, profile, target=target, basis=basis)
+    if source == 'watchlist_strength':
+        plan['entry_source'] = source
     try:
         plans = exit_plans(root)
         plans[symbol] = plan
@@ -1900,6 +2007,22 @@ def regime_stop_levels(plan, view, index, symbol=None):
     if (plan or {}).get('profile') not in ('ipo', 'oversold') and ((view or {}).get(index) or {}).get('regime') in tightening_regimes(symbol):
         levels['stop'] = max(levels['stop'], Decimal('0.99'))
     return levels
+
+
+def inverse_exit(plan, avg, bid, view, index):
+    """Why a held inverse leaves now beyond its price levels (user 2026-11-20 "시황 잘 보고 손실 안 보게"), or None: the
+    index rebounding INVERSE['rebound_exit_pct'] % over the last 30 minutes, or back at the average after the best bid
+    reached +INVERSE['protect_at_pct'] %."""
+    if (plan or {}).get('profile') not in ('inverse_quick', 'inverse_crash'):
+        return None
+    recent = (((view or {}).get('index_intraday') or {}).get(index) or {}).get('change_30m_pct')
+    if type(recent) in (int, float) and recent >= INVERSE['rebound_exit_pct']:
+        return 'inverse_market_rebound'
+    peak = plan.get('peak')
+    if (type(peak) in (int, float) and type(avg) in (int, float) and avg > 0
+            and peak >= avg * (1 + INVERSE['protect_at_pct'] / 100) and bid <= avg):
+        return 'inverse_protect'
+    return None
 
 
 def exit_reason(avg, bid, levels, protected, peak=None):
@@ -2489,13 +2612,17 @@ def select_entry(choice, confidence, comparison, *, etf7=False, modes=None, univ
 _INVESTOR_CACHE = {}
 
 
+INVESTOR_TTL = 600
+
+
 def investor_flows(read, now):
-    """Per-ETF daily investor net quantities for Jev (latest closed day and today's provisional); cached 5 minutes.
+    """Per-ETF daily investor net quantities for Jev (latest closed day and today's provisional); cached 10 minutes
+    (2026-11-20 NH call plan P1: a daily figure, seven NH calls a refresh).
 
     ETFs whose read fails are left out; None when none could be read.
     """
     cached = _INVESTOR_CACHE.get('value')
-    if cached and 0 <= (now - cached[0]).total_seconds() < 300:
+    if cached and 0 <= (now - cached[0]).total_seconds() < INVESTOR_TTL:
         return cached[1]
     today = now.astimezone(KST).strftime('%Y%m%d')
     keys = (('frgn_ntby_qty', 'foreign'), ('gigwan', 'institution'), ('person', 'individual'))
@@ -2570,7 +2697,8 @@ def opening_split(bars, now):
     """(today's rows by chart, the previous session's rows by chart) of the opening review's bars: only today's may be
     logged as market_bars (the ledger keeps bsop_time only, so yesterday's 15:19 would become today's 15:19)."""
     today = now.astimezone(KST).strftime('%Y%m%d')
-    split = lambda keep: {n: [r for r in rows if (r.get('bsop_date', today) == today) == keep] for n, rows in bars.items()}  # noqa: E731
+    split = lambda keep: {n: [r for r in rows if (r.get('bsop_date', today) == today and r.get('market') != 'NXT') == keep]  # noqa: E731
+                          for n, rows in bars.items()}
     return {n: r for n, r in split(True).items() if r}, {n: r for n, r in split(False).items() if r}
 
 
@@ -2594,6 +2722,51 @@ def opening_bars(data, code, now):
     if not ordered:
         raise ValueError('bars missing')
     return [{k: r[k] for k in fields} for r in ordered[:30]]
+
+
+def entry_rows(data, code, now, opening, premarket=None):
+    """Entry chart rows: valid_bars (six settled bars of today), or inside the opening window the opening_bars (today's
+    settled bars, then the previous session's). User 2026-11-20: "9:00~9:05가 피크라 바로 시작" — entries no longer wait
+    until about 09:06 for six bars of today. `premarket(code)`: a stock's NXT pre-market rows, used instead of the previous
+    session's when there are any (user 2026-11-20 '키움으로 바꾸기'; ETFs have no NXT trading)."""
+    try:
+        return valid_bars(data, code, now)
+    except ValueError as exc:
+        if not opening or str(exc) != 'insufficient bars':
+            raise
+        rows = opening_bars(data, code, now)
+        pre = premarket(code) if premarket else []
+        if not pre:
+            return rows
+        today = now.astimezone(KST).strftime('%Y%m%d')
+        return ([r for r in rows if r['bsop_date'] == today] + pre)[:30]
+
+
+_NXT_PRE = {}  # (day, code) -> rows: the pre-market is over by 08:50, so one Kiwoom read per stock a day
+
+
+def nxt_premarket(code, now=None):
+    """Today's NXT pre-market 1-minute rows of a stock (Kiwoom ka10080 `_NX`), dated today and marked market NXT so they are
+    charted but never logged or kept as KRX bars; [] when Kiwoom has none or fails (the previous session's rows stand in)."""
+    now = now or datetime.now(KST)
+    key = (now.astimezone(KST).date(), code)
+    if key not in _NXT_PRE:
+        try:
+            import kiwoom_data
+            rows = kiwoom_data.nxt_premarket_bars(code, now)
+        except Exception:  # noqa: BLE001 - no key, a failed call: the opening chart falls back to yesterday's bars
+            return []
+        day = now.astimezone(KST).strftime('%Y%m%d')
+        if any(k[0] != key[0] for k in _NXT_PRE):
+            _NXT_PRE.clear()  # yesterday's go
+        _NXT_PRE[key] = [{'bsop_date': day, 'market': 'NXT', **r} for r in rows]
+    return _NXT_PRE[key]
+
+
+OPENING_ENTRY_NOTE = ('Opening minutes of the session: today\'s settled KRX bars come first; rows marked market NXT are today\'s '
+                      'NXT pre-market trades (08:00~08:50) of that stock, rows with bsop_date before today are the previous '
+                      'session\'s last bars (ETFs have no NXT trading). Judge the open now from them, today\'s open/gap in the '
+                      'candidates and premarket_context (overnight markets); do not wait for more bars.')
 
 
 def etf7_signal_deadline(bars, decision_time, jev_time, now, *, modes=None):
@@ -3058,7 +3231,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         if plan.get('exiting'):  # a full exit larger than one order keeps selling until flat
             return True
         return (exit_reason(avg, bid, regime_stop_levels(plans.get(symbol), view, stop_symbol_index(root, symbol), symbol), symbol in protected, plan.get('peak')) is not None
-                or ipo_time_stop(plan, datetime.now(KST)) is not None)
+                or ipo_time_stop(plan, datetime.now(KST)) is not None
+                or inverse_exit(plan, avg, bid, view, stop_symbol_index(root, symbol) or '코스피') is not None)
 
     from etf_universe import SHORT as _SHORT
     short_codes = {ETF7_SYMBOLS[n] for n in _SHORT}
@@ -3091,16 +3265,20 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                 'pre_close_review': datetime.now(KST).strftime('%H:%M') >= ENTRY_CUTOFF,
                 'same_day_exit_from': FLATTEN_AT}
 
-    def track(symbol, bid, cycle_id):
-        """Keep the highest bid; switch a defensive plan to trend when the tape turns strong (never back)."""
+    def track(symbol, bid, cycle_id, avg=None):
+        """Keep the highest bid; switch a defensive plan to trend when the tape turns strong (never back), or a
+        watchlist strength pick once it is STRENGTH_TREND_AT% up on its own (user 2026-11-20: 한진칼 sold at +1.3/+2.2%
+        on the 하락장 caps while it ran to +5.8%; in the replay the losing side is unchanged)."""
         if observing_open:
             return
         plan, changed = plans.get(symbol), False
-        if (trend_mode(view, symbol_index(root, symbol), symbol in short_codes)
+        own_trend = ((plan or {}).get('entry_source') == 'watchlist_strength' and (plan or {}).get('profile') == 'defensive'
+                     and type(avg) in (int, float) and avg > 0 and bid >= avg * (1 + STRENGTH_TREND_AT / 100))
+        if ((own_trend or trend_mode(view, symbol_index(root, symbol), symbol in short_codes))
                 and (plan or {}).get('profile') not in OWN_EXIT_PROFILES):  # new-listing / rebound / quick inverse plans keep their own numbers
             plan = {**(plan or new_plan(symbol)), 'profile': 'trend', 'peak': max((plan or {}).get('peak') or 0, bid),
                     **{k: v for k, v in new_plan(symbol, 'trend').items() if k in ('trend_half_pct', 'trend_trail_pct')}}
-            journal_event(root, 'exit_plan', symbol=symbol, reason='trend_upgrade', cycle_id=cycle_id, profile=plan['profile'],
+            journal_event(root, 'exit_plan', symbol=symbol, reason='strength_trend' if own_trend else 'trend_upgrade', cycle_id=cycle_id, profile=plan['profile'],
                           **{k: plan[k] for k in ('stop_pct', 'half_pct', 'all_pct', 'trend_half_pct', 'trend_trail_pct')})
             changed = True
         if (plan and plan.get('profile') == 'defensive' and not plan.get('weak_caps')
@@ -3143,7 +3321,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         manual = symbol in requested
         switched = manual and requested[symbol] is None and (datetime.now(KST).date(), symbol) in _SWITCH_EXITS
         if etf7:
-            track(symbol, bid, cycle_id)
+            track(symbol, bid, cycle_id, avg)
         # Before the runner stops at 15:00 a holding leaves unless its trend plan, a rising market, a profit, the
         # overnight limit and an open next session all allow carrying it.
         flatten = etf7 and datetime.now(KST).strftime('%H:%M') >= FLATTEN_AT
@@ -3309,6 +3487,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                     reason = (((plans.get(symbol) or {}).get('exiting')
                                or exit_reason(avg, price, regime_stop_levels(plans.get(symbol), view, stop_symbol_index(root, symbol), symbol), symbol in protected, (plans.get(symbol) or {}).get('peak'))
                                or ipo_time_stop(plans.get(symbol), datetime.now(KST))
+                               or inverse_exit(plans.get(symbol), avg, price, view, stop_symbol_index(root, symbol) or '코스피')
                                or ('direction_switch' if switched else 'session_flatten' if flatten else None)) if etf7 else None)
                     if etf7 and reason and not take_profit and symbol in plans and not plans[symbol].get('exiting'):
                         plans[symbol] = {**plans[symbol], 'exiting': reason}
@@ -3411,12 +3590,13 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         return 'wait'
     bars = {}
     symbols = ETF7_SYMBOLS if etf7 else SYMBOLS
+    opening = etf7 and opening_window(datetime.now(KST))
     try:
         for name, symbol in symbols.items():
-            response = minute_bars(read, symbol, bar_cache)
+            response = minute_bars(read, symbol, bar_cache, prior=opening)
             if response.get('status') != 'ok':
                 raise ValueError('paper signal bars unavailable')
-            bars[name] = valid_bars(response.get('data', {}), symbol, datetime.now(KST) if etf7 else now)
+            bars[name] = entry_rows(response.get('data', {}), symbol, datetime.now(KST) if etf7 else now, opening)
     except ValueError as exc:
         if not etf7:
             raise
@@ -3433,11 +3613,12 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             if code in symbols.values():
                 continue
             try:
-                response = minute_bars(read, code, bar_cache)
-                rows = valid_bars(response.get('data', {}), code, datetime.now(KST)) if response.get('status') == 'ok' else None
+                response = minute_bars(read, code, bar_cache, prior=opening)
+                rows = (entry_rows(response.get('data', {}), code, datetime.now(KST), opening, nxt_premarket)
+                        if response.get('status') == 'ok' else None)
             except ValueError:
                 rows = None
-            if rows and fresh_series(rows, datetime.now(KST)):
+            if rows and (fresh_series(rows, datetime.now(KST)) or opening_series(rows, datetime.now(KST))):
                 bars[code], movers[code] = rows, details
         symbols = {**symbols, **{code: code for code in movers}}
     cycle_id = uuid.uuid4().hex
@@ -3461,14 +3642,19 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         return 'wait'
     choice, confidence, usage = None, None, {}
     investor = investor_flows(read, datetime.now(KST)) if etf7 and modes['jev'] else None
+    logged = {'market_bars': bars}  # only today's rows go to market_bars (the ledger keeps bsop_time only)
+    today_rows, prior_rows = opening_split(bars, datetime.now(KST))
+    if prior_rows:
+        logged = {'market_bars': today_rows} if set(today_rows) & set(ETF7_SYMBOLS) else {}
+        logged['opening_prior_bars'] = prior_rows
     if modes['decision']:
         choice, confidence, usage = (decision7 if etf7 else decision)(bars, news)
         extra = {'universe':'etf7', 'model_response_time':usage.get('response_time')} if etf7 else {}
-        journal_event(root, 'decision', choice=choice, confidence=confidence, market_bars=bars,
+        journal_event(root, 'decision', choice=choice, confidence=confidence, **logged,
                       market_source='NH KRX 1-minute completed bars', model='gpt-6-luna', news=news,
                       recent_range_pct={k:volatility(v) for k,v in bars.items()}, usage=usage, cycle_id=cycle_id, **extra)
     else:
-        journal_event(root, 'market_context', market_bars=bars, market_source='NH KRX 1-minute completed bars',
+        journal_event(root, 'market_context', **logged, market_source='NH KRX 1-minute completed bars',
                       universe='etf7', context='entry', news=news, investor_flows=investor,
                       candidates={c: {k: d.get(k) for k in ('name', 'reasons', 'change_pct', 'value_mil', 'index')}
                                   for c, d in movers.items()}, track_record=track_record(root), cycle_id=cycle_id)
@@ -3477,7 +3663,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         try:
             extra = {'own_track_record': track_record(root),
                      'market_regime_themes_global': market_view(root), 'premarket_context': premarket_view(),
-                     'market_playbook': market_playbook.brief('entry')}  # user 2026-11-18: reference lens, not a rule
+                     'market_playbook': market_playbook.brief('entry'),  # user 2026-11-18: reference lens, not a rule
+                     'opening_entry': OPENING_ENTRY_NOTE if prior_rows else None}
             extra['watchlist_details'] = {code: watchlist_brief(code, d) for code, d in movers.items()}  # facts, flows, recent news
             extra['trading_journal'] = trading_journal_brief()  # 2026-11-13: the last sessions' journal and lessons
             extra['past_falls_reference'] = oversold_cases.bars_context(  # 2026-11-13: the past of today's falls, always
@@ -3498,6 +3685,13 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         return 'opening_observation'
     candidate, source, reason = select_entry(choice, confidence, comparison, etf7=etf7, modes=modes,
                                              universe=symbols if etf7 else None)
+    if etf7 and candidate is not None and source == 'jev':  # user 2026-11-20: an inverse the gate refuses leaves the turn
+        from etf_universe import SHORT as _S  # to a strong stock or a new listing, as a Jev WAIT does
+        if symbols.get(candidate) in {ETF7_SYMBOLS[n] for n in _S} and (gate := inverse_refusal(
+                root, symbols[candidate], bars.get(candidate) or [], candidate, read,
+                ((comparison or {}).get('candidate') or {}).get('confidence'), source)):
+            journal_event(root, 'v2_entry_gate', choice=candidate, source=source, permitted=False, reason=gate, cycle_id=cycle_id)
+            candidate, reason = None, 'jev_wait'
     can_confirm = modes.get('jev')
     pick = oversold_v2_entry(read, root, owned, cycle_id, bars, news, investor, modes, db) if v2_open else None
     if pick is None and v2_open:
@@ -3520,6 +3714,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             careful_ok[code] = regime
         return verdict
     slot = None
+    gated = False  # the Jev-wait strength pick already passed entry_block
     if candidate is not None and source == 'jev' and etf7:
         # strategy slots (user 2026-11-17): an inverse on a falling index and a new listing or a strong stock are
         # separate bets; the slots are checked every cycle, not only when Jev waits (11/17 Jev picked the inverse
@@ -3540,15 +3735,20 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                 journal_event(root, 'watchlist_strength', symbol=code, confidence=facts['jev_watchlist_confidence'],
                               change_pct=facts['change_pct'], cycle_id=cycle_id, slot=True)
     if candidate is None and etf7 and reason in ('jev_wait', 'jev_low_confidence'):
-        strength_why = None
+        strength_why, strength_all = None, None
         if movers:
             closed = reentry_floors(db, root, day)
             code, facts = strength_candidate(root, movers, bars, datetime.now(KST), owned, closed if REENTRY_GUARD else None,
                                              sized=lambda c, pr: strength_shares(root, c, pr, owned, closed))
-            if code is None:
-                strength_why = facts
+            # the data gate first, as for a slot (11-20 180640: three careful_reentry_chase refusals took the cycle
+            # and the new-listing look after it); a refused stock falls through to the next path
+            refused = code is not None and entry_block(root, code, owned, 'watchlist_strength', bars.get(code) or [], closed,
+                                                       code in short_codes, read=read, review=review)
+            if code is None or refused:
+                strength_why = refused or facts
+                strength_all = strength_whys(code, refused)
             else:
-                candidate, source = code, 'watchlist_strength'
+                candidate, source, gated = code, 'watchlist_strength', True
                 _PICK['pick'] = (code, source)
                 journal_event(root, 'watchlist_strength', symbol=code, confidence=facts['jev_watchlist_confidence'],
                               change_pct=facts['change_pct'], cycle_id=cycle_id)
@@ -3557,7 +3757,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                  else ipo_candidate(read, root, owned, datetime.now(KST)))
             if code is None:
                 journal_event(root, 'v2_entry_gate', choice='WAIT', permitted=False, reason=reason,
-                              strength_reason=strength_why, ipo_reason=facts, cycle_id=cycle_id)
+                              strength_reason=strength_why, strength_reasons=strength_all, ipo_reason=facts, cycle_id=cycle_id)
                 return 'wait'
             candidate, source = code, 'new_listing'
             _PICK['pick'] = (code, source)
@@ -3601,9 +3801,11 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                 if source == 'jev':
                     shadow(why)
                 return 'wait'
+        etfs = set(ETF7_SYMBOLS.values())  # user 2026-11-20: a held inverse no longer keeps stocks out (and stocks not the inverse)
         if (OPPOSITE_GUARD and source not in V2_SOURCES  # 선별 v2 holds for days; a same-day inverse is another trade
                 and not (source == 'new_listing' and IPO_SLOT)  # a new listing is not an index bet (user 2026-11-17)
-                and any((code in short_codes) != (symbols[candidate] in short_codes) for code in owned)):
+                and symbols[candidate] in etfs
+                and any((code in short_codes) != (symbols[candidate] in short_codes) for code in owned if code in etfs)):
             journal_event(root, 'v2_entry_gate', choice=candidate, source=source, permitted=False,
                           reason='opposite_direction_holding', cycle_id=cycle_id)
             if source == 'jev':
@@ -3617,8 +3819,9 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                 _SWITCH_EXITS.update((datetime.now(KST).date(), code) for code in switch)
                 journal_event(root, 'direction_switch', symbol=switch[0], choice=candidate, cycle_id=cycle_id)
             return 'wait'
-        refused = None if slot else entry_block(root, symbols[candidate], owned, source, bars[candidate], reentry_floors(db, root, day),
-                                                symbols[candidate] in short_codes, name=candidate, read=read, review=review)  # a slot passed it
+        refused = None if slot or gated else entry_block(root, symbols[candidate], owned, source, bars[candidate], reentry_floors(db, root, day),
+                                                symbols[candidate] in short_codes, name=candidate, read=read, review=review,
+                                                confidence=((comparison or {}).get('candidate') or {}).get('confidence'))  # a slot passed it
         if refused:
             journal_event(root, 'v2_entry_gate', choice=candidate, source=source, permitted=False, reason=refused, cycle_id=cycle_id)
             if source == 'jev' and refused != 'reentry_disabled':
@@ -3661,7 +3864,9 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         return 'wait'
     qty = min(max_qty, int(cash // price), quantity_room(owned),
               int(min(SHARED_SINGLE_ORDER_KRW, SPLIT_TRANCHE_KRW * size_factor(source)
-                      * (oversold_basis.get('size_mult', 1) if source in V2_SOURCES else 1))) // price
+                      * (oversold_basis.get('size_mult', 1) if source in V2_SOURCES else 1)
+                      * ((INVERSE['late_size_pct'] if inverse_late(market_view(root), symbol_index(root, symbols[candidate]))
+                          else INVERSE['size_pct']) / 100 if symbols[candidate] in short_codes else 1))) // price
               if etf7 else max_qty)
     if source == 'oversold_v2_reentry':
         qty = min(qty, int(oversold_basis['reentry_qty']))
@@ -3739,7 +3944,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             elif source in ('oversold', 'oversold_v2', 'oversold_v2_reentry'):
                 save_exit_plan(root, symbol, cycle_id, 'oversold', target=oversold_basis['target_pct'], basis=oversold_basis)
             else:
-                save_exit_plan(root, symbol, cycle_id, *entry_plan(root, read, symbol, symbol in {ETF7_SYMBOLS[n] for n in SHORT}))
+                save_exit_plan(root, symbol, cycle_id, *entry_plan(root, read, symbol, symbol in {ETF7_SYMBOLS[n] for n in SHORT}),
+                               source=source)
         try:
             order_id, number = submit(db, broker, account, day, symbol, 'BUY', qty, price,
                                       cycle_id=cycle_id, etf7=etf7,
@@ -3813,6 +4019,9 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
             for mode in ('quote', 'paper_notice'):
                 threading.Thread(target=watch, args=(mode, stop, lambda event: wake_on_data(wake, event)), daemon=True).start()
         read_failures = 0
+        from session_times import until_open
+        if wait := until_open(datetime.now(KST)):  # started pre-open (trading-day-start 08:55): ready at the bell
+            time.sleep(wait)
         try:
             while True:
                 now = datetime.now(KST)
