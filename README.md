@@ -40,7 +40,7 @@
 </details>
 
 <p align="center">
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.3"><img src="https://img.shields.io/badge/release-v0.1.3-ff6600?style=flat-square" alt="Release v0.1.3"></a>
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.4"><img src="https://img.shields.io/badge/release-v0.1.4-ff6600?style=flat-square" alt="Release v0.1.4"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1c20?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-1a1c20?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/broker-NH%20%EB%82%98%EB%AC%B4%20PLUG-ff6600?style=flat-square" alt="NH 나무 PLUG OpenAPI">
@@ -144,7 +144,7 @@ Omni AI Trading은 내려받아 실행하는 앱이 아니라 **AI 코딩 에이
 ## 바로 설치하기
 
 > [!NOTE]
-> 공개 v0.1.3에는 Jev 모의 실행에 필요한 Python 모듈이 빠져 있습니다. 해당 버전의 공개 소스로 시작한다면 [설치 후 확인](docs/getting-started.md#공개-v013-설치-후-확인)을 먼저 읽어 주세요.
+> 공개 v0.1.3과 v0.1.4에는 Jev 모의 실행에 필요한 Python 모듈이 빠져 있습니다. 해당 공개 버전으로 시작한다면 [설치 후 확인](docs/getting-started.md#공개-v013-설치-후-확인)을 먼저 읽어 주세요.
 
 AI 코딩 에이전트에게 설치를 맡기는 것이 가장 빠릅니다. 준비물은 macOS, Python 3.11, Node.js 22 이상, NH 나무 PLUG 앱 키(모의투자 계좌 포함), 그리고 [Claude Code](https://github.com/anthropics/claude-code) 또는 [Codex](https://github.com/openai/codex) 중 하나입니다. **Claude Code는 Claude 유료 요금제(Pro·Max) 또는 API 사용료, Codex는 ChatGPT 유료 요금제(Plus·Pro 등) 또는 API 사용료가 필요합니다.**
 
@@ -1005,7 +1005,7 @@ cp .env.example .env && chmod 600 .env   # 키 이름은 .env.example 참고, �
 | 장기투자 | [장기투자](docs/longterm.md) · [적립식](docs/longterm-dca.md) · [여운봉 매매법](docs/yeo-method.md) |
 | 기록·알림 | [매매일지](docs/journal.md) · [장전 분석](docs/premarket.md) · [리포트 발행](docs/report-pages.md) · [알림](docs/notifications.md) |
 | AI·운영 | [AI와 함께 쓰기](docs/ai-agents.md) · [운영](docs/operations.md) · [자동 작업](docs/automation.md) · [FAQ](docs/faq.md) |
-| 원본 Vibe-Trading | [README (English)](README_upstream.md) · [한국어](README_ko.md) |
+| 원본 Vibe-Trading | [README (English)](docs/vibe-trading/README_upstream.md) · [한국어](docs/vibe-trading/README_ko.md) |
 
 ## 개발
 

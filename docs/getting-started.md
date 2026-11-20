@@ -57,7 +57,7 @@ python3.11 -m venv .venv
 
 ### 공개 v0.1.3 설치 후 확인
 
-공개 v0.1.3에는 Jev 모의 실행기가 간접적으로 참조하는 `strategies.kr_swing_v5.signal_engine`이 빠져 있습니다. 공개 소스만 설치하면 Jev 모의 실행과 이를 참조하는 일부 미러·NXT 검증이 `ModuleNotFoundError`에서 중단됩니다. 이 오류가 나면 해당 서비스 등록을 보류하고 NH 시세 연결부터 확인하세요. [NH 공식 MCP 연결](#4-nh-공식-mcp-연결) · [실행기의 시세 함수 참조](../scripts/nh_paper_isolated.py#L30) · [전략 모듈 참조](../scripts/kr_swing_v5_forward.py#L24)
+공개 v0.1.3과 v0.1.4에는 Jev 모의 실행기가 간접적으로 참조하는 `strategies.kr_swing_v5.signal_engine`이 빠져 있습니다. 공개 소스만 설치하면 Jev 모의 실행과 이를 참조하는 일부 미러·NXT 검증이 `ModuleNotFoundError`에서 중단됩니다. 이 오류가 나면 해당 서비스 등록을 보류하고 NH 시세 연결부터 확인하세요. [NH 공식 MCP 연결](#4-nh-공식-mcp-연결) · [실행기의 시세 함수 참조](../scripts/nh_paper_isolated.py#L30) · [전략 모듈 참조](../scripts/kr_swing_v5_forward.py#L24)
 
 ## 3. 키 설정 (.env)
 

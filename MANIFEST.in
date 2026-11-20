@@ -1,12 +1,12 @@
 include LICENSE
 include NOTICE
-include README_upstream.md
-include README_zh.md
-include README_ja.md
-include README_ko.md
-include README_ar.md
-include README_es.md
-include README_id.md
+include docs/vibe-trading/README_upstream.md
+include docs/vibe-trading/README_zh.md
+include docs/vibe-trading/README_ja.md
+include docs/vibe-trading/README_ko.md
+include docs/vibe-trading/README_ar.md
+include docs/vibe-trading/README_es.md
+include docs/vibe-trading/README_id.md
 recursive-include guides *.md
 include pyproject.toml
 include Dockerfile

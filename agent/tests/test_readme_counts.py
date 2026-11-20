@@ -84,7 +84,7 @@ def _read(name: str) -> str:
     Returns:
         The file contents.
     """
-    text = (REPO_ROOT / name).read_text(encoding="utf-8")
+    text = (REPO_ROOT / "docs/vibe-trading" / name).read_text(encoding="utf-8")
     # The language editions link to the same authoritative inventories.
     for guide in ("capabilities", "cli-and-api", "mcp"):
         path = f"guides/{guide}.md"

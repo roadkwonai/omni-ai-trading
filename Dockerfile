@@ -49,7 +49,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements-channels-lock.tx
 # re-creates the same /app/agent source tree the .pth file points at).
 # --no-deps because every dependency is already installed from the two locks
 # above; without it pip re-resolves and downloads unhashed wheels.
-COPY pyproject.toml LICENSE README_upstream.md ./
+COPY pyproject.toml LICENSE ./
+COPY docs/vibe-trading/README_upstream.md docs/vibe-trading/README_upstream.md
 COPY agent/ agent/
 RUN pip install --no-cache-dir --no-deps -e .
 
@@ -94,7 +95,8 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Re-materialize the source tree the editable install references, plus the
 # built frontend static assets.
-COPY pyproject.toml LICENSE README_upstream.md ./
+COPY pyproject.toml LICENSE ./
+COPY docs/vibe-trading/README_upstream.md docs/vibe-trading/README_upstream.md
 COPY agent/ agent/
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 

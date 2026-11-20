@@ -18,8 +18,9 @@ from pathlib import Path
 
 from src.trading.profiles import BUILTIN_PROFILES
 
-README_PATH = Path(__file__).resolve().parents[3] / "README_upstream.md"
-GUIDE_PATH = README_PATH.parent / "guides/portfolio-and-brokers.md"
+ROOT = Path(__file__).resolve().parents[3]
+README_PATH = ROOT / "docs/vibe-trading/README_upstream.md"
+GUIDE_PATH = ROOT / "guides/portfolio-and-brokers.md"
 _BEGIN = "<!-- BEGIN GENERATED broker-capability-matrix -->"
 _END = "<!-- END GENERATED broker-capability-matrix -->"
 
@@ -110,7 +111,7 @@ def render_block(*, detailed: bool = False) -> str:
             "### Broker support at a glance\n\n"
             "<details>\n<summary>Compare read-only, paper and live support by broker</summary>\n\n"
             + _broker_overview()
-            + "\n\n</details>\n\n[Full permissions by profile](guides/portfolio-and-brokers.md#full-broker-permissions)"
+            + "\n\n</details>\n\n[Full permissions by profile](../../guides/portfolio-and-brokers.md#full-broker-permissions)"
         )
     return f"{_BEGIN}\n\n{body}\n\n{_END}"
 

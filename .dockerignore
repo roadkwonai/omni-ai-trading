@@ -37,7 +37,10 @@ frontend/tsconfig.tsbuildinfo
 
 # Tests & docs (not needed in production image)
 agent/tests/
-docs/
+docs/*
+!docs/vibe-trading/
+docs/vibe-trading/*
+!docs/vibe-trading/README_upstream.md
 assets/
 build/
 dist/
@@ -49,5 +52,4 @@ dist/
 CLAUDE.md
 CONTRIBUTING.md
 /*.md
-!README_upstream.md
 !LICENSE

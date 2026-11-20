@@ -1011,7 +1011,7 @@ function Start() {
           <p className="kicker">시작하기</p>
           <h2 id="start-title" className="heading-2">설치하고 시세 연결부터 확인하세요</h2>
           <p className="small muted">
-            공개 v0.1.3에는 Jev 모의 실행에 필요한 Python 모듈이 빠져 있습니다. 해당 버전으로 시작한다면 <a className="more" href={doc('getting-started.md')}>설치 가이드</a>의 시세 연결 확인부터 진행하세요.
+            공개 v0.1.3과 v0.1.4에는 Jev 모의 실행에 필요한 Python 모듈이 빠져 있습니다. 해당 버전으로 시작한다면 <a className="more" href={doc('getting-started.md')}>설치 가이드</a>의 시세 연결 확인부터 진행하세요.
           </p>
         </div>
         <div className="start">

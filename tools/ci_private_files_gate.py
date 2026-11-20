@@ -46,6 +46,9 @@ def _public_doc(path: PurePosixPath) -> bool:
         return False
     if len(path.parts) == 2:
         return path.name in PUBLIC_DOCS
+    if path.parts[1] == "vibe-trading" and len(path.parts) == 3:
+        return path.name in {"README_upstream.md", "README_zh.md", "README_ja.md", "README_ko.md",
+                             "README_ar.md", "README_es.md", "README_id.md"}
     return path.parts[1] == "images" and path.suffix.lower() in PUBLIC_DOC_IMAGES
 
 

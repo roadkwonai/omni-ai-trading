@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.3' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.4' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 

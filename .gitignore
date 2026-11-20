@@ -153,6 +153,9 @@ docs/
 # plans, audits and research notes stay local (2026-11-19). Add a guide here and in PUBLIC_DOCS together.
 /docs/*
 !/docs/images/
+!/docs/vibe-trading/
+/docs/vibe-trading/*
+!/docs/vibe-trading/README_*.md
 !/docs/README.md
 !/docs/ai-agents.md
 !/docs/integrations.md
