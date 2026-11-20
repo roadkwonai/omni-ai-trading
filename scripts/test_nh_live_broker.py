@@ -83,6 +83,45 @@ def test_collection_rejects_repeated_cursor():
         collect_snapshots(reader,A,NOW,sleep=lambda _:None)
 
 
+def test_linked_balance_reads_only_registered_live_account(monkeypatch):
+    from accounts import digest
+    from nh_live_broker import read_linked_balance
+
+    monkeypatch.setattr('nh_live_broker.PAGE_GAP', 0)
+    record = {'kind': 'live', 'hash': digest(A)}
+
+    class PaginatedReader(FakeReader):
+        def call_tool(self, tool, args):
+            response = super().call_tool(tool, args)
+            if tool == 'call_api':
+                data = response['data']
+                data['Output_1'] = [{'iem_cd': '005930' if 'cts' not in args else '114800', 'rsdl_qty': 1}]
+                if 'cts' not in args:
+                    data.update(rsp_cd='00218', rsp_msg='계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다.',
+                                _nh_pagination={'complete': False, 'cts': 'next', 'cts_flag': 'Y'})
+            return response
+
+    reader = PaginatedReader()
+    before = datetime.now(NOW.tzinfo)
+    data, observed_at = read_linked_balance(reader, 'live-1', record)
+    assert before <= observed_at <= datetime.now(NOW.tzinfo)
+    assert [row['iem_cd'] for row in data['Output_1']] == ['005930', '114800']
+    assert [tool for tool, _ in reader.calls] == ['list_accounts', 'call_api', 'call_api']
+    assert all(args['operationId'] == 'krstockInquiryBalance' and args['input']['act_no'] == A for _, args in reader.calls[1:])
+    assert reader.calls[-1][1]['cts'] == 'next'
+
+    reader = FakeReader()
+    with pytest.raises(ValueError, match='연결 확인 불가'):
+        read_linked_balance(reader, 'live-1', {'kind': 'live', 'hash': digest('99999999999')})
+    assert reader.calls == [('list_accounts', {})]
+
+    reader = FakeReader()
+    reader.server_config = SimpleNamespace(args=['--mode', 'paper'])
+    with pytest.raises(LiveOrderBlocked, match='readonly'):
+        read_linked_balance(reader, 'live-1', record)
+    assert reader.calls == []
+
+
 def test_lost_transport_ack_stays_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
     snapshots = collect_snapshots(FakeReader(),A,NOW,sleep=lambda _:None)
@@ -192,7 +231,9 @@ def test_a_second_page_waits_for_nhs_one_request_a_second():
                                                  'Output_1': [{'n': 1}], '_nh_pagination': {'complete': False, 'cts': 'c', 'cts_flag': 'Y'}}}
             return {'status': 'ok', 'data': {'rsp_cd': '00000', 'rsp_msg': '조회가 완료되었습니다.', 'Output_1': [{'n': 2}],
                                              '_nh_pagination': {'complete': True}}}
-    sleep = lambda seconds: clock.__setitem__('t', clock['t'] + seconds)
+    def sleep(seconds):
+        clock['t'] += seconds
+
     data = _pages(NH(), 'krstockInquiryBalance', {}, 'Output_1', clock=lambda: clock['t'], sleep=sleep)
     assert data['Output_1'] == [{'n': 1}, {'n': 2}] and len(starts) == 2 and starts[1] - starts[0] >= 1.0
 

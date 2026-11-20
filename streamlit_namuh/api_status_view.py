@@ -1,11 +1,15 @@
 """API 연동 tab (2026-11-17): every external API's status, call volume, failures and where its data is used.
 
 Reads scripts/api_calls.py (call log, 10-minute slots + failure rows) and scripts/api_catalog.py (hand-kept use map).
-Calls no external API itself; .env is checked for key presence only, never values.
+Optional provider data is fetched only through explicit controls in the detail view.
 """
 from __future__ import annotations
 
 import json
+import random
+import re
+import sqlite3
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -15,12 +19,14 @@ import streamlit as st
 
 import api_calls
 import api_catalog as cat
+import liner_history
+import liner_jobs
 import status_cards as sc
 
 KST = api_calls.KST
 PERIODS = {'오늘': 0, '최근 7일': 6, '최근 30일': 29}
 KINDS = {'network': '연결 실패', 'http': 'HTTP 오류', 'response': '응답 내용 오류'}
-STATES = {'정상': 'ok', '주의': 'warn', '지연': 'alert', '실패': 'alert', '키 없음': 'warn', '호출 없음': 'off'}
+STATES = {'정상': 'ok', '주의': 'warn', '지연': 'alert', '실패': 'alert', '키 없음': 'warn', '호출 없음': 'off', '미사용': 'off'}
 SESSION = ('09:15', '15:00')  # the cadence check runs inside the session, away from the open and close edges
 
 
@@ -30,7 +36,7 @@ def credentials():
     try:
         from dotenv import dotenv_values
         import local_env
-        values = dotenv_values(local_env.ENV)
+        values = dotenv_values(local_env.ENV, interpolate=False)
     except Exception:  # noqa: BLE001 - a missing file just means no keys
         values = {}
     return {k: bool(str(v or '').strip()) for k, v in values.items()}
@@ -73,7 +79,7 @@ def state(provider, today, recent, keys, now, active=False):
     from nh_paper_isolated import is_trading_day  # the runners' KRX holiday table: discord-notify and FRED run on holidays
     missing = [k for k in provider['keys'] if not keys.get(k)]
     if missing:
-        return '키 없음', f"{', '.join(missing)} 미설정"
+        return ('미사용' if provider.get('optional') else '키 없음'), f"{', '.join(missing)} 미설정"
     if recent and recent['n'] and (recent['fail'] + recent['bad']) / recent['n'] >= 0.5:
         return '실패', f"최근 30분 {recent['n']}건 중 {recent['fail'] + recent['bad']}건 실패"
     expect, hm = provider.get('expect_min'), now.strftime('%H:%M')
@@ -209,6 +215,471 @@ def macro_data(runtime, now):
         st.dataframe(events, hide_index=True, width='stretch', alt='다가오는 미국 발표')
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def liner_issues():
+    import trading_journal
+
+    today = datetime.now(KST).date()
+    records = trading_journal.days((today - timedelta(days=3)).isoformat(), today.isoformat())
+    if not records:
+        return None, []
+    record = records[-1]
+    headlines, _ = trading_journal.rank_issues(record)
+    return record['day'], headlines[:5]
+
+
+def close_liner_search() -> None:
+    st.session_state.pop('quick_liner_open', None)
+
+
+@st.dialog('AI 검색', width=1440, icon=':material/search:', on_dismiss=close_liner_search)
+def open_liner_search() -> None:
+    st.html("""
+    <style>
+    [data-testid="stDialog"] [role="dialog"]:has(.st-key-quick_liner_panel) {
+        display: flex;
+        flex-direction: column;
+        height: calc(100dvh - 2rem);
+        max-height: calc(100dvh - 2rem);
+        overflow: hidden;
+    }
+    [data-testid="stDialog"] [role="dialog"] > div:has(.st-key-quick_liner_panel) {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+    .st-key-quick_liner_panel {
+        --ai-chat-height: clamp(18rem, calc(100dvh - 35rem), 64rem);
+    }
+    /* Streamlit reserves the container's fixed height in its layout wrapper. */
+    [data-testid="stLayoutWrapper"]:has(> .st-key-quick_liner_chat_history) {
+        flex: 0 0 var(--ai-chat-height);
+        min-height: var(--ai-chat-height);
+    }
+    .st-key-quick_liner_chat_history {
+        height: var(--ai-chat-height) !important;
+        max-height: var(--ai-chat-height) !important;
+    }
+    [data-testid="stDialog"] [role="dialog"] > div:has(.st-key-quick_liner_panel),
+    .st-key-quick_liner_chat_history {
+        overflow-y: auto !important;
+        scrollbar-gutter: stable;
+    }
+    [data-testid="stDialog"] [role="dialog"] > div:has(.st-key-quick_liner_panel)::-webkit-scrollbar,
+    .st-key-quick_liner_chat_history::-webkit-scrollbar {
+        width: 10px;
+    }
+    [data-testid="stDialog"] [role="dialog"] > div:has(.st-key-quick_liner_panel)::-webkit-scrollbar-thumb,
+    .st-key-quick_liner_chat_history::-webkit-scrollbar-thumb {
+        background: color-mix(in srgb, currentColor 45%, transparent);
+        border-radius: 8px;
+    }
+    @media (max-width: 640px) {
+        .st-key-quick_liner_panel {
+            --ai-chat-height: clamp(10rem, calc(100dvh - 34rem), 38rem);
+        }
+    }
+    </style>
+    """)
+    with st.container(key='quick_liner_panel'):
+        liner_search(True, prefix='quick_liner')
+
+
+def markdown_label(text: str) -> str:
+    return markdown_escape(' '.join(text.split()))
+
+
+def markdown_escape(text: str) -> str:
+    return re.sub(r'([\\\x60*_\[\]{}<>&!~:$|#])', r'\\\1', text)
+
+
+def normalize_bold(text: str) -> str:
+    parts = re.split(r'(?<![\\*])\*\*(?!\*)([^\n*]+?)\*\*(?!\*)', text)
+    for index in range(0, len(parts), 2):
+        parts[index] = re.sub(r'(?<!\*)\\?\*\*(?!\*)', '', parts[index])
+    for index in range(1, len(parts), 2):
+        phrase = parts[index].strip()
+        if not phrase:
+            parts[index] = ''
+            continue
+        before, after = parts[index - 1][-1:], parts[index + 1][:1]
+        # Korean particles next to punctuation can prevent a CommonMark delimiter from closing.
+        left = '\u200a' if before.isalnum() and not phrase[0].isalnum() else ''
+        right = '\u200a' if after.isalnum() and not phrase[-1].isalnum() else ''
+        parts[index] = f'{left}**{phrase}**{right}'
+    return ''.join(parts)
+
+
+def highlight_excerpt(excerpt: str, query: str) -> str:
+    text = ' '.join(excerpt.split())
+    terms = dict.fromkeys(re.findall(r'[가-힣A-Za-z][가-힣A-Za-z0-9]{1,}', query))
+    figures = r'[+−-]?\d+(?:[.,]\d+)*\s*(?:%p|%|bp|[조억만]\s?원)'
+    pattern = re.compile('|'.join([figures, *(re.escape(term) for term in sorted(terms, key=len, reverse=True)[:12])]), re.IGNORECASE)
+    parts, end = [], 0
+    for index, match in enumerate(pattern.finditer(text)):
+        if index == 4:
+            break
+        parts.extend((markdown_escape(text[end:match.start()]), f':yellow-background[{markdown_escape(match.group())}]'))
+        end = match.end()
+    return ''.join(parts) + markdown_escape(text[end:])
+
+
+def answer_markdown(answer: str, *, highlight: bool) -> str:
+    answer = re.sub(r'\(\((\d+)\)\)', r'[\1]', answer).replace('![', '[')
+    parts = re.split(r'(?ms)(^\x60{3}.*?^\x60{3}[^\n]*|\x60[^\x60\n]*\x60)', answer)
+    for index in range(0, len(parts), 2):
+        marked = re.split(r'(?<!\w)==([^\n=]{1,240})==', parts[index])
+        for field, text in enumerate(marked):
+            if field % 2:
+                phrase = markdown_label(text.replace('**', ''))
+                marked[field] = f':yellow-background[{phrase}]' if highlight else f'**{phrase}**'
+            else:
+                marked[field] = normalize_bold(text)
+        parts[index] = ''.join(marked)
+    return ''.join(parts)
+
+
+def liner_search_results(results: list[dict[str, str]], prefix: str, query: str) -> None:
+    for index, row in enumerate(results):
+        with st.container(border=True, gap='xsmall'):
+            st.markdown(f"**{markdown_label(row['제목'])}**")
+            if row.get('발행일'):
+                st.caption(f"발행일 · {markdown_label(row['발행일'])}",
+                           help='검색 결과에서 제공한 원문의 발행일입니다. 기사에 표시된 시간은 원문에서 확인하세요.')
+            if row.get('요약'):
+                st.markdown(highlight_excerpt(row['요약'], query))
+            st.link_button('원문 열기', row['원문 링크'], key=f'{prefix}_article_{index}', icon=':material/open_in_new:',
+                           help='새 탭에서 원문을 엽니다. 공식 발표 시각, 문맥, 요약에 빠진 내용을 확인할 수 있습니다.')
+
+
+def queue_liner_request(prefix, kind, query, operation, **details):
+    st.session_state.pop(f'{prefix}_notice', None)
+    st.session_state[f'{prefix}_pending'] = {
+        'kind': kind, 'query': query, 'started': time.monotonic(),
+        'future': liner_jobs.submit(kind, query, operation), **details,
+    }
+    st.rerun()
+
+
+def finish_liner_request(prefix):
+    pending = st.session_state.get(f'{prefix}_pending')
+    if not pending or not pending['future'].done():
+        return pending
+    st.session_state.pop(f'{prefix}_pending')
+    try:
+        result, saved = pending['future'].result()
+    except ValueError as exc:
+        st.session_state[f'{prefix}_notice'] = ('error', str(exc), pending.get('guides', []))
+    except Exception:
+        st.session_state[f'{prefix}_notice'] = ('error', '요청을 처리하는 중 오류가 발생했습니다.', pending.get('guides', []))
+    else:
+        if pending['kind'] == '검색':
+            st.session_state[f'{prefix}_subject'] = pending['subject']
+            st.session_state[f'{prefix}_results'] = result
+        else:
+            answer, sources = result
+            thread = pending['thread']
+            thread['turns'].append({'question': pending['question'], 'answer': answer,
+                                    'sources': sources, 'guides': pending['guides'],
+                                    'local': pending['kind'] == '내부 조회', 'local_query': pending.get('local_query')})
+            st.session_state[f'{prefix}_chat'] = thread
+        if not saved:
+            st.session_state[f'{prefix}_notice'] = ('warning', '이 요청을 검색·질문 이력에 저장하지 못했습니다.', [])
+    return None
+
+
+@st.fragment(run_every=1)
+def liner_progress(pending):
+    if pending['future'].done():
+        st.rerun()
+    elapsed = int(time.monotonic() - pending['started'])
+    action = {'검색': '웹 자료를 검색하는 중', '질문': '출처를 찾아 AI 답변을 작성하는 중',
+              '내부 조회': '대시보드 기록을 확인하는 중'}[pending['kind']]
+    with st.status(f'{action} · {elapsed}초 경과', expanded=True):
+        st.text(pending['query'])
+        st.caption('기존 답변이나 사용 가이드를 읽을 수 있습니다. 결과가 도착하면 자동으로 표시됩니다.',
+                   help='표시된 시간은 요청을 시작한 뒤 지난 시간입니다. 진행 중인 요청이 끝나면 검색과 질문을 다시 보낼 수 있습니다.')
+
+
+def liner_suggestions(prefix: str, busy: bool) -> None:
+    from liner_topics import groups
+
+    questions = groups()
+    pick_key = f'{prefix}_suggestions'
+    action_key = f'{prefix}_repeat'
+    queue = st.session_state.__setitem__
+    with st.container(horizontal=True, horizontal_alignment='distribute', vertical_alignment='center'):
+        st.subheader('추천 질문', icon=':material/lightbulb:', divider='violet',
+                     help='서비스 사용법, 용어, Jev 성과, 거장 투자법 등 분류별로 질문을 골라 보여 줍니다.')
+        shuffle = st.button('다른 질문', icon=':material/shuffle:', key=f'{prefix}_shuffle',
+                            help='지금 보이는 추천을 다른 질문으로 바꿉니다. 추천 태그를 누르면 AI 채팅에 바로 전송됩니다.')
+    if shuffle or pick_key not in st.session_state:
+        previous = st.session_state.get(pick_key, {})
+        st.session_state[pick_key] = {
+            name: random.choice([q for q in items if q != previous.get(name)] or items)
+            for name, items in questions.items() if items
+        }
+    with st.container(horizontal=True, gap='xsmall'):
+        for index, question in enumerate(st.session_state[pick_key].values()):
+            st.button(markdown_label(question), key=f'{prefix}_suggestion_{index}', wrap=True, disabled=busy,
+                      help='이 문장을 AI 채팅에 바로 보냅니다. 채팅 요청 요금이 적용됩니다.',
+                      on_click=queue, args=(action_key, ('질문', question)))
+    with st.expander(f'추천 질문 전체 {sum(map(len, questions.values()))}개'):
+        st.caption('분류에서 원하는 질문을 찾을 수 있습니다.',
+                   help='이 목록을 펼치면 모아 둔 질문을 분류별로 볼 수 있습니다. 선택한 질문 보내기를 누르면 전송됩니다.')
+        group = st.selectbox('분류', [name for name, items in questions.items() if items], key=f'{prefix}_topic_group',
+                             help='서비스 사용법, Jev·투자 성과, 투자 거장 등 관심 분야를 골라 질문 목록을 좁힙니다.')
+        question = st.selectbox('질문', questions[group], index=None, key=f'{prefix}_topic_question',
+                                help='선택한 문장을 확인한 뒤 아래 버튼으로 AI 채팅에 보냅니다.')
+        st.button('선택한 질문 보내기', key=f'{prefix}_topic_send', disabled=busy or not question,
+                  help='고른 질문으로 AI 답변을 요청합니다. 채팅 요청 요금이 적용됩니다.',
+                  on_click=queue, args=(action_key, ('질문', question)))
+
+
+def liner_recent(prefix: str, busy: bool) -> None:
+    try:
+        recent = liner_history.recent()
+    except (OSError, sqlite3.Error):
+        st.warning('최근 검색·질문 이력을 불러오지 못했습니다.')
+        return
+    with st.expander(f'최근 검색·질문 {len(recent)}개', expanded=bool(recent)):
+        st.caption('항목을 누르면 다시 요청합니다.' if recent else '검색이나 채팅을 사용하면 이곳에 기록됩니다.',
+                   help='완료한 요청을 로컬 SQLite에 저장하고, 최근 검색어와 질문을 최대 8개 보여 줍니다.')
+        with st.container(horizontal=True, gap='xsmall'):
+            for index, (kind, text) in enumerate(recent):
+                label = text if len(text) <= 55 else f'{text[:54]}…'
+                icon = ':material/search:' if kind == '검색' else ':material/chat_bubble:'
+                st.button(f'{kind} · {markdown_label(label)}', key=f'{prefix}_history_{index}', wrap=True, disabled=busy,
+                          icon=icon,
+                          help=f'**{kind} 다시 요청** · {markdown_label(text)}\n\n새 API 요청 요금이 적용됩니다.',
+                          on_click=st.session_state.__setitem__,
+                          args=(f'{prefix}_repeat', (kind, text)))
+
+
+def show_liner_guides(guides: list[dict[str, str]]) -> None:
+    if guides:
+        with st.expander(f'서비스 가이드 {len(guides)}개'):
+            st.caption('답변에 참고한 프로젝트 문서', help='화면 안내와 프로젝트 가이드에서 찾은 항목의 출처와 발췌입니다.')
+            for guide in guides:
+                st.markdown(f"**{markdown_label(guide['항목'])}** · \x60{guide['문서']}\x60")
+                st.markdown(guide['본문'].replace('![', '['), unsafe_allow_html=False)
+
+
+def render_liner_usage_guide() -> None:
+    guide = Path(__file__).resolve().parents[1] / 'docs' / 'ai-search.md'
+    title, _, body = guide.read_text(encoding='utf-8').partition('\n')
+    intro, *sections = re.split(r'(?m)^## (.+)\n', body)
+    st.subheader(title.removeprefix('# '), icon=':material/menu_book:', divider='blue',
+                 help='빠른 시작에서 기본 흐름을 보고, 기능별 사용법과 이력·연동에서 필요한 설명을 찾아보세요.')
+    st.markdown(intro.strip())
+    for tab, text in zip(st.tabs(sections[::2]), sections[1::2]):
+        with tab:
+            st.markdown(text.strip())
+
+
+def liner_search(available: bool, prefix: str = 'api_liner') -> None:
+    from liner_search import search
+
+    pending = finish_liner_request(prefix)
+    busy = pending is not None
+    with st.container(horizontal=True, vertical_alignment='center'):
+        st.caption('화면 선택', help='검색·채팅에서 자료를 찾고 질문합니다. 사용 가이드에는 기능별 사용법, 흐름도, 이력과 연동 설명이 있습니다.')
+        view = st.segmented_control('AI 검색 화면', ('검색·채팅', '사용 가이드'), default='검색·채팅',
+                                    required=True, key=f'{prefix}_view', label_visibility='collapsed')
+    if pending:
+        liner_progress(pending)
+    if notice := st.session_state.get(f'{prefix}_notice'):
+        kind, message, guides = notice
+        if kind == 'error':
+            st.error(message)
+            show_liner_guides(guides)
+        else:
+            st.warning(message)
+    if view == '사용 가이드':
+        render_liner_usage_guide()
+        return
+    if not available:
+        for field in ('results', 'subject', 'chat'):
+            st.session_state.pop(f'{prefix}_{field}', None)
+        st.info('웹 검색을 사용하려면 프로젝트 .env에 LINER_API_KEY를 설정하세요.')
+        return
+
+    with st.container(border=True):
+        st.subheader('웹 검색', icon=':material/search:', divider='blue',
+                     help='뉴스·공시와 관련된 웹 자료를 찾아 제목, 발행일, 요약, 원문 링크를 확인합니다.')
+        with st.form(f'{prefix}_search', border=False):
+            with st.container(horizontal=True, vertical_alignment='bottom'):
+                query = st.text_input('종목·시장 이슈 검색', key=f'{prefix}_query', max_chars=300,
+                                      placeholder='예: 반도체 실적과 코스피', width='stretch',
+                                      help='종목명, 종목코드, 공시나 시장 이슈를 300자 이내로 입력합니다. 날짜나 지표를 함께 적으면 더 구체적으로 찾을 수 있습니다.')
+                submitted = st.form_submit_button('검색', key=f'{prefix}_submit', icon=':material/search:', type='primary',
+                                                  disabled=busy, help='검색어로 웹에서 제목, 발행일, 요약과 원문 링크를 최대 10개 찾습니다. 검색 요청 요금이 적용됩니다.')
+        st.caption('웹 검색과 웹·가이드 질문에는 Liner API 요금이 적용됩니다.',
+                   help='웹 요청은 Liner에 전송되며 완료한 요청은 로컬 이력에 저장됩니다. 채팅의 내부 데이터 조회는 대시보드에서 처리합니다.')
+
+    action, repeated = st.session_state.pop(f'{prefix}_repeat', (None, None))
+    if action == '검색':
+        query, submitted = repeated, True
+
+    content, news = st.columns([2, 1], gap='large')
+    selected_news = None
+    with news:
+        with st.container(border=True):
+            st.subheader('최근 주요 뉴스', icon=':material/newspaper:', divider='orange',
+                         help='최근 3일 안의 최신 매매일지에서 이슈 중요도 순으로 최대 5개를 보여 줍니다. 색상과 별 1~5개는 같은 중요도 점수를 나타냅니다.')
+            day, issues = liner_issues()
+            st.caption(f'{day} 매매일지 · 중요도순' if issues else '최근 3일의 매매일지에 순위를 매길 뉴스가 없습니다.')
+            for index, issue in enumerate(issues):
+                stars = issue.get('stars', 1)
+                color = ('gray', 'blue', 'yellow', 'orange', 'red')[stars - 1]
+                rating = f":{color}-badge[{'★' * stars} {stars}/5]"
+                label = f"{rating}  **{markdown_label(issue['title'])}**"
+                if st.button(label, key=f'{prefix}_issue_{index}', width='stretch', wrap=True, disabled=busy,
+                             help=f'매매일지 중요도 {stars}/5. 제목으로 웹 검색을 실행합니다. 검색 뒤 시장 영향 분석을 요청할 수 있습니다.'):
+                    selected_news = issue
+                    query, submitted = issue['title'], True
+        with st.container(border=True):
+            liner_suggestions(prefix, busy)
+        with st.container(border=True):
+            st.subheader('이력', icon=':material/history:', divider='gray',
+                         help='돋보기는 웹 검색, 말풍선은 AI 채팅 질문입니다. 최근 항목을 누르면 해당 요청을 다시 보냅니다.')
+            liner_recent(prefix, busy)
+
+    with content:
+        if submitted and not busy:
+            query = query.strip()
+            if not query:
+                st.info('검색어를 입력하세요.')
+            else:
+                subject = {'주제': query}
+                if selected_news:
+                    subject.update({'매매일지 기준일': day, '기사 링크': selected_news.get('link') or ''})
+                queue_liner_request(prefix, '검색', query, lambda: search(query), subject=subject)
+        subject = st.session_state.get(f'{prefix}_subject')
+        results = st.session_state.get(f'{prefix}_results')
+        if subject:
+            st.subheader(markdown_label(subject['주제']),
+                         help='최근에 완료한 검색의 주제입니다. 이 주제로 오늘 주식시장 영향 분석을 시작할 수 있습니다.')
+        with st.container(border=True):
+            liner_chat(prefix, subject, repeated if action == '질문' else None, busy=busy)
+        if results:
+            with st.expander(f'검색 결과 {len(results)}건', expanded=not st.session_state.get(f'{prefix}_chat')):
+                st.caption('제목·발행일·요약·원문', help='형광펜은 검색어와 등락률 등 요약에 포함된 주요 숫자를 표시합니다.')
+                liner_search_results(results, prefix, subject['주제'] if subject else '')
+        elif results == []:
+            st.info('표시할 검색 결과가 없습니다.')
+
+
+def liner_chat(prefix: str, subject: dict | None, suggested: str | None = None, *, busy: bool = False) -> None:
+    import liner_local_data
+    from liner_search import analyze
+    from liner_topics import find_guides
+    from markdown_clipboard import copy_markdown
+    from src.config.paths import get_runtime_root
+
+    chat_key = f'{prefix}_chat'
+    thread = st.session_state.get(chat_key)
+
+    if not thread:
+        thread = {'subject': None, 'turns': []}
+    turns = thread['turns']
+    topic = thread['subject']
+    with st.container(horizontal=True, horizontal_alignment='distribute', vertical_alignment='center'):
+        st.subheader('투자 AI 채팅', icon=':material/forum:', divider='green',
+                     help='질문을 입력하고 전송 버튼을 누르세요. 종목·투자 용어나 서비스 사용법을 바로 물어볼 수 있고, 이전 답변에 이어 질문할 수 있습니다.')
+        if turns:
+            latest = turns[-1]
+            markdown = answer_markdown(latest['answer'], highlight=False)
+            if latest['sources']:
+                source_lines = []
+                for source in latest['sources']:
+                    url = source['원문 링크'].replace('<', '%3C').replace('>', '%3E')
+                    source_lines.append(f"- [{markdown_label(source['제목'])}](<{url}>)")
+                markdown += '\n\n### 출처\n\n' + '\n'.join(source_lines)
+            if latest.get('guides'):
+                markdown += '\n\n### 서비스 가이드\n\n' + '\n'.join(
+                    f"- {markdown_label(guide['항목'])} ({guide['문서']})" for guide in latest['guides']
+                )
+            copy_markdown(key=f'{prefix}_copy', data={'markdown': markdown}, width='content')
+    if topic:
+        st.caption(f"분석 주제 · {markdown_label(topic['주제'])}")
+    mode = st.segmented_control('채팅 조회 범위', ('자동', '내부 데이터'), default='자동', required=True,
+                                key=f'{prefix}_chat_mode',
+                                help='자동은 지원하는 운용 기록 질문을 대시보드에서 조회합니다. 내부 데이터에서는 모든 질문을 로컬에서 처리합니다.')
+    start = subject and st.button(
+        '오늘 주식시장 영향 분석', icon=':material/auto_awesome:', key=f'{prefix}_analyze', type='primary',
+        disabled=busy or mode == '내부 데이터',
+        help='자동 모드에서 선택한 이슈로 새 웹 분석을 요청합니다. 관련 지수·업종과 확인할 지표를 최신 출처와 함께 찾아봅니다.',
+    )
+    with st.container(key=f'{prefix}_chat_history', height=360, border=False, autoscroll=len(turns) > 1):
+        if not turns:
+            st.caption('첫 질문 예시 · Jev의 최대 낙폭은 어느 화면에서 확인할 수 있나요?')
+        for turn_index, turn in enumerate(turns):
+            st.chat_message('user').text(turn['question'])
+            with st.chat_message('assistant'):
+                if turn.get('local'):
+                    st.caption('대시보드 내부 조회')
+                st.markdown(answer_markdown(turn['answer'], highlight=True), unsafe_allow_html=False)
+                if turn['sources']:
+                    with st.expander(f"출처 {len(turn['sources'])}개"):
+                        st.caption('AI 답변에 참고한 웹 자료', help='원문에서 발행일과 인용된 내용의 전체 문맥을 확인할 수 있습니다.')
+                        for source_index, source in enumerate(turn['sources']):
+                            st.link_button(markdown_label(source['제목']), source['원문 링크'],
+                                           key=f'{prefix}_source_{turn_index}_{source_index}', icon=':material/open_in_new:',
+                                           wrap=True, help='새 탭에서 이 출처의 원문을 엽니다.')
+                show_liner_guides(turn.get('guides', []))
+    follow_up = st.chat_input('주식·ETF·서비스 사용법을 질문하세요', key=f'{prefix}_follow_up',
+                              max_chars=1000, disabled=busy)
+    st.caption('질문 입력 · 최대 1,000자',
+               help='질문을 쓴 뒤 오른쪽의 전송 화살표를 누르세요. 새 주제를 질문하거나 앞서 받은 답변에 이어 물어볼 수 있습니다.')
+    question = '이 이슈가 오늘 국내 주식시장에 어떤 영향을 미칠 수 있나요?' if start else suggested or follow_up
+    if not busy and isinstance(question, str) and question.strip():
+        question = question.strip()
+        if start:
+            thread = {'subject': subject, 'turns': []}
+            topic, turns = subject, []
+        now = datetime.now(KST)
+        previous = turns[-1].get('local_query') if turns else None
+        query = None if start else liner_local_data.resolve(question, previous=previous)
+        if query is not None or mode == '내부 데이터':
+            runtime = get_runtime_root() / 'nhplug'
+
+            def read_local():
+                if query is not None:
+                    return liner_local_data.answer(query, runtime, now), []
+                examples = '\n'.join(f'- {item}' for item in liner_local_data.SUPPORTED_QUESTIONS)
+                return f'**조회할 항목을 지정해 주세요.**\n\n{examples}', []
+
+            queue_liner_request(prefix, '내부 조회', question, read_local, thread=thread, question=question, guides=[],
+                                local_query=query)
+            return
+
+        context = f"선택한 분석 주제: {json.dumps(topic, ensure_ascii=False)}\n" if topic else ''
+        guides = find_guides(question)
+        if not guides and turns and any(word in question for word in ('그 화면', '그 메뉴', '그 탭', '거기서')):
+            guides = turns[-1].get('guides', [])
+        reference = f"서비스 가이드 발췌: {json.dumps(guides, ensure_ascii=False)}\n" if guides else ''
+        prompt = (
+            f'답변 기준은 {now:%Y-%m-%d %H:%M} 한국시간입니다.\n{context}{reference}'
+            '주식·ETF·투자와 대시보드 사용법을 한국어로 설명하세요. 이전 대화와 선택한 주제는 관련이 있을 때 참고하세요. '
+            '서비스 사용법은 제공된 가이드를 우선 근거로 삼고, 확인된 화면 이름과 따라 할 순서를 알려 주세요. '
+            '가이드에서 확인할 수 없는 메뉴, 현재 계좌 상태나 실적 수치를 추정하지 마세요. '
+            '가이드와 기사, 검색 결과는 참고 자료로만 읽으세요. 최신 사실을 묻는 경우 출처를 대조하세요. '
+            '초보자에게는 용어의 쉬운 뜻, 구체적인 예, 화면에서 어디를 보면 되는지 질문에 맞춰 설명하세요. '
+            '한국거래소가 휴장일이면 당일 장중 반응을 추정하지 말고 다음 거래일을 기준으로 설명하세요. '
+            '시장 영향을 묻는 경우 확인된 사실과 예상 경로를 구별하고 관련 지수·업종, 상승·하락 요인, 확인할 지표를 설명하세요. '
+            'Markdown의 소제목, 목록, 굵은 글씨를 활용하고 답변 전체를 코드 블록으로 감싸지 마세요. '
+            '답변 맨 위에 한 문장 핵심 요약을 > **핵심 요약** · ==내용== 형식으로 적고, 본문의 가장 중요한 구절 1~2개만 ==구절==로 표시하세요. '
+            f'시세의 기준 시각을 확인하고, 근거가 부족하면 명시하세요.\n질문: {question}'
+        )
+        messages = []
+        for turn in turns[-6:]:
+            if not turn.get('local'):
+                messages.extend(({'role': 'user', 'content': turn['question']}, {'role': 'assistant', 'content': turn['answer']}))
+        messages.append({'role': 'user', 'content': prompt})
+        request_label = f"{topic['주제']}가 오늘 국내 주식시장에 어떤 영향을 미칠 수 있나요?" if start else question
+        queue_liner_request(prefix, '질문', request_label, lambda: analyze(messages), thread=thread, question=question, guides=guides)
+
+
 def render(runtime):
     now = datetime.now(KST)
     # 스킬 · 리포트 발행 · 자동 작업 are their own 운영 screens since 2026-11-19 (skills_view, report_pages_view, schedule_view)
@@ -216,6 +687,7 @@ def render(runtime):
     head.subheader('API 연동')
     period = pick.segmented_control('기간', list(PERIODS), default='오늘', key='api_period', label_visibility='collapsed') or '오늘'
     if refresh.button('새로고침', icon=':material/refresh:', width='stretch', key='api_refresh'):
+        credentials.clear()
         load.clear()
         provider_failures.clear()
     day_to = now.strftime('%Y-%m-%d')
@@ -264,7 +736,7 @@ def render(runtime):
                      '실패율': st.column_config.ProgressColumn(format='%.1f%%', min_value=0.0, max_value=100.0),
                      '평균 응답(ms)': st.column_config.NumberColumn(format='%,.0f'),
                      '쓰는 화면': st.column_config.TextColumn(width='large')})
-    st.caption('상태: 키 없음(필요한 .env 키 미설정) → 실패(최근 30분 절반 이상 실패) → 지연(장중 09:15~15:00에 예상 주기의 3배, 최소 5분 넘게 성공 없음; '
+    st.caption('상태: 미사용(선택 키 미설정) · 키 없음(필요한 .env 키 미설정) → 실패(최근 30분 절반 이상 실패) → 지연(장중 09:15~15:00에 예상 주기의 3배, 최소 5분 넘게 성공 없음; '
                '오늘 아무 API도 호출되지 않은 날은 판단하지 않음) → 주의(1시간 안 실패) → 정상(오늘 호출 있음) → 호출 없음 순으로 판단합니다. '
                '"호출 없음"은 장 시간 밖이거나 그 API를 쓰는 서비스가 아직 새 코드로 재시작하지 않았다는 뜻일 수 있습니다.')
 
@@ -294,10 +766,15 @@ def render(runtime):
                    + (f" · {token}" if (token := token_status(p, runtime, now)) else ''))
         st.caption(p['note'])
     names_ = ['데이터·용도', '엔드포인트별 호출', '호출한 프로그램', '실패 이력', '산출물'] + (['최근 데이터'] if p['key'] in MACRO_PROVIDERS else [])
+    if p['key'] == 'liner':
+        names_.append('웹 검색')
     uses_tab, endpoint_tab, caller_tab, fail_tab, output_tab, *data_tab = st.tabs(names_)
     if data_tab:
         with data_tab[0]:
-            macro_data(runtime, now)
+            if p['key'] == 'liner':
+                liner_search(keys.get('LINER_API_KEY', False))
+            else:
+                macro_data(runtime, now)
     mine = frame[frame['provider'] == p['key']] if not frame.empty else frame
     with uses_tab:
         st.dataframe([{'데이터': u['data'], '엔드포인트': u['endpoint'], '언제': u['when'], '보이는 화면': u['screen'],

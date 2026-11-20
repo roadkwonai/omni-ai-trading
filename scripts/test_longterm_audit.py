@@ -141,7 +141,7 @@ def test_collect_checks_orders_against_fills_every_day(tmp_path):
     db = L.connect(root)
     L.log(db, 'order', '2026-11-18', regime='correction', now=at(date(2026, 11, 18), 9, 40), reason='여운봉 리밸런싱',
           orders=[{'key': 'NDX', 'code': '379810', 'side': 'SELL', 'qty': 3, 'filled': 3, 'price': 23_000},
-                  {'key': 'NDXMIX', 'code': '0261H0', 'side': 'BUY', 'qty': 6, 'filled': 2, 'price': 11_000}])
+                  {'key': 'NDXMIX', 'code': '0261H0', 'side': 'BUY', 'qty': 6, 'filled': 2, 'price': 11_000, 'unfilled_why': '매도호가 11,050원 > 주문가 11,000원'}])
     L.put_state(db, **{'book:actual': {'yeo_owed': {'NDXMIX': 44_006.6}}})
     log = tmp_path / 'longterm-live.jsonl'
     log.write_text('\n'.join(json.dumps(e) for e in (
@@ -154,7 +154,8 @@ def test_collect_checks_orders_against_fills_every_day(tmp_path):
         live.execute('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?)', ('live-2', '2026-11-18', 1, '379810', 'BUY', 5, 23_000, '2026-11-18T09:42:10+09:00', 'x'))
     data = A.collect(root, date(2026, 11, 18), days=3, journal_dir=tmp_path / 'none', live_log=log, now=at(date(2026, 11, 18), 16, 45))
     fills = data['fills']
-    assert fills['virtual'] == [{'day': '2026-11-18', 'key': 'NDXMIX', 'qty': 6, 'filled': 2}]
+    assert fills['virtual'] == [{'day': '2026-11-18', 'key': 'NDXMIX', 'qty': 6, 'filled': 2, 'why': '매도호가 11,050원 > 주문가 11,000원'}]
+    assert any('(매도호가 11,050원 > 주문가 11,000원)' in f for f in data['findings'])
     assert fills['live'] == [{'day': '2026-11-18', 'account': 'live-2', 'symbol': '0261H0', 'side': 'BUY', 'qty': 6, 'filled': 0}]
     assert fills['recovered'] == [{'day': '2026-11-18', 'account': 'live-2', 'symbol': '0261H0'}]
     assert fills['owed'] == {'actual': {'NDXMIX': 44_007}}

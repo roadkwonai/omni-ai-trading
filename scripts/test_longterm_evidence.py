@@ -117,3 +117,12 @@ def test_a_tuned_dca_names_the_tune_in_its_record_and_evidence(tmp_path, monkeyp
     row = L.connect(tmp_path).execute("SELECT indicators, reason FROM decisions WHERE kind='dca'").fetchone()
     assert json.loads(row[0])['tune'] == {'wait': 3} and '내 조정: 하락일 최대 3일' in row[1]
     assert '내 조정: 하락일 최대 3일' in json.loads(evidence(tmp_path, kind='dca')[0]['bundle'])['parts']['reason']['text']
+
+
+def test_a_reservoir_order_is_named_by_the_etf_the_book_holds(tmp_path, monkeypatch):
+    # 2026-11-20: the virtual book bought CD금리(357870) and the summary said 'TIGER KOFR금리액티브(합성) 매수 82주'
+    now = decided(tmp_path, monkeypatch).replace(hour=9, minute=40)
+    L.save_settings(tmp_path, {'books': {'actual': {'reservoir': '357870'}}})
+    assert L.trade(tmp_path, Read(), now) == 'planned'
+    res = [r for r in evidence(tmp_path) if r['code'] == '357870']
+    assert res and all(L.RESERVOIRS['357870'] in r['summary'] and 'KOFR' not in r['summary'] for r in res)

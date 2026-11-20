@@ -197,7 +197,7 @@ def _fills(root, rows, span, live_log, now):
     Today's live orders are checked only after 15:30, when they have had the session to fill."""
     import longterm_live as LL
     nhplug = Path(root).parent
-    virtual = [{'day': r['day'], 'key': o['key'], 'qty': o['qty'], 'filled': o['filled']}
+    virtual = [{'day': r['day'], 'key': o['key'], 'qty': o['qty'], 'filled': o['filled'], 'why': o.get('unfilled_why')}
                for r in rows if r['kind'] in ('order', 'dca') for o in (_json(r['orders']) or [])
                if isinstance(o, dict) and 'filled' in o and o['filled'] < o['qty']]
     sent, recovered, accounts = {}, [], set()
@@ -227,7 +227,7 @@ def _fills(root, rows, span, live_log, now):
         state = LL.load_state(nhplug, account)
         owed[account] = (state.get('book_next') or state.get('book') or {}).get('yeo_owed')
     owed = {k: {a: round(v) for a, v in o.items()} for k, o in owed.items() if o}
-    findings = ([f"{v['day']}: 가상 주문 미체결 — {L.asset_name(v['key'])} {v['filled']}/{v['qty']}주" for v in virtual]
+    findings = ([f"{v['day']}: 가상 주문 미체결 — {L.asset_name(v['key'])} {v['filled']}/{v['qty']}주" + (f" ({v['why']})" if v['why'] else '') for v in virtual]
                 + [f"{v['day']}: 실계좌 주문 미체결 — {v['account']} {v['symbol']} {'매수' if v['side'] == 'BUY' else '매도'} "
                    f"{v['filled']}/{v['qty']}주(체결 기록 기준)" for v in live]
                 + [f"{v['day']}: 재시작 뒤 전송 복구 — {v['account']} {v['symbol']}(같은 주문이 다시 실행되지 않았는지 확인)" for v in recovered]

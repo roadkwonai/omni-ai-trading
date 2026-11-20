@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 import status_cards as sc
+from strategy_compare import curve, returns, stats
 
 MIN_DAYS = 20  # below this many days a correlation or a by-regime average says little: shown greyed with the count
 REBUILD_MIN = 10
@@ -48,39 +49,6 @@ def window(days, period, today, picked=None):
     else:
         start = days[0]
     return start, days[-1]
-
-
-def returns(rows, book):
-    """Daily returns for the period. Jev: P&L ÷ the period's average money in positions — each day's own base let a
-    1,277원 day's −2% outweigh +75,990원 of P&L (11-11) — so the curve is the P&L curve; 장기투자: the stored day return."""
-    if book != 'jev':
-        return [r['ret_day'] or 0 for r in rows]
-    used = [r['deployed'] for r in rows if r['deployed']]
-    base = sum(used) / len(used) if used else 0
-    return [(r['pnl_day'] or 0) / base if base else 0.0 for r in rows]
-
-
-def curve(rows, book):
-    """[(day, cumulative return, drawdown)]: Jev adds its days (one base), 장기투자 compounds its NAV changes."""
-    out, index, peak = [], 1.0, 1.0
-    for r, ret in zip(rows, returns(rows, book)):
-        index = index + ret if book == 'jev' else index * (1 + ret)
-        peak = max(peak, index)
-        out.append((r['day'], index - 1, index / peak - 1))
-    return out
-
-
-def stats(rows, book):
-    """Period figures of one book's rows (oldest first): P&L, return, worst fall, day win rate and trades."""
-    if not rows:
-        return None
-    line = curve(rows, book)
-    index, worst = 1 + line[-1][1], min(d for _, _, d in line)
-    active = [r for r in rows if r['pnl_day'] and abs(r['pnl_day']) >= 1]
-    trades = [r['trades'] for r in rows if r['trades'] is not None]
-    return {'pnl': sum(r['pnl_day'] or 0 for r in rows), 'ret': index - 1, 'mdd': worst, 'days': len(rows),
-            'win_days': sum(1 for r in active if r['pnl_day'] > 0), 'active': len(active),
-            'trades': sum(trades) if trades else None, 'fees': sum(r['fees_est'] or 0 for r in rows)}
 
 
 def relation(a, b):

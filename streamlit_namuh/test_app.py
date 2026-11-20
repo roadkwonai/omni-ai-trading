@@ -850,10 +850,10 @@ class SubmitTest(unittest.TestCase):
 
     def test_live_balance_requires_complete_paginated_result(self):
         reader = Adapter(account_type='01')
-        with patch.object(app, 'read_live_pages', return_value={'Output_0': {}, 'Output_1': [], '_pagination_complete': True}) as pages:
+        with patch('nh_live_broker._pages', return_value={'Output_0': {}, 'Output_1': [], '_pagination_complete': True}) as pages:
             self.assertEqual(app.live_balance(reader, 'paper')['Output_1'], [])
             self.assertEqual(pages.call_args.args[1], 'krstockInquiryBalance')
-        with patch.object(app, 'read_live_pages', return_value={'Output_0': {}, 'Output_1': [], '_pagination_complete': False}):
+        with patch('nh_live_broker._pages', return_value={'Output_0': {}, 'Output_1': [], '_pagination_complete': False}):
             with self.assertRaises(ValueError):
                 app.live_balance(reader, 'paper')
 

@@ -32,7 +32,8 @@ from etf_universe import SYMBOLS as ETF_CODES, NAMES as ETF_NAMES
 from paper_ai_modes import read_modes, read_pending_modes, write_modes
 from engine_compare import apply_fill, read_events, signed
 from strategy_settings import read_settings, write_settings, DEFAULTS as STRATEGY_DEFAULTS, LIMITS as STRATEGY_LIMITS, LABELS as STRATEGY_LABELS
-from nh_live_broker import _pages as read_live_pages
+from nh_live_broker import BALANCE_FIELDS as BALANCE
+from nh_live_broker import _pages as read_live_pages, read_balance
 from src.live.halt import halt_flag_set
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
@@ -44,7 +45,6 @@ KST = ZoneInfo('Asia/Seoul')
 SYMBOLS = {ETF_NAMES[key]: code for key, code in ETF_CODES.items()}
 ETF_CHARTS = {ETF_NAMES[key]: (key, ETF_CODES[key]) for key in
               ('INV', 'K200', 'LEV', 'KQ150', 'KQ150LEV', 'KQ150INV', 'SEMILEV')}
-BALANCE = {'bnc_bse_cd': '5', 'ltg_aot_dit_cd': '9', 'aet_bse': '2', 'qut_dit_cd': 'UNT', 'aly_qut_cd': '1'}
 
 
 def configured_account(config, mode):
@@ -175,10 +175,7 @@ def verify_account(read, account, account_types, cache_s=0):
 
 def live_balance(read, account):
     verify_account(read, account, {'01', '02'}, ACCOUNT_LIST_CACHE_S)
-    data = read_live_pages(read, 'krstockInquiryBalance', {'act_no': account, **BALANCE}, 'Output_1')
-    if data.get('_pagination_complete') is not True or not isinstance(data.get('Output_0'), dict) or not isinstance(data.get('Output_1'), list):
-        raise ValueError('실계좌 잔고 확인 불가')
-    return data
+    return read_balance(read, account)
 
 
 def live_order_rows(read, account, now):
@@ -5318,6 +5315,14 @@ def main():
     title.title('Omni AI Trading')
     controls.toggle(f'{refresh_s()}초 자동 갱신', value=st.session_state['prefs']['quotes_auto'], key='auto_all',
                     help='모든 화면(시세·트레이딩 현황·실계좌·전략 구조)의 자동 갱신을 한 번에 켜고 끕니다. 간격과 처음 켜짐 여부는 화면 설정에서 정합니다.')
+    import api_status_view
+    if api_status_view.credentials().get('LINER_API_KEY'):
+        if controls.button('AI 검색', icon=':material/search:', key='quick_liner',
+                           help='종목·시장 이슈를 찾고 투자 용어나 서비스 사용법을 질문하는 창을 엽니다. 창 안에서 사용 가이드를 볼 수 있습니다.'):
+            st.session_state.pop('quick_liner_suggestions', None)
+            st.session_state['quick_liner_open'] = True
+        if st.session_state.get('quick_liner_open'):
+            api_status_view.open_liner_search()
     with controls.popover('화면 설정', icon=':material/settings:'):
         prefs_form()
     st.caption('모의·실계좌 구분 · 한국시간 · 자동매매는 별도 실행기가 하며 이 화면은 실주문을 내지 않습니다')

@@ -179,3 +179,14 @@ def test_a_rate_limited_quote_is_asked_again_and_other_errors_are_not(tmp_path, 
     with pytest.raises(ValueError):
         VirtualBroker(tmp_path / 'x.sqlite3', down).quote('005930')
     assert down.calls == 1
+
+
+def test_an_order_that_does_not_fill_keeps_why_in_the_history(tmp_path):
+    # 2026-11-18·19 long-term 적립식 buys rested and were cancelled with no reason on record (weekly audit W47, A1)
+    read = Read()
+    broker = VirtualBroker(tmp_path / 'v.sqlite3', read, cash=1_000_000)
+    with patch.object(p, 'order_session', return_value=True):
+        broker.call_tool('call_api', {'operationId': 'krstockOrderCashBuy', 'input': {'iem_cd': '005930', 'orr_qty': 1, 'orr_pr': 50_000}})
+        day = broker.clock().strftime('%Y%m%d')
+        row = broker.call_tool('call_api', {'operationId': 'krstockInquiryDailyOrderExecution', 'input': {'orr_dt': day}})['data']['Output_0'][0]
+    assert row['tot_cns_qty'] == 0 and '50,100' in row['note'] and '50,000' in row['note']

@@ -71,6 +71,7 @@
   <a href="#빠른-시작">빠른 시작</a> &middot;
   <a href="#ai와-함께-쓰기">AI와 함께 쓰기</a> &middot;
   <a href="#대시보드">대시보드</a> &middot;
+  <a href="#ai-검색">AI 검색</a> &middot;
   <a href="#안전장치">안전장치</a> &middot;
   <a href="docs/README.md">가이드 문서</a> &middot;
   <a href="#투자-유의사항-및-면책-고지">투자 유의사항</a> &middot;
@@ -598,6 +599,7 @@ flowchart LR
 | --- | --- | --- |
 | 증권 | **NH 나무 PLUG**(필수) · 키움 REST · 토스증권 Open API | 시세·잔고·주문 / 순위 선별·시황 대체 / 신규상장·NXT 프리마켓 |
 | AI | TypeSafe Jev · OpenAI · Claude Code·Codex | 차트·뉴스 판단 / 빠른 판단·관찰 / 채팅 운영·리포트 작성 |
+| AI 검색 | Liner | 기사·공시 원문 검색, 출처가 있는 투자 채팅과 시장 영향 분석 |
 | 데이터 | KRX 정보데이터 · OpenDART · FRED · 네이버·Yahoo·뉴스 RSS | 일별 시세 / 공시·재무 / 금리·거시 / 수급·해외·헤드라인 |
 | 알림·게시 | Discord · Telegram · Slack · GitHub Pages | 알림·리포트 링크 / HTML 리포트 게시 |
 
@@ -618,6 +620,7 @@ flowchart LR
 | 알림 | Discord·Telegram·Slack으로 실시간·장기 채널 발송, 매도 손익, 15:40 마감 요약, 리포트 링크 | [알림](docs/notifications.md) · [연동 서비스](docs/integrations.md) |
 | 운영 자동화 | launchd 서비스 17개, 예약 작업, 장전 사전 점검, 매시 장중 감사, 문제 이력 | [운영](docs/operations.md) · [자동 작업](docs/automation.md) |
 | AI 운영 | Claude Code·Codex 채팅 운영, 프로젝트 스킬 9개, 예약 작업 15개, 읽기 전용 실행기 `scripts/ro` | [AI와 함께 쓰기](docs/ai-agents.md) |
+| AI 검색 | 기사·공시 원문 검색, 뉴스의 시장 영향 분석, 투자 AI 채팅, 실계좌 잔고·보유 종목 조회 | [AI 검색 사용 가이드](docs/ai-search.md) |
 | 대시보드 | Streamlit 10개 탭, 상태 카드, 가이드 팝업, Archify 흐름도 | [대시보드](docs/dashboard.md) |
 | 백업·이식 | 설정 정리본 git 보관, 전체 백업, 새 계정·세션 복원 절차 | [이식](docs/portability.md) |
 
@@ -972,6 +975,14 @@ cp .env.example .env && chmod 600 .env   # 키 이름은 .env.example 참고, �
 
 탭은 10개이고 세 묶음으로 나뉩니다. 매일(종합 현황 · 시장 상황 · 전략 구조 · 트레이딩 현황 · 매매일지 · 성과 비교), 계좌(계좌·자동매매 · 장기투자 · 실계좌), 관리(운영)입니다. 예전의 주문·정리 탭은 실계좌 탭의 '주문·정리 종합' 보기로, 운영 상태·AI·실행 기록·API 연동·백업·이식 탭은 운영 탭의 하위 보기로 옮겼습니다. [대시보드 가이드](docs/dashboard.md)
 
+## AI 검색
+
+대시보드 상단 **AI 검색**에서 종목·시장 이슈의 기사와 공시 원문을 찾을 수 있습니다. **투자 AI 채팅**에는 뉴스가 주식시장에 미칠 영향, 투자 용어, 대시보드 사용법을 물어보세요. 웹 답변에는 Liner가 찾은 원문을, 서비스 사용법 답변에는 참고한 프로젝트 가이드를 표시합니다.
+
+채팅의 **내부 데이터**를 선택하고 "이번 주 Jev 수익률과 최대 낙폭은?" 또는 "실계좌 1의 현재 보유 종목과 잔고는?"이라고 물을 수 있습니다. 실계좌 잔고는 NH 나무 PLUG에서 읽기 전용으로 조회하고, 마지막 응답을 받은 한국시간을 표시합니다. 내부 조회의 질문과 답변은 대시보드의 대화 안에서 처리합니다.
+
+프로젝트 `.env`에 `LINER_API_KEY`를 설정하면 **AI 검색** 버튼이 표시됩니다. 웹 검색과 웹·가이드 답변에는 Liner API 요금이 적용됩니다. [AI 검색 사용 가이드](docs/ai-search.md) · [Liner 연동 설정](docs/integrations.md#liner)
+
 ## 안전장치
 
 <table>
@@ -1000,7 +1011,7 @@ cp .env.example .env && chmod 600 .env   # 키 이름은 .env.example 참고, �
 | 목적 | 바로가기 |
 | --- | --- |
 | 설치·설정 | [시작하기](docs/getting-started.md) · [연동 서비스](docs/integrations.md) · [설정 레퍼런스](docs/configuration.md) · [이식](docs/portability.md) |
-| 구조·화면 | [동작 구조](docs/architecture.md) · [대시보드](docs/dashboard.md) |
+| 구조·화면 | [동작 구조](docs/architecture.md) · [대시보드](docs/dashboard.md) · [AI 검색](docs/ai-search.md) |
 | Jev 실시간 | [매매 전략](docs/strategy.md) · [낙폭과대](docs/oversold.md) · [NXT](docs/nxt.md) · [실계좌](docs/live-accounts.md) · [안전장치](docs/safety.md) |
 | 장기투자 | [장기투자](docs/longterm.md) · [적립식](docs/longterm-dca.md) · [여운봉 매매법](docs/yeo-method.md) |
 | 기록·알림 | [매매일지](docs/journal.md) · [장전 분석](docs/premarket.md) · [리포트 발행](docs/report-pages.md) · [알림](docs/notifications.md) |

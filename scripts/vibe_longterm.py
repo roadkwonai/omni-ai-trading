@@ -79,7 +79,9 @@ def reservoir_code(settings, key, capital=None, held=None):
     return KOFR if capital is None or capital >= RESERVOIR_AUTO_KRW else RESERVOIR_SMALL
 
 
-def asset_name(key):
+def asset_name(key, code=None):
+    if key == 'RES' and code in RESERVOIRS:  # the book's own reservoir ETF, not always KOFR
+        return RESERVOIRS[code]
     return ASSETS[key][1] if key in ASSETS else yeo_method.EXTRA[key][1] if key in yeo_method.EXTRA else key
 
 # key: (master, title, rule, replay evidence (docs 14), default, locked)
@@ -1289,6 +1291,8 @@ def settle(broker, sent):
         if found and found['ny_cns_qty'] > 0:
             broker.call_tool('call_api', {'operationId': 'krstockOrderCancel', 'input': {'org_mkt_orr_no': row['number']}})
             row['cancelled'] = found['ny_cns_qty']
+            if found.get('note'):  # the virtual broker's last reason it did not fill
+                row['unfilled_why'] = found['note']
 
 
 def fill_whole(book, planned, prices):

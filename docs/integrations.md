@@ -7,6 +7,7 @@ Omni AI Trading이 쓰는 외부 서비스를 한곳에 모았습니다. 서비�
 - 증권사: [NH 나무 PLUG](#nh-나무-plug) · [키움 REST](#키움-rest) · [토스증권 Open API](#토스증권-open-api)
 - AI 판단: [TypeSafe Jev](#typesafe-jev) · [OpenAI](#openai)
 - 공공·시장 데이터: [KRX 정보데이터](#krx-정보데이터) · [OpenDART](#opendart) · [FRED](#fred) · [키 없이 쓰는 출처](#키-없이-쓰는-출처)
+- 웹 검색: [Liner](#liner)
 - 알림: [알림 채널 두 개](#알림-채널-두-개) · [먼저 정할 것](#먼저-정할-것) · [Discord](#discord) · [Telegram](#telegram) · [Slack](#slack) · [발송 확인과 재시작](#발송-확인과-재시작)
 - [리포트 게시: GitHub Pages](#리포트-게시-github-pages)
 - [AI에게 맡기기](#ai에게-맡기기)
@@ -44,6 +45,7 @@ flowchart LR
 | NH 나무 PLUG | 시세, 잔고, 모의·실계좌 주문 | **필수** | `APP_KEY`, `APP_SECRET`, `ACCOUNT_NUMBER`(실계좌만) | NH 안내를 따름 |
 | TypeSafe Jev | 진입·보유 판단(차트 이미지·뉴스) | Jev 매매에 필수 | `JEV_API_KEY` | 서비스 요금을 따름 |
 | OpenAI | Decisions 빠른 판단, 실계좌 AI 관찰 | 권장 | `OPENAI_API_KEY` | API 사용료 |
+| Liner | 종목·이슈 웹 검색과 원문 확인 | 선택 | `LINER_API_KEY` | 요청당 API 사용료 |
 | 키움 REST | 순위 후보 선별, 시황 대체, 프로그램매매 | 선택 | `KIWOOM_APP_KEY`, `KIWOOM_APP_SECRET` | 키움 안내를 따름 |
 | 토스증권 Open API | 신규상장 목록 대체, 시황 대체, NXT 프리마켓 요약 | 선택 | `TOSS_CLIENT_ID`, `TOSS_CLIENT_SECRET` | 토스 안내를 따름 |
 | KRX 정보데이터 | 코스피·코스닥 일별 시세 | 선택 | `KRX_API_KEY` | 무료 신청 |
@@ -150,6 +152,22 @@ ETF 모의 실행기의 Decisions(빠른 판단)와 실계좌 AI 관찰기가 �
 | 발급 | [FRED](https://fred.stlouisfed.org) → My Account → API Keys (무료) |
 | `.env` | `FRED_API_KEY` |
 | 함께 쓰는 것 | 연준 FOMC 일정 페이지(키 없음) |
+
+## Liner
+
+1. Liner Platform의 **API Keys**에서 발급한 키를 프로젝트 `.env`의 `LINER_API_KEY`에 넣습니다. [공식 설정 가이드](https://liner.com/ko/developers/docs/quick-start)
+2. 대시보드 상단의 **AI 검색**에서 검색어를 입력하거나 중요도 순으로 정렬된 최근 뉴스 제목을 누릅니다. **운영 → API 연동 → API 상세 → Liner → 웹 검색**에서도 사용할 수 있습니다.
+3. **투자 AI 채팅**에서 주식이나 ETF를 질문할 수 있습니다. **오늘 주식시장 영향 분석**으로 선택한 이슈의 시장 영향과 출처를 확인하세요. 웹·가이드 채팅과 시장 영향 분석에는 Liner Search Agent API 요금이 적용됩니다. [공식 Search Agent API 문서](https://liner.com/ko/developers/docs/search-agent-api)
+4. **추천 질문** 태그를 누르면 채팅에 질문을 보냅니다. **다른 질문**으로 추천을 바꾸거나 **추천 질문 전체**에서 분류별로 고를 수 있습니다. **최근 검색·질문**에서 같은 요청을 다시 보낼 수 있습니다. 완료한 웹 검색어와 웹 질문은 로컬 런타임의 `nhplug/ai-search-history.sqlite3`에 저장합니다.
+5. 채팅 오른쪽 위의 **마크다운 복사**를 누르면 가장 최근 답변과 출처를 클립보드에 복사합니다.
+
+대화상자의 **사용 가이드** 탭에서 기능별 안내와 검색·채팅 흐름을 볼 수 있습니다. [AI 검색 사용 가이드](ai-search.md)
+
+서비스 용어와 사용법을 묻는 경우 AI 채팅이 화면 안내와 대시보드·전략·장기투자·연동 가이드의 관련 내용을 찾아 답변에 참고합니다. 답변 아래 **서비스 가이드**에서 사용한 문서와 발췌 내용을 확인할 수 있습니다.
+
+**내부 데이터**에서 실계좌 잔고와 보유 종목을 물으면 대시보드가 NH 나무 PLUG의 읽기 전용 조회를 사용합니다. 결과는 조회 완료 시각과 함께 현재 대화에 표시합니다. [내부 데이터 읽기](ai-search.md#내부-데이터-읽기)
+
+키가 비어 있으면 연동 상태에 **미사용**으로 표시됩니다. 검색 버튼을 누를 때마다 검색어를 Liner에 보내고 웹 검색 API를 한 번 호출합니다. Premium Data는 끕니다. [공식 Search API 문서](https://liner.com/ko/developers/docs/search-api)
 
 ## 키 없이 쓰는 출처
 

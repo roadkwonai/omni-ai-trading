@@ -158,6 +158,7 @@ docs/
 !/docs/vibe-trading/README_*.md
 !/docs/README.md
 !/docs/ai-agents.md
+!/docs/ai-search.md
 !/docs/integrations.md
 !/docs/architecture.md
 !/docs/automation.md

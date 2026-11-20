@@ -63,6 +63,8 @@ class VirtualBroker:
         self.db.execute('''CREATE TABLE IF NOT EXISTS orders (number INTEGER PRIMARY KEY AUTOINCREMENT, day TEXT NOT NULL,
             symbol TEXT NOT NULL, side TEXT NOT NULL, qty INTEGER NOT NULL, price INTEGER NOT NULL, filled INTEGER NOT NULL,
             cancelled INTEGER NOT NULL, fill_price REAL, time TEXT NOT NULL)''')
+        if 'note' not in {r[1] for r in self.db.execute('PRAGMA table_info(orders)')}:  # why a resting order has not filled
+            self.db.execute('ALTER TABLE orders ADD COLUMN note TEXT')
         self.db.execute("INSERT OR IGNORE INTO account VALUES ('cash', ?)", (float(cash),))
         self.db.commit()
 
@@ -105,17 +107,28 @@ class VirtualBroker:
 
     def fill(self, number, symbol, side, qty, price):
         """Fill a resting or new order when marketable against a fresh quote."""
-        bid, ask = self.quote(symbol)
-        if (side == 'BUY' and price < ask) or (side == 'SELL' and price > bid):
-            return False
+        try:
+            bid, ask = self.quote(symbol)
+        except ValueError as exc:
+            self.note(number, f'시세 없음: {exc}')
+            raise
+        if side == 'BUY' and price < ask:
+            return self.note(number, f'매도호가 {ask:,}원 > 주문가 {price:,}원')
+        if side == 'SELL' and price > bid:
+            return self.note(number, f'매수호가 {bid:,}원 < 주문가 {price:,}원')
         at = ask if side == 'BUY' else bid
         with self.db:
             if side == 'BUY' and qty * at * (1 + self.fee) > self.cash():
-                return False
+                return self.note(number, '가상 현금 부족')
             self.db.execute('UPDATE orders SET filled=?, fill_price=? WHERE number=?', (qty, at, number))
             self.db.execute("UPDATE account SET value=value+? WHERE name='cash'",
                             ((-qty * at * (1 + self.fee)) if side == 'BUY' else qty * at * (1 - self.fee),))
         return True
+
+    def note(self, number, text):
+        with self.db:
+            self.db.execute('UPDATE orders SET note=? WHERE number=?', (text, number))
+        return False
 
     def call_tool(self, tool, params, order_intent_id=None, pre_reserve_check=None, pre_send_check=None, order_guard_deadline_ms=None, **_):
         if tool != 'call_api' or not isinstance(params, dict):
@@ -192,9 +205,9 @@ class VirtualBroker:
             except ValueError:
                 pass
         rows = [{'itg_orr_no': n, 'iem_cd': s, 'sby_dit_cd_nm': '현금매수' if side == 'BUY' else '현금매도', 'orr_qty': q,
-                 'tot_cns_qty': f, 'ny_cns_qty': q - f - c, 'can_qty': c, 'cns_avg_uit_pr': fp or 0}
-                for n, s, side, q, f, c, fp in self.db.execute(
-                    'SELECT number,symbol,side,qty,filled,cancelled,fill_price FROM orders WHERE day=? ORDER BY number', (day,))]
+                 'tot_cns_qty': f, 'ny_cns_qty': q - f - c, 'can_qty': c, 'cns_avg_uit_pr': fp or 0, 'note': note}
+                for n, s, side, q, f, c, fp, note in self.db.execute(
+                    'SELECT number,symbol,side,qty,filled,cancelled,fill_price,note FROM orders WHERE day=? ORDER BY number', (day,))]
         return page('Output_0', rows)
 
     def balance(self):

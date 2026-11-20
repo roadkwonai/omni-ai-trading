@@ -64,7 +64,8 @@ def test_public_docs_and_ignored_local_notes_pass(repo: Path) -> None:
 
 
 def test_published_guides_and_their_images_pass(repo: Path) -> None:
-    for name in ["docs/README.md", "docs/strategy.md", "docs/images/two-engines.jpg", "docs/images/screens/market.jpg"]:
+    for name in ["docs/README.md", "docs/strategy.md", "docs/ai-search.md",
+                 "docs/images/two-engines.jpg", "docs/images/screens/market.jpg"]:
         path = repo / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("public guide", encoding="utf-8")

@@ -190,8 +190,13 @@ def longterm_panel(runtime):
     plan, last = state.get('plan') or {}, state.get('last_plan') or {}
     st.caption(f"{LT.REGIMES.get(plan.get('regime'), ('판정 전',))[0]} 국면 · {plan.get('day', '')}" + (f" · {LT.why_label(last.get('why'))}" if last.get('why') else ''))
     want, now = last.get('want') or {}, last.get('weights') or {}
+    try:  # the reservoir ETF the virtual book holds (CD금리 since 11-20), not always KOFR
+        held = {r['symbol']: r['after'] for r in LT.journal_rows(Path(runtime) / 'vibe-longterm')}
+    except Exception:
+        held = {}
+    res = next((c for c, q in held.items() if c in LT.RESERVOIRS and q > 0), None)
     for key in sorted(want, key=lambda k: -want[k])[:3]:
-        st.caption(f"{LT.asset_name(key)} · 현재 {now.get(key, 0) * 100:.0f}% / 목표 {want[key] * 100:.0f}%")  # NDXMIX: 여운봉 매매법
+        st.caption(f"{LT.asset_name(key, res)} · 현재 {now.get(key, 0) * 100:.0f}% / 목표 {want[key] * 100:.0f}%")  # NDXMIX: 여운봉 매매법
     for line in longterm_side_lines(state):
         st.caption(line)
     import vibe_longterm_view as LV

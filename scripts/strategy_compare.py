@@ -30,7 +30,7 @@ LT_BOOKS = {'actual': 'longterm', 'base': 'longterm_base', 'auto': 'longterm_aut
 COLUMNS = ('day', 'book', 'nav_index', 'contributed', 'pnl_day', 'pnl_cum', 'realized_day', 'unrealized', 'deployed',
            'ret_day', 'drawdown', 'trades', 'buys', 'sells', 'wins', 'turnover', 'avg_hold_min', 'fees_est',
            'regime_kr', 'regime_us', 'bench', 'source', 'built')
-SCHEMA = f"""CREATE TABLE IF NOT EXISTS compare_daily (
+SCHEMA = """CREATE TABLE IF NOT EXISTS compare_daily (
   day TEXT, book TEXT, nav_index REAL, contributed REAL, pnl_day REAL, pnl_cum REAL, realized_day REAL, unrealized REAL,
   deployed REAL, ret_day REAL, drawdown REAL, trades INT, buys INT, sells INT, wins INT, turnover REAL, avg_hold_min REAL,
   fees_est REAL, regime_kr TEXT, regime_us TEXT, bench TEXT, source TEXT, built TEXT, PRIMARY KEY (day, book))"""
@@ -69,14 +69,16 @@ def jev_days(rows, days, snapshots, etfs):
         return []
     first = rows[0]['time'][:10]
     days = sorted(d for d in set(days) | {r['time'][:10] for r in rows} if d >= first)
-    held, books, out, last_unreal, i = {}, {}, [], 0.0, 0
+    books, out, last_unreal, i = {}, [], 0.0, 0
     closed = {}
     for ep in episodes(rows):
         if ep['close']:
             minutes = (datetime.fromisoformat(ep['close']) - datetime.fromisoformat(ep['open'])).total_seconds() / 60
             closed.setdefault(ep['close'][:10], []).append(minutes)
+    def cost():
+        return sum(q * a for q, a in books.values())
+
     for day in days:
-        cost = lambda: sum(q * a for q, a in books.values())
         peak, day_rows = cost(), []
         while i < len(rows) and rows[i]['time'][:10] == day:
             r = rows[i]
@@ -146,7 +148,9 @@ def _bench(cases_db):
     from sqlite_ro import ro_connect
     with ro_connect(cases_db) as db:
         series = {s: db.execute('SELECT day, c FROM series WHERE symbol=? ORDER BY day', (s,)).fetchall() for s in ('069500.KS', '^NDX')}
-    pct = lambda rows: [(d, (c / p - 1) * 100) for (_, p), (d, c) in zip(rows, rows[1:]) if p]
+    def pct(rows):
+        return [(d, (c / p - 1) * 100) for (_, p), (d, c) in zip(rows, rows[1:]) if p]
+
     return dict(pct(series['069500.KS'])), pct(series['^NDX'])
 
 
@@ -181,7 +185,7 @@ def build(runtime):
     """Recompute every day and book from the sources and replace the table; returns {book: rows written}."""
     import engine_compare as ec
     import vibe_longterm as L
-    from engine_roles import ledger_root
+    from engine_roles import SHARED, ledger_root
     from etf_universe import SYMBOLS as ETF_CODES
     from vibe_longterm_view import nav_history
     runtime = Path(runtime)
@@ -196,7 +200,8 @@ def build(runtime):
     regimes_us = regime_days(lt_root / 'longterm.sqlite3')
     kodex, ndx = _bench(runtime / 'shared-etf-paper' / 'oversold-cases.sqlite3')
     built = datetime.now().astimezone().isoformat(timespec='seconds')
-    sources = {'jev': 'shared paper orders.sqlite3 · account-snapshots.jsonl', **{b: 'vibe-longterm nav' for b in LT_BOOKS.values()}}
+    jev_source = 'shared paper' if jev_root.name == SHARED else 'Jev virtual'
+    sources = {'jev': f'{jev_source} orders.sqlite3 · account-snapshots.jsonl', **{b: 'vibe-longterm nav' for b in LT_BOOKS.values()}}
     table = []
     for book, rows in books.items():
         for r in finish(rows):
@@ -216,18 +221,55 @@ def build(runtime):
     return {book: len(rows) for book, rows in books.items()}
 
 
-def rows(runtime):
-    """Every stored row as dicts, oldest first (bench decoded); [] before the first build."""
+def rows(runtime, *, start=None, end=None, book=None, timeout=5):
+    """Stored rows, oldest first, optionally limited by trading day and book."""
     path = Path(runtime) / FILE
     if not path.exists():
         return []
     from sqlite_ro import ro_connect
-    with ro_connect(path) as db:
+    filters = [(column, value) for column, value in (('day >= ?', start), ('day <= ?', end), ('book = ?', book))
+               if value is not None]
+    where = ' WHERE ' + ' AND '.join(column for column, _ in filters) if filters else ''
+    with ro_connect(path, timeout) as db:
         db.row_factory = sqlite3.Row
-        found = [dict(r) for r in db.execute('SELECT * FROM compare_daily ORDER BY day, book')]
+        found = [dict(r) for r in db.execute('SELECT * FROM compare_daily' + where + ' ORDER BY day, book',
+                                             [value for _, value in filters])]
     for r in found:
         r['bench'] = json.loads(r['bench'] or '{}')
     return found
+
+
+def returns(rows, book):
+    """Daily returns for the period. Jev: P&L ÷ the period's average money in positions — each day's own base let a
+    1,277원 day's −2% outweigh +75,990원 of P&L (11-11) — so the curve is the P&L curve; 장기투자: the stored day return."""
+    if book != 'jev':
+        return [r['ret_day'] or 0 for r in rows]
+    used = [r['deployed'] for r in rows if r['deployed']]
+    base = sum(used) / len(used) if used else 0
+    return [(r['pnl_day'] or 0) / base if base else 0.0 for r in rows]
+
+
+def curve(rows, book):
+    """[(day, cumulative return, drawdown)]: Jev adds its days (one base), 장기투자 compounds its NAV changes."""
+    out, index, peak = [], 1.0, 1.0
+    for r, ret in zip(rows, returns(rows, book)):
+        index = index + ret if book == 'jev' else index * (1 + ret)
+        peak = max(peak, index)
+        out.append((r['day'], index - 1, index / peak - 1))
+    return out
+
+
+def stats(rows, book):
+    """Period figures of one book's rows (oldest first): P&L, return, worst fall, day win rate and trades."""
+    if not rows:
+        return None
+    line = curve(rows, book)
+    index, worst = 1 + line[-1][1], min(d for _, _, d in line)
+    active = [r for r in rows if r['pnl_day'] and abs(r['pnl_day']) >= 1]
+    trades = [r['trades'] for r in rows if r['trades'] is not None]
+    return {'pnl': sum(r['pnl_day'] or 0 for r in rows), 'ret': index - 1, 'mdd': worst, 'days': len(rows),
+            'win_days': sum(1 for r in active if r['pnl_day'] > 0), 'active': len(active),
+            'trades': sum(trades) if trades else None, 'fees': sum(r['fees_est'] or 0 for r in rows)}
 
 
 def stale(runtime):

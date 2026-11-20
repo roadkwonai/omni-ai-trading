@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from src.tools.nhplug_live_guard import LiveOrderBlocked, SYMBOL
 
 KST = ZoneInfo('Asia/Seoul')
+BALANCE_FIELDS = {'bnc_bse_cd': '5', 'ltg_aot_dit_cd': '9', 'aet_bse': '2', 'qut_dit_cd': 'UNT', 'aly_qut_cd': '1'}
 
 
 RATE_LIMIT_WAITS = (0.5, 1.0, 2.0)  # NH's per-app call limit (IGW42902) is retryable; every service shares one app key
@@ -35,7 +36,8 @@ def rate_limited(result):
 
 
 def _pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.sleep):
-    cursor, flag, seen, rows, first, started = None, None, set(), [], None, None
+    cursor, flag, seen, rows, first = None, None, set(), [], None
+    started = 0.0
     for _ in range(20):
         args = {'operationId': operation, 'input': fields, 'want_pagination': True}
         if cursor is not None:
@@ -72,6 +74,35 @@ def _pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.s
     raise LiveOrderBlocked('broker pagination page limit reached')
 
 
+def require_readonly(adapter):
+    args: list[str] = list(getattr(getattr(adapter, 'server_config', None), 'args', ()))
+    if (getattr(adapter, 'server_name', None) != 'nhplug_readonly' or args.count('--mode') != 1
+            or args[args.index('--mode') + 1:args.index('--mode') + 2] != ['readonly']):
+        raise LiveOrderBlocked('only configured NH readonly transport permitted')
+
+
+def read_balance(adapter, account):
+    data = _pages(adapter, 'krstockInquiryBalance', {'act_no': account, **BALANCE_FIELDS}, 'Output_1')
+    if (data.get('_pagination_complete') is not True or not isinstance(data.get('Output_0'), dict)
+            or not isinstance(data.get('Output_1'), list)):
+        raise ValueError('실계좌 잔고 확인 불가')
+    return data
+
+
+def read_linked_balance(adapter, account_key, record):
+    from accounts import resolve
+
+    require_readonly(adapter)
+    linked = _request(adapter, 'list_accounts', {})['data'].get('Output_0')
+    if not isinstance(linked, list):
+        raise ValueError('실계좌 연결 확인 불가')
+    account = resolve({account_key: record}, linked).get(account_key)
+    if not isinstance(account, str) or len(account) != 11 or not account.isascii() or not account.isdigit():
+        raise ValueError('실계좌 연결 확인 불가')
+    result = read_balance(adapter, account)
+    return result, datetime.now(KST)
+
+
 def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL):
     """Fetch guard inputs (quotes for `symbol`) from the configured read-only broker; never place an order.
     `symbol=None` skips the two quotes and their 2-second gap and the account list (the live mirror's per-minute read,
@@ -80,15 +111,12 @@ def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL):
         raise LiveOrderBlocked('invalid account')
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise LiveOrderBlocked('clock unavailable')
-    config = getattr(adapter, 'server_config', None)
-    args = getattr(config, 'args', ())
-    if getattr(adapter, 'server_name', None) != 'nhplug_readonly' or args.count('--mode') != 1 or args[args.index('--mode') + 1:args.index('--mode') + 2] != ['readonly']:
-        raise LiveOrderBlocked('only configured NH readonly transport permitted')
+    require_readonly(adapter)
     day = now.astimezone(KST).strftime('%Y%m%d')
     accounts = _request(adapter, 'list_accounts', {})['data'] if symbol is not None else None
     history = _pages(adapter, 'krstockInquiryDailyOrderExecution', {'act_no':account, 'orr_dt':day, 'orr_mkt_cd':'00', 'ost_cns_dit':'0'}, 'Output_0', sleep=sleep)
     history.update(_account=account, _day=day)
-    balance = _pages(adapter, 'krstockInquiryBalance', {'act_no':account, 'bnc_bse_cd':'5', 'ltg_aot_dit_cd':'9', 'aet_bse':'2', 'qut_dit_cd':'UNT', 'aly_qut_cd':'1'}, 'Output_1', sleep=sleep)
+    balance = _pages(adapter, 'krstockInquiryBalance', {'act_no': account, **BALANCE_FIELDS}, 'Output_1', sleep=sleep)
     balance['_account'] = account
     pnl = _request(adapter, 'call_api', {'operationId':'krstockInquiryRealizedPnl', 'input':{'act_no':account,
         'iqr_dit_cd1':'0', 'fee_dit_cd':'1', 'qut_dit_cd':'KRX', 'aly_qut_cd':'1'}})['data']

@@ -1,10 +1,450 @@
+import pytest
 from streamlit.testing.v1 import AppTest
+
+
+@pytest.fixture(autouse=True)
+def isolate_liner_history(tmp_path, monkeypatch):
+    monkeypatch.setattr('liner_history.path', lambda: tmp_path / 'ai-search-history.sqlite3')
 
 
 def _app():
     import api_status_view
     from pathlib import Path
     api_status_view.render(Path('/nonexistent-runtime'))
+
+
+def finish_liner(at, prefix='quick_liner'):
+    key = f'{prefix}_pending'
+    if key in at.session_state:
+        try:
+            at.session_state[key]['future'].result(timeout=5)
+        except ValueError:
+            pass  # the app renders provider errors on the next pass
+        at.run()
+
+
+def test_liner_search_can_render_twice_without_widget_conflicts(monkeypatch):
+    import liner_search
+    import api_status_view
+
+    monkeypatch.setattr(liner_search, 'search', lambda query: [{'제목': query, '원문 링크': 'https://example.org'}])
+    monkeypatch.setattr(api_status_view, 'liner_issues', lambda: ('2026-11-20', [
+        {'title': '금리 발표', 'stars': 5}, {'title': '반도체 실적', 'stars': 1},
+    ]))
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True)
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    assert not at.exception
+    assert ':red-badge[★★★★★ 5/5]' in at.button(key='quick_liner_issue_0').label
+    assert ':gray-badge[★ 1/5]' in at.button(key='quick_liner_issue_1').label
+    at.text_input(key='quick_liner_query').set_value('반도체')
+    at.button(key='quick_liner_submit').click().run()
+    finish_liner(at)
+    assert not at.exception
+    assert any(item.value == '**반도체**' for item in at.markdown)
+    assert at.text_input(key='api_liner_query').value == ''
+    at.button(key='quick_liner_issue_0').click().run()
+    finish_liner(at)
+    assert any(item.value == '**금리 발표**' for item in at.markdown)
+
+
+def test_liner_market_analysis_keeps_news_context_and_sources(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_search
+
+    env = tmp_path / '.env'
+    env.write_text('LINER_API_KEY=test-key\n')
+    monkeypatch.setattr(liner_search.local_env, 'ENV', env)
+    monkeypatch.setattr(view, 'liner_issues', lambda: ('2026-11-20', [
+        {'title': '금리 발표', 'link': 'https://example.org/news'},
+    ]))
+    monkeypatch.setattr(liner_search, 'search', lambda query: [])
+    response = Mock(status_code=200)
+    answer = '### 확인된 사실\n\n- **금리 경로**를 살펴보세요. ((1))'
+    response.json.return_value = {'answer': answer, 'references': [
+        {'title': '중앙은행 발표', 'url': 'https://example.org/release', 'date': '2026-11-20'},
+        {'url': 'javascript:alert(1)'},
+    ]}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(liner_search.requests, 'post', post)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    at.button(key='quick_liner_issue_0').click().run()
+    finish_liner(at)
+    post.assert_not_called()
+    at.button(key='quick_liner_analyze').click().run()
+    finish_liner(at)
+    assert not at.exception
+    assert post.call_args.args == (liner_search.ANALYSIS_ENDPOINT,)
+    assert post.call_args.kwargs['headers'] == {'x-api-key': 'test-key'}
+    body = post.call_args.kwargs['json']
+    assert body['lang'] == 'ko' and body['stream'] is False
+    assert '금리 발표' in body['messages'][-1]['content'] and 'https://example.org/news' in body['messages'][-1]['content']
+    assert any(item.value == '### 확인된 사실\n\n- **금리 경로**를 살펴보세요. [1]' for item in at.markdown)
+    assert [link.url for link in at.link_button] == ['https://example.org/release']
+
+    at.chat_input(key='quick_liner_follow_up').set_value('은행주는 어떤가요?').run()
+    finish_liner(at)
+    assert not at.exception
+    messages = post.call_args.kwargs['json']['messages']
+    assert [message['role'] for message in messages] == ['user', 'assistant', 'user']
+    assert messages[1]['content'] == answer
+    assert '은행주는 어떤가요?' in messages[-1]['content'] and '금리 발표' in messages[-1]['content']
+    at.run()
+    assert post.call_count == 2
+
+
+def test_liner_chat_accepts_a_question_without_a_search_or_news(monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_search
+
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+    analyze = Mock(return_value=('ETF는 거래소에서 매매할 수 있는 펀드입니다.', []))
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+    search = Mock()
+    monkeypatch.setattr(liner_search, 'search', search)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    assert not at.exception
+    analyze.assert_not_called()
+    at.chat_input(key='quick_liner_follow_up').set_value('ETF가 뭐예요?').run()
+    finish_liner(at)
+    assert not at.exception
+    first = analyze.call_args.args[0]
+    assert len(first) == 1 and 'ETF가 뭐예요?' in first[0]['content']
+    assert '선택한 분석 주제:' not in first[0]['content']
+    assert any('거래소에서 매매할 수 있는 펀드' in item.value for item in at.markdown)
+    at.chat_input(key='quick_liner_follow_up').set_value('일반 펀드와 어떻게 달라요?').run()
+    finish_liner(at)
+    assert not at.exception
+    messages = analyze.call_args.args[0]
+    assert [message['role'] for message in messages] == ['user', 'assistant', 'user']
+    assert '일반 펀드와 어떻게 달라요?' in messages[-1]['content']
+    search.assert_not_called()
+
+
+def test_liner_chat_keeps_internal_answers_out_of_liner_and_search_history(monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_history
+    import liner_local_data as local
+    import liner_search
+
+    question = '이번 주 Jev 수익률이 얼마야?'
+    result = 'Jev 내부 조회 결과 12.34%'
+    answer = Mock(return_value=result)
+    analyze = Mock(return_value=('공개 투자 설명', []))
+    monkeypatch.setattr(local, 'answer', answer)
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    at.chat_input(key='quick_liner_follow_up').set_value(question).run()
+    finish_liner(at)
+    assert not at.exception
+    answer.assert_called_once()
+    assert any(item.value == result for item in at.markdown)
+    analyze.assert_not_called()
+    assert liner_history.recent() == []
+
+    at.segmented_control(key='quick_liner_chat_mode').set_value('내부 데이터').run()
+    at.chat_input(key='quick_liner_follow_up').set_value('설명해 줘').run()
+    finish_liner(at)
+    assert any('조회할 항목을 지정해 주세요' in item.value for item in at.markdown)
+    analyze.assert_not_called()
+
+    at.segmented_control(key='quick_liner_chat_mode').set_value('자동').run()
+    at.chat_input(key='quick_liner_follow_up').set_value('ETF란 무엇인가요?').run()
+    finish_liner(at)
+    analyze.assert_called_once()
+    messages = analyze.call_args.args[0]
+    assert len(messages) == 1 and 'ETF란 무엇인가요?' in messages[0]['content']
+    assert question not in messages[0]['content'] and result not in messages[0]['content']
+    assert liner_history.recent() == [('질문', 'ETF란 무엇인가요?')]
+
+
+def test_liner_chat_reads_live_balance_and_keeps_it_out_of_liner(tmp_path, monkeypatch):
+    import json
+    from datetime import datetime
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from accounts import DEFAULT_BUDGET, digest
+    import api_status_view as view
+    import liner_history
+    import liner_search
+
+    number = '12345678901'
+    name = '비공개테스트종목'
+    query = '실계좌 1의 현재 보유 종목과 잔고는?'
+    stamp = datetime(2026, 11, 21, 10, 54, 32, tzinfo=view.KST)
+    runtime = tmp_path / 'nhplug'
+    runtime.mkdir()
+    (runtime / 'accounts.json').write_text(json.dumps({'accounts': {'live-1': {
+        'kind': 'live', 'engine': 'jev', 'auto': False, 'budget': DEFAULT_BUDGET['live'], 'hash': digest(number),
+    }}}))
+    monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path))
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+    monkeypatch.setattr('nh_live_broker.datetime', SimpleNamespace(now=lambda _tz: stamp))
+    config = SimpleNamespace(args=['--mode', 'readonly'])
+    monkeypatch.setattr('src.config.loader.load_agent_config',
+                        lambda: SimpleNamespace(mcp_servers={'nhplug_readonly': config}))
+    calls = []
+    complete = True
+
+    def call_tool(tool, args):
+        calls.append((tool, args))
+        if tool == 'list_accounts':
+            return {'status': 'ok', 'data': {'Output_0': [{'acct_type': '01', 'acct_no': number}]}}
+        assert tool == 'call_api' and args['operationId'] == 'krstockInquiryBalance'
+        assert args['input']['act_no'] == number
+        return {'status': 'ok', 'data': {
+            'rsp_cd': '00166', 'rsp_msg': '조회가 완료되었습니다.', '_nh_pagination': {'complete': complete},
+            'Output_0': {'act_no': number, 'dca': 0, 'orr_pbl_amt1': 1234567, 'tot_aet_amt': 9876543},
+            'Output_1': [{'iem_cd': '005930', 'iem_nm': name, 'rsdl_qty': 17, 'act_no': number}],
+        }}
+
+    def adapter(server_name, server_config, **_kwargs):
+        assert server_name == 'nhplug_readonly' and server_config is config
+        return SimpleNamespace(server_name=server_name, server_config=server_config, call_tool=call_tool)
+
+    monkeypatch.setattr('src.tools.mcp.MCPServerAdapter', adapter)
+    analyze = Mock(return_value=('공개 투자 설명', []))
+    search = Mock()
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+    monkeypatch.setattr(liner_search, 'search', search)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    at.chat_input(key='quick_liner_follow_up').set_value(query).run()
+    finish_liner(at)
+
+    assert not at.exception
+    reply = next(m.value for m in at.markdown if '### 실계좌 1 잔고와 보유 종목' in m.value)
+    assert '조회 완료 2026-11-21 10:54:32 한국시간' in reply
+    assert f'{name} (005930) · 17주' in reply and '예수금 0원' in reply and '총자산 9,876,543원' in reply
+    assert number not in reply
+    assert [tool for tool, _ in calls] == ['list_accounts', 'call_api']
+    assert liner_history.recent() == []
+    analyze.assert_not_called()
+    search.assert_not_called()
+
+    complete = None
+    at.chat_input(key='quick_liner_follow_up').set_value('다시 조회해줘').run()
+    finish_liner(at)
+    assert any('NH에서 실계좌 잔고와 보유 종목을 확인하지 못했습니다' in m.value for m in at.markdown)
+    assert not any('조회된 보유 종목이 없습니다' in m.value for m in at.markdown)
+    analyze.assert_not_called()
+
+    at.chat_input(key='quick_liner_follow_up').set_value('ETF란 무엇인가요?').run()
+    finish_liner(at)
+    analyze.assert_called_once()
+    payload = str(analyze.call_args.args[0])
+    assert all(value not in payload for value in (number, name, '9,876,543', query, '다시 조회해줘'))
+    assert liner_history.recent() == [('질문', 'ETF란 무엇인가요?')]
+    search.assert_not_called()
+
+
+def test_liner_chat_grounds_service_questions_in_local_guides(monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_search
+    from liner_topics import find_guides
+
+    assert any(guide['문서'] == 'streamlit_namuh/guides.py' for guide in find_guides('이 서비스에서 Jev 신뢰도가 뭐예요?'))
+    assert any(guide['항목'] == '가이드 팝업과 도식' for guide in find_guides('대시보드를 처음 쓰는데 사용법을 알려줘'))
+    assert any(guide['항목'] == '성과 비교' for guide in find_guides('누적 거래를 CSV로 받을 수 있어?'))
+    assert any(guide['문서'] == 'docs/nxt.md' for guide in find_guides('NXT 야간 거래 사용법은?'))
+    assert not find_guides('주식과 채권의 차이는 무엇인가요?')
+
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+    analyze = Mock(return_value=('**성과 비교** 탭에서 기간을 고르세요.', []))
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    composer = at.chat_input(key='quick_liner_follow_up')
+    composer.set_value('이 서비스에서 JEV 투자 성능을 어디서 확인해요?').run()
+    finish_liner(at)
+    assert not at.exception
+    prompt = analyze.call_args.args[0][-1]['content']
+    assert '서비스 가이드 발췌:' in prompt and 'docs/dashboard.md' in prompt
+    assert '최대 낙폭' in prompt and '성과 비교' in prompt
+    assert any(item.label.startswith('서비스 가이드') for item in at.expander)
+    at.chat_input(key='quick_liner_follow_up').set_value('거기서 기간을 어떻게 고르나요?').run()
+    finish_liner(at)
+    assert 'docs/dashboard.md' in analyze.call_args.args[0][-1]['content']
+
+
+def test_liner_suggestions_and_history_replay_search_and_chat(monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_history
+    import liner_search
+
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+    analyze = Mock(return_value=('> **핵심 요약** · ==수급을 확인하세요==', []))
+    search = Mock(return_value=[{'제목': '반도체', '요약': '반도체가 3.5% 상승했습니다.', '원문 링크': 'https://example.org'}])
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+    monkeypatch.setattr(liner_search, 'search', search)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    assert not at.exception
+    assert not liner_history.path().exists()
+    old = at.button(key='quick_liner_suggestion_0').label
+    at.button(key='quick_liner_shuffle').click().run()
+    assert at.button(key='quick_liner_suggestion_0').label != old
+    analyze.assert_not_called()
+    at.button(key='quick_liner_suggestion_0').click().run()
+    finish_liner(at)
+    assert not at.exception
+    assert any(':yellow-background[수급을 확인하세요]' in item.value for item in at.markdown)
+    kind, question = liner_history.recent()[0]
+    assert kind == '질문' and question in analyze.call_args.args[0][-1]['content']
+
+    at.text_input(key='quick_liner_query').set_value('반도체')
+    at.button(key='quick_liner_submit').click().run()
+    finish_liner(at)
+    assert [kind for kind, _ in liner_history.recent()] == ['검색', '질문']
+    assert any(':yellow-background[반도체]가 :yellow-background[3.5%]' in item.value for item in at.markdown)
+
+    reopened = AppTest.from_function(app).run()
+    assert reopened.button(key='quick_liner_history_0').label == '검색 · 반도체'
+    assert reopened.button(key='quick_liner_history_0').proto.icon == ':material/search:'
+    assert reopened.button(key='quick_liner_history_1').proto.icon == ':material/chat_bubble:'
+    reopened.button(key='quick_liner_history_0').click().run()
+    finish_liner(reopened)
+    search.assert_called_with('반도체')
+    assert len(liner_history.recent()) == 2
+    reopened.button(key='quick_liner_history_1').click().run()
+    finish_liner(reopened)
+    assert question in analyze.call_args.args[0][-1]['content']
+
+
+def test_liner_is_optional_and_only_searches_on_submit(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    import api_status_view as view
+    import liner_search
+
+    env = tmp_path / '.env'
+    env.write_text('LINER_API_KEY=\n')
+    monkeypatch.setattr(liner_search.local_env, 'ENV', env)
+    monkeypatch.setattr(view, 'load', Mock(return_value=([], [], {})))
+    response = Mock(status_code=200)
+    response.json.return_value = {'results': [
+        {'title': '실적 보도', 'url': 'https://example.org/news', 'date': '2026-11-21', 'description': '분기 실적 발표'},
+        {'title': '잘못된 링크', 'url': 'javascript:alert(1)'},
+    ]}
+    post = Mock(return_value=response)
+    monkeypatch.setattr(liner_search.requests, 'post', post)
+
+    try:
+        view.credentials.clear()
+        at = AppTest.from_function(_app, default_timeout=60).run()
+        at.selectbox(key='api_pick').set_value('Liner').run()
+        assert not at.exception
+        status = at.dataframe[0].value
+        assert status.loc[status['API'] == 'Liner', '상태'].item() == '미사용'
+        assert not at.text_input and not at.chat_input and any('LINER_API_KEY' in item.value for item in at.info)
+        post.assert_not_called()
+
+        env.write_text('LINER_API_KEY=test-key\n')
+        view.credentials.clear()
+        at.run()
+        post.assert_not_called()
+        at.text_input(key='api_liner_query').set_value(' 삼성전자 실적 ')
+        at.button(key='api_liner_submit').click().run()
+        finish_liner(at, 'api_liner')
+        assert not at.exception
+        post.assert_called_once_with(
+            liner_search.ENDPOINT, headers={'x-api-key': 'test-key'},
+            json={'query': '삼성전자 실적', 'country_code': 'kr', 'lang': 'ko', 'max_results': 10, 'include_knowledge': False},
+            timeout=10, allow_redirects=False,
+        )
+        assert [link.url for link in at.link_button] == ['https://example.org/news']
+        at.run()
+        assert post.call_count == 1
+        response.status_code = 429
+        at.button(key='api_liner_submit').click().run()
+        finish_liner(at, 'api_liner')
+        assert any('HTTP 429' in item.value for item in at.error)
+        assert [link.url for link in at.link_button] == ['https://example.org/news']
+    finally:
+        view.credentials.clear()
+
+
+def test_liner_guide_remains_available_while_waiting_for_an_answer(monkeypatch):
+    from threading import Event
+
+    import api_status_view as view
+    import liner_search
+
+    release = Event()
+
+    def analyze(messages):
+        assert release.wait(timeout=10)
+        return '**다음 일지 ▶**를 열고 **‘매매·차트’**를 선택하세요.', []
+
+    monkeypatch.setattr(view, 'liner_issues', lambda: (None, []))
+    monkeypatch.setattr(liner_search, 'analyze', analyze)
+
+    def app():
+        import api_status_view
+        api_status_view.liner_search(True, prefix='quick_liner')
+
+    at = AppTest.from_function(app).run()
+    try:
+        assert '종목코드' in at.text_input(key='quick_liner_query').help
+        assert '최대 10개' in at.button(key='quick_liner_submit').help
+        assert '바로 보냅니다' in at.button(key='quick_liner_suggestion_0').help
+        at.chat_input(key='quick_liner_follow_up').set_value('거래 기록을 어떻게 봐요?').run()
+        assert at.button(key='quick_liner_submit').disabled
+        assert not at.button(key='quick_liner_shuffle').disabled
+        at.segmented_control(key='quick_liner_view').set_value('사용 가이드').run()
+        assert not at.exception
+        assert [tab.label for tab in at.tabs] == ['빠른 시작', '기능별 사용법', '이력·연동']
+        assert not at.expander
+        assert any('### 검색·채팅 흐름도' in item.value and 'flowchart' in item.value for item in at.markdown)
+        assert any('마크다운 복사' in item.value and '웹 출처' in item.value for item in at.markdown)
+    finally:
+        release.set()
+        finish_liner(at)
+    at.segmented_control(key='quick_liner_view').set_value('검색·채팅').run()
+    assert any('**다음 일지 ▶**\u200a를' in item.value and '**‘매매·차트’**\u200a를' in item.value for item in at.markdown)
 
 
 def test_api_tab_renders_status_usage_and_failures(tmp_path, monkeypatch):

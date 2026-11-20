@@ -31,3 +31,11 @@ def test_a_written_audit_is_shown_with_its_check_and_download(tmp_path, monkeypa
     assert any('기록 보완 제안' in m.value for m in at.markdown) and not at.warning
     at.selectbox(key='lt_audit_key').set_value('2026-11').run()
     assert at.warning and '템플릿 검사' in at.warning[0].value
+
+
+def test_days_missing_a_report_review_or_nav_are_named():
+    import longterm_audit_view as V
+    rows = [{'날짜': '2026-11-16', '빠짐': '시작 전', '아침 리포트': '없음', '저녁 복기': '없음', '순자산': '없음'},
+            {'날짜': '2026-11-19', '빠짐': '—', '아침 리포트': '없음', '저녁 복기': '없음', '순자산': '있음'},
+            {'날짜': '2026-11-20', '빠짐': '—', '아침 리포트': '있음', '저녁 복기': '있음', '순자산': '있음'}]
+    assert V.gaps(rows) == ['11-19 아침 리포트·저녁 복기']

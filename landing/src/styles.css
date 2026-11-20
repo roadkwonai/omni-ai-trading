@@ -485,6 +485,68 @@ button { font-family: inherit; }
   font-size: 0.8125rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .num.quiet { background: var(--surface-2); color: var(--text); }
 
+/* AI search */
+.search-section {
+  background: linear-gradient(180deg, var(--bg), var(--surface) 60%, var(--bg));
+}
+.search-intro {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, .65fr);
+  align-items: center;
+  gap: clamp(24px, 6vw, 88px);
+}
+.search-intro .kicker { color: var(--accent-text); }
+.search-actions { display: grid; justify-items: start; gap: 12px; margin-top: 12px; }
+.search-actions p { max-width: 42ch; }
+.search-art {
+  justify-self: center;
+  width: min(100%, 344px);
+  background: radial-gradient(ellipse closest-side, var(--accent-tint), transparent);
+}
+.search-demo {
+  margin-top: clamp(32px, 6vw, 64px);
+  padding: clamp(16px, 3vw, 32px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  background: var(--bg);
+  box-shadow: var(--shadow), var(--gloss);
+}
+.search-demo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.search-demo-head .tab-chips { margin-top: 0; }
+.search-demo-head .tab-chip { min-height: 44px; }
+.search-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.95fr) minmax(0, 1fr);
+  gap: clamp(16px, 4vw, 44px);
+  align-items: center;
+}
+.search-panel[hidden] { display: none; }
+.search-panel .zoom { border-radius: var(--r-lg); box-shadow: var(--gloss); }
+.search-example { display: grid; gap: 16px; padding-block: 8px; }
+.search-question {
+  display: flex;
+  gap: 10px;
+  align-items: start;
+  padding: 14px;
+  border-radius: var(--r-md);
+  background: var(--accent-tint);
+}
+.search-question svg { flex-shrink: 0; margin-top: 2px; color: var(--accent-text); }
+.search-example > p + p { padding-top: 14px; border-top: 1px solid var(--line-soft); }
+@media (max-width: 800px) {
+  .search-intro, .search-panel { grid-template-columns: 1fr; }
+  .search-art { width: min(56vw, 224px); }
+  .search-example { padding-block: 0; }
+}
+
 /* ztd-charts cards (Charts.tsx) */
 .chart-wrap { margin-top: 48px; }
 .chart-slot { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg); }

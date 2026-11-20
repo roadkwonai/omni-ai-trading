@@ -181,7 +181,7 @@ def order_bundle(ctx, row):
                             nav=ctx['nav'], cash=ctx['cash'], planned_krw=round(ctx['planned'].get(key, 0)),
                             buy_cap=round(cap), buy_cap_used=round(bought), source='가상 브로커(NH 호가) · 엔진 계산', how='주문 계산에 쓰임')
     parts['research'] = common['research']
-    name = L.asset_name(key)
+    name = L.asset_name(key, row.get('code'))
     label = L.REGIMES.get(plan.get('regime'), (plan.get('regime'),))[0]
     summary = (f"{name} {'매수' if row['side'] == 'BUY' else '매도'} {row['qty']:,}주{unfilled(row)}: {why_text}. {label} 국면, "
                f"목표 비중 {pct(final)}(지금 {pct(weight)})" + (f", 비중을 바꾼 거장: {', '.join(m['label'].split(' · ')[0] for m in moved)}" if moved else '')
@@ -213,7 +213,7 @@ def dca_bundle(ctx, row, cfg, notes, regime):
     parts['trading'] = part('trading', True, f"매수 {row['qty']:,}주 × 주문가 {row['price']:,}원{fill}", amount=cfg.get('amount_krw'),
                             source='가상 브로커(NH 호가)', how='주문 계산에 쓰임')
     parts['research'] = common['research']
-    name = L.asset_name(key)
+    name = L.asset_name(key, row.get('code'))
     return {'summary': f"{name} 적립 매수 {row['qty']:,}주{unfilled(row)}: {who} 규칙, {basis} {pct(want)}로 배분. 거시·뉴스는 참고만 함.",
             'parts': parts, 'masters': [cfg['profile']]}
 
