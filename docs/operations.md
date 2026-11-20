@@ -22,11 +22,11 @@
 | 묶음 | 서비스 | 역할 |
 | --- | --- | --- |
 | Jev 트레이딩 | `shared-etf-paper` | 공유 모의 실행기(`--execute`, 모의 주문). 09:00(개장)부터 매매 |
-| | `trading-day-start` | 09:00 거래일 확인 뒤 실행기·관찰기 시작 |
+| | `trading-day-start` | 08:55 거래일 확인 뒤 실행기·관찰기 준비 |
 | | `shared-etf-learning`, `shared-etf-regime` | 사후 관측·학습·장 마감 복기, 시황 국면 관측 |
 | | `market-movers`, `premarket`, `preflight` | 순위·관심종목, 장전 자료, 장전 사전 점검 |
 | 실계좌 | `live-follow-1` | 실계좌 1 미러(`--execute` 등록, 실주문은 계좌 스위치가 켜졌을 때만) |
-| | `longterm-live-2` | 실계좌 2 장기투자 실행기(계획만) |
+| | `longterm-live-2` | 실계좌 2 장기투자 실행기(저장소 정의에 `--execute` 포함, 계좌별 실주문 조건 확인) |
 | 장기투자 | `vibe-longterm`, `us-ideas` | 장기 엔진(가상 계좌), 미국 종목 아이디어(참고) |
 | 기타 | `nxt-virtual` | [NXT 종가매매](nxt.md) 가상 실행 |
 | | `discord-notify` | [알림](notifications.md)과 [리포트 발행](report-pages.md) |
@@ -52,7 +52,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.<이름>
 
 > [!WARNING]
 > - plist는 반드시 `~/Library/LaunchAgents`에 두고 등록합니다. 다른 폴더에서 등록한 서비스는 재부팅 뒤 올라오지 않습니다.
-> - `--execute`가 붙은 서비스(`shared-etf-paper`, `live-follow-1`)와 실계좌 관련 서비스는 계좌·보호 설정을 확인하고 사용자 승인을 받은 뒤 등록합니다. `longterm-live-2`에 `--execute`를 넣는 것도 별도 승인입니다.
+> - 저장소의 `shared-etf-paper`, `live-follow-1`, `longterm-live-2` 정의에는 `--execute`가 들어 있습니다. 모의·실계좌 주문이 가능한 서비스를 등록하기 전에 사용할 인자와 계좌·보호 설정을 확인하고 사용자 승인을 받습니다.
 
 대시보드 **운영 → 운영 상태**에서 서비스별 실행 여부와 오류를 한국어 이름으로 봅니다.
 
@@ -110,7 +110,7 @@ launchctl kickstart -k gui/$(id -u)/com.vibetrading.shared-etf-dashboard   # 브
 
 | 무엇을 | 방법 | 효과 |
 | --- | --- | --- |
-| 공유 모의 실행기 | `~/.vibe-trading/nhplug/shared-etf-paper/STOP` 파일 | 실행기가 스스로 멈춤. 09:00 거래일 시작도 이 파일이 있으면 띄우지 않음 |
+| 공유 모의 실행기 | `~/.vibe-trading/nhplug/shared-etf-paper/STOP` 파일 | 미확인 주문을 대조한 뒤 실행기를 종료. 08:55 거래일 준비 때도 파일이 있으면 띄우지 않음 |
 | 장기 엔진 | `~/.vibe-trading/nhplug/vibe-longterm/STOP` 파일 | 그날 실행을 끝냄 |
 | 실주문 전체 | `~/.vibe-trading/live/HALT`(전체) 또는 `live/<브로커>/HALT` | 모든 실주문 직전에 확인하는 차단 스위치 |
 | Jev·장기투자 운영 | 대시보드 **계좌·자동매매 → 운영 엔진** (둘 다·Jev만·장기투자만·끔) | Jev를 끄면 새 진입·추가 매수만 멈추고 보유 손절·익절·정리는 계속. 장기투자를 끄면 다음 확인 때 판단·주문 없이 끝남 |
@@ -161,7 +161,7 @@ chmod 600 ~/.vibe-trading/nhplug/shared-etf-paper/exit-requests.json
 | `shared-etf-paper/events.jsonl` | 판단·주문·체결·대기 사유 이벤트 |
 | `shared-etf-paper/orders.sqlite3` | 공유 모의 주문·체결 원장 |
 | `shared-etf-paper/trading-ledger.sqlite3` | 조회용 이벤트 원장 |
-| `shared-etf-paper/trading-day-start.jsonl` | 매일 09:00 시작 결정 |
+| `shared-etf-paper/trading-day-start.jsonl` | 평일 08:55 거래일 준비 기록 |
 | `shared-etf-paper/restarts.jsonl` | 실행기 재시작 이력 |
 | `live-follow.jsonl`, `longterm-live.jsonl` | 실계좌 미러·장기투자 실계좌 회차 기록 |
 | `live-balance-<계좌 키>.jsonl` | 실계좌 잔고 기록(5분마다, 계좌번호 없음) |

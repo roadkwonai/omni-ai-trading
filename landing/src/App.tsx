@@ -10,7 +10,7 @@ import {
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
   AI_LOOP, AI_PAID, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
-  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, TRAPS, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEO,
+  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_FLOW, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, RETIREMENT_POVERTY, TRAPS, WHY_CASES, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEO,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
 // Charts load in their own chunk; the placeholder keeps the height so nothing jumps.
@@ -135,20 +135,20 @@ function Hero() {
   return (
     <section className="hero" aria-labelledby="hero-title">
       <div className="container hero-inner">
-        <p className="kicker hero-step" style={css({ '--d': 0 })}>Claude Code·Codex에서 대화로 운영하는 AI 트레이딩 · 오픈소스</p>
+        <p className="kicker hero-step" style={css({ '--d': 0 })}>모의매매부터 장기투자까지 · 오픈소스 AI 투자 도구</p>
         <h1 id="hero-title" className="heading-1 hero-title hero-step" style={css({ '--d': 1 })}>
-          손절을 망설이는 순간에도<br />AI는 원칙대로 움직입니다
+          오늘의 시장을 읽고<br />노후를 준비합니다
         </h1>
         <p className="lead hero-sub hero-step" style={css({ '--d': 2 })}>
-          투자에서 지는 이유는 정보가 아니라 <mark className="hl">망설임</mark>입니다. AI 트레이더 Jev는 <strong className="em">수급과 시황으로 주도주를 찾아 1분마다 판단</strong>하고,
-          {' '}<strong className="em">거장의 원칙은 장기 자산을 천천히 키웁니다.</strong> Claude Code나 Codex에 설치해 <mark className="hl">대화로 운영하고, 예약 작업이 매일 점검과 리포트를 맡습니다.</mark>
+          Jev가 차트·뉴스·수급을 함께 읽습니다. <strong className="em">모의매매로 왜 사고 왜 기다리는지</strong> 배울 수 있습니다.
+          {' '}장기투자에서는 거장의 원칙을 참고해 <strong className="em">ETF 적립과 비중 조정 계획</strong>을 세우고 가상 장부에서 비교합니다.
         </p>
         <div className="hero-cta hero-step" style={css({ '--d': 3 })}>
-          <a className="btn btn-primary button-md" href={START}><GithubLogo size={18} aria-hidden />GitHub에서 시작하기</a>
-          <a className="more button-md" href={doc('README.md')}>가이드 문서 보기 <ArrowRight size={16} aria-hidden /></a>
+          <a className="btn btn-primary button-md" href="#jev"><Lightning size={18} aria-hidden />장중 모의매매 살펴보기</a>
+          <a className="btn btn-ghost button-md" href="#longterm"><Compass size={18} aria-hidden />장기투자 살펴보기</a>
         </div>
         <p className="proof small hero-step" style={css({ '--d': 3 })}>
-          <ShieldCheck size={16} aria-hidden /><span>기본은 모의계좌</span><span>실계좌 하루 손실 한도 2만 원</span><span>자동 테스트 1,998개</span>
+          <ShieldCheck size={16} aria-hidden /><span>모의·가상으로 먼저 확인</span><span>실주문은 별도 승인과 주문 보호 적용</span>
         </p>
         <p className="hero-notice hero-step" style={css({ '--d': 4 })}>
           <Warning size={16} aria-hidden />
@@ -239,41 +239,64 @@ function Why() {
   return (
     <section id="why" className="section band why" aria-labelledby="why-title">
       <div className="container">
-        <div className="head-split">
         <div className="head">
-          <p className="kicker">왜 AI로 투자해야 할까요</p>
-          <h2 id="why-title" className="heading-2">대부분의 손실은 분석이 아니라<br />망설임에서 시작됩니다</h2>
+          <h2 id="why-title" className="heading-2">노후를 준비할 기회가 투자 경험에 달리지 않도록</h2>
           <p className="lead">
-            차트를 볼 줄 몰라서가 아닙니다. <strong className="em">손실 앞에서 머뭇거리고 이익 앞에서 조급해지는 건</strong>, 사람이라서 그렇습니다.
-            연구 결과도 이런 실수가 수익을 깎아 먹는다는 것을 보여 줍니다.
+            처음 투자하면 어떤 정보를 봐야 할지 막막하고, 본업이 있으면 시장을 계속 지켜보기 어렵습니다.
+            Omni를 만든 이유는 누구나 시장을 읽는 법을 익히고, 오래 운용할 자금의 적립과 비중을 관리해
+            더 여유로운 노후를 준비하도록 돕기 위해서입니다.
           </p>
         </div>
-        <img className="art art-md" src={img('mascot-why')} alt="" width="320" height="320" loading="lazy" />
+        <div className="retirement-grid">
+          <figure className="why-stat poverty-chart" aria-labelledby="poverty-title">
+            <figcaption id="poverty-title" className="heading-3">66세 이상 상대적 소득 빈곤율</figcaption>
+            <ul className="poverty-bars">
+              {RETIREMENT_POVERTY.rows.map(({ label, rate }) => (
+                <li key={label}>
+                  <span>{label}</span>
+                  <strong className="tabular">{rate.toFixed(1)}%</strong>
+                  <div className="poverty-track" aria-hidden="true"><span style={{ width: `${rate / Math.max(...RETIREMENT_POVERTY.scale) * 100}%` }} /></div>
+                </li>
+              ))}
+            </ul>
+            <div className="poverty-scale caption muted tabular" aria-hidden="true">
+              {RETIREMENT_POVERTY.scale.map((tick) => <span key={tick}>{tick}%</span>)}
+            </div>
+            <p className="small muted">가구 규모를 반영한 가처분소득이 각국 중위값의 절반 미만인 비율입니다.</p>
+            <a className="caption why-src" href={RETIREMENT_POVERTY.source} target="_blank" rel="noopener noreferrer">OECD 연금 지표 2025 · 표 7.2 <ArrowUpRight size={12} aria-hidden /></a>
+          </figure>
+          <img className="retirement-photo" src={img('retirement-planning')} alt="식탁에 앉아 노트에 함께 계획을 적는 두 사람" width="1120" height="840" loading="lazy" />
         </div>
-        <ul className="why-stats" data-reveal>
+        <ul className="why-stats">
           {WHY_STATS.map((s) => (
-            <li key={s.num} className="why-stat">
-              <strong className="why-num">{s.num}</strong>
-              <span className="small">{rich(s.label)}</span>
-              <a className="caption muted why-src" href={s.href} target="_blank" rel="noopener noreferrer">{s.source}<ArrowUpRight size={12} aria-hidden /></a>
+            <li key={s.title} className="why-stat">
+              <strong className="why-num tabular">{s.num}</strong>
+              <h3 className="title-1">{s.title}</h3>
+              <p className="small muted">{s.label}</p>
+              <a className="caption why-src" href={s.href} target="_blank" rel="noopener noreferrer">{s.source}<ArrowUpRight size={12} aria-hidden /></a>
             </li>
           ))}
         </ul>
-        <h3 className="title-1 traps-title">사람이 빠지는 여섯 가지 함정, Omni는 이렇게 막습니다</h3>
-        <ol className="traps" data-reveal>
-          {TRAPS.map((t, i) => (
+        <h3 className="heading-3 traps-title">개인 투자자가 어려움을 겪는 순간</h3>
+        <ul className="traps">
+          {TRAPS.map((t) => (
             <li key={t.trap} className="trap">
-              <span className="trap-no" aria-hidden>{String(i + 1).padStart(2, '0')}</span>
               <h4 className="title-2">{t.trap}</h4>
-              <p className="small muted trap-human">{rich(t.human)}</p>
-              <p className="small trap-fix"><ShieldCheck size={16} aria-hidden /><span>{rich(t.fix)}</span></p>
+              <p className="small muted">{t.human}</p>
+              <p className="small trap-fix"><ShieldCheck size={16} aria-hidden /><span>{t.fix}</span></p>
             </li>
           ))}
-        </ol>
-        <p className="why-close heading-4">
-          사람이 약해서가 아니라, 사람이라서 그렇습니다.<br />
-          <span className="accent-text">그래서 원칙을 지키는 일을 AI에게 맡겼습니다.</span>
-        </p>
+        </ul>
+        <ul className="why-cases">
+          {WHY_CASES.map((item) => (
+            <li key={item.title} className="why-stat">
+              <p className="kicker">{item.kind}</p>
+              <h3 className="heading-4">{item.title}</h3>
+              <p className="small muted">{item.body}</p>
+              <a className="caption why-src" href={item.href} target="_blank" rel="noopener noreferrer">{item.label}<ArrowUpRight size={12} aria-hidden /></a>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   )
@@ -468,7 +491,10 @@ function Jev() {
           ))}
         </ul>
         <p className="small muted regime-note">지정학·해외 이슈는 별도 규칙이 아니라 90분 뉴스, 해외 선물·원자재·환율 입력으로 Jev 판단에 들어갑니다.</p>
-        <p className="more-row"><a className="more button-sm" href={doc('strategy.md')}>매매 전략 가이드 <ArrowUpRight size={16} aria-hidden /></a></p>
+        <p className="more-row">
+          <a className="more button-sm" href={`${doc('getting-started.md')}#7-첫-모의-회차-확인`}>첫 모의 회차 가이드 <ArrowUpRight size={16} aria-hidden /></a>
+          <a className="more button-sm" href={doc('strategy.md')}>매매 전략 가이드 <ArrowUpRight size={16} aria-hidden /></a>
+        </p>
       </div>
     </section>
   )
@@ -486,15 +512,27 @@ function Longterm() {
         <div className="head-split">
           <div className="head">
             <p className="kicker">거장의 안목, 장기투자</p>
-            <h2 id="longterm-title" className="heading-2">시장의 계절을 읽고, 그 계절의 거장 원칙으로 운용합니다</h2>
+            <h2 id="longterm-title" className="heading-2">시장에 맞춰 적립하고, 계획한 비중을 지킵니다</h2>
             <p className="lead">
-              <mark className="hl">빠르지는 않지만, 천천히 부자가 되는 길</mark>입니다. 시장이 무너질 때 겁먹지 않고 과열될 때 들뜨지 않도록 거장들의 원칙을 미리 정해 둡니다.
-              국내 상장 미국 지수·테마 ETF 6종을 코어 60 · 위성 25 · 저수지 15로 담습니다. 매일 아침 나스닥100 낙폭, 200일선, VIX로
-              시장의 계절을 정하고, 켜 둔 거장 전략이 목표 비중을 조정합니다. 거장이 직접 운용하는 것이 아니라 공개된 원칙을 본뜬 규칙입니다.
+              하락장에 얼마나 더 모을지, 오른 자산을 언제 줄일지 기준을 미리 정합니다. 달리오의 비중 관리나 여운봉의 단계 매수처럼
+              공개된 투자 원칙을 규칙으로 옮겼습니다. 장기 엔진은 나스닥100 낙폭, 200일선, 변동성 지표를 살피고 선택한 계좌 전략에 따라
+              국내 상장 미국 ETF의 매수·대기·비중 조정 계획을 세웁니다.
             </p>
           </div>
           <img className="art art-md" src={img('mascot-masters')} alt="" width="280" height="280" loading="lazy" />
         </div>
+        <figure className="longterm-flow" aria-labelledby="longterm-flow-title">
+          <figcaption id="longterm-flow-title" className="heading-3">적립에서 복기까지</figcaption>
+          <img src={img('longterm-workflow')} alt="" width="1200" height="383" loading="lazy" />
+          <ol>
+            {LONGTERM_FLOW.map((step) => (
+              <li key={step.title}>
+                <h3 className="title-1">{step.title}</h3>
+                <p className="small muted">{step.body}</p>
+              </li>
+            ))}
+          </ol>
+        </figure>
         <div className="regimes" role="group" aria-label="시장의 계절 고르기. 위험이 큰 순서입니다">
           {REGIMES.map((r, i) => (
             <button key={r.name} type="button" className="regime" aria-pressed={i === pick} onClick={() => setPick(i)} style={css({ '--heat': HEAT[i] })}>
@@ -542,7 +580,7 @@ function Dca() {
         <div className="head-split">
           <div className="head">
             <p className="kicker">적립식 투자</p>
-            <h2 id="dca-title" className="heading-2">매달 넣는 돈을 거장의 리듬으로 꾸준히</h2>
+            <h2 id="dca-title" className="heading-2">언제, 얼마나 적립할지 미리 정합니다</h2>
             <p className="lead">
               새로 넣는 적립금은 적립식이, 계좌에 있는 운용금은 계좌 전략이 맡습니다. 언제, 얼마나, 무엇을, 몇 시에 살지를 항목마다
               거장에게 맡기거나 직접 정합니다. 적립식은 사기만 하고, 파는 일은 거장 전략의 몫입니다.
@@ -574,6 +612,10 @@ function Dca() {
             <p className="caption muted" style={{ marginTop: 16 }}>장기투자 차트에는 다음 적립 매수선과 여운봉 매매법 단계가 함께 그려집니다.</p>
           </div>
         </div>
+        <p className="dca-funding small">
+          <strong>입금형 적립식</strong>은 장기투자 실계좌에서 설정 이력으로 확인한 운용금 증가분을 기준으로 합니다.
+          {' '}지정한 몫을 여러 주에 나눠 매수할 계획을 세우고, 계좌의 현금과 주문 보호 기준을 확인합니다.
+        </p>
         <p className="more-row"><a className="more button-sm" href={doc('longterm-dca.md')}>적립식 가이드 <ArrowUpRight size={16} aria-hidden /></a></p>
       </div>
     </section>
@@ -587,7 +629,7 @@ function Styles() {
         <div className="head">
           <p className="kicker">내 투자 스타일</p>
           <h2 id="styles-title" className="heading-2">투자 성향에 맞춰 고르고, 기록으로 키웁니다</h2>
-          <p className="lead">빠른 트레이딩, 천천히 부자가 되는 장기투자, 또는 둘 다. <strong className="em">시간이 지날수록 내 기록과 선택이 쌓여 나에게 맞는 시스템</strong>이 됩니다.</p>
+          <p className="lead">장중 매매를 연습하거나 장기 적립 계획을 세울 수 있습니다. 모의계좌와 가상 장부에서 각각의 판단과 결과를 보고 나에게 맞는 방식을 고릅니다.</p>
         </div>
         <img className="art-visual styles-visual" src={img('mascot-styles')} alt="" width="1200" height="406" loading="lazy" />
         <ul className="styles" data-reveal>
@@ -679,7 +721,6 @@ function AiOps() {
             <div className="chat-head">
               <img src={img('mascot-ai-chat')} alt="" width="160" height="160" loading="lazy" />
               <div><p className="title-2">Omni 운영 채팅</p><p className="caption muted">Claude Code · Codex</p></div>
-              <span className="dot" aria-hidden />
             </div>
             <ul className="chat-body">
               {CHAT.map((c, i) => (
@@ -856,8 +897,8 @@ function Safety() {
         <div className="head-split">
           <div className="head">
             <p className="kicker">안전장치와 대시보드</p>
-            <h2 id="safety-title" className="heading-2">실계좌 주문은 세 단계를 거쳐야 실행됩니다</h2>
-            <p className="lead">처음에는 계획만 기록하고, 가상으로 사고팔아 본 뒤, 계좌마다 스위치와 확인 문구를 거쳐야 실제 주문이 실행됩니다.</p>
+            <h2 id="safety-title" className="heading-2">관찰부터 시작하고, 실주문은 승인합니다</h2>
+            <p className="lead">계획과 가상 체결을 먼저 살펴볼 수 있습니다. 실계좌 주문은 계좌별 승인과 보호 조건을 거칩니다. 시세 급변이나 미체결이 생기면 실제 손실은 손실 차단 기준을 넘을 수 있습니다.</p>
           </div>
           <img className="art art-sm" src={img('mascot-safety-v2')} alt="" width="360" height="360" loading="lazy" />
         </div>
@@ -874,8 +915,8 @@ function Safety() {
           <div>
             <h3 className="heading-4">AI도 틀립니다. 그래서 매일 검증합니다</h3>
             <p className="small muted">
-              첫 주(11/11~11/17, 공유 모의계좌) Jev 진입 신호를 신뢰도 구간별로 5·15·30분 뒤 결과와 비교해 보니, <mark className="hl">신뢰도가 높을수록 오히려 덜 맞았습니다.</mark>{' '}
-              그래서 <strong className="em">신뢰도를 수익 확률로 쓰지 않고</strong>, 손절과 하루 손실 한도를 늘 함께 두고, 장 마감마다 구간별 적중률을 다시 확인합니다.
+              공유 모의계좌 첫 주(11/11~11/17)에 관찰한 Jev 진입 신호는 높은 신뢰도 구간의 적중률이 더 낮았습니다.
+              {' '}장 마감 뒤 신호와 5·15·30분 뒤 가격 흐름을 대조합니다. 화면의 신뢰도는 후보 판단에 부여한 값이며 적중률과 수익률은 따로 확인합니다.
             </p>
           </div>
           <ul className="calib-bars" aria-label="신뢰도 구간별 적중률">
@@ -968,7 +1009,10 @@ function Start() {
       <div className="container">
         <div className="head">
           <p className="kicker">시작하기</p>
-          <h2 id="start-title" className="heading-2">세 단계로 모의매매까지 준비합니다</h2>
+          <h2 id="start-title" className="heading-2">설치하고 시세 연결부터 확인하세요</h2>
+          <p className="small muted">
+            공개 v0.1.3에는 Jev 모의 실행에 필요한 Python 모듈이 빠져 있습니다. 해당 버전으로 시작한다면 <a className="more" href={doc('getting-started.md')}>설치 가이드</a>의 시세 연결 확인부터 진행하세요.
+          </p>
         </div>
         <div className="start">
           <ol className="steps-v code-steps">
@@ -1078,8 +1122,8 @@ export default function App() {
       <main id="main">
         <span id="top" />
         <Hero />
-        <Video />
         <Why />
+        <Video />
         <Principle />
         <AiOps />
         <Art />

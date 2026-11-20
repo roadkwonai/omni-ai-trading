@@ -53,8 +53,8 @@ gantt
 | 08:50 | launchd | `market-movers` | 순위·관심종목 계산(09:00 개장을 기다렸다가 15:05까지) |
 | 08:50 | Claude | `longterm-strategy-daily` | 장기투자 일일 전략 리포트 |
 | 08:53 | launchd | `preflight` | 장전 사전 점검 2차 |
+| 08:55 | launchd | `trading-day-start` | 거래일 확인 뒤 실행기·관찰기 준비 |
 | 08:58 | launchd | `live-follow-1` | 실계좌 1 미러 실행기 |
-| 09:00 | launchd | `trading-day-start` | 거래일 확인 뒤 실행기·관찰기 시작 |
 | 09:20\~15:20 매시 20분 | Claude | `intraday-audit-hourly` | 장중 매매·차단 감사 |
 | 09:35 | launchd | `longterm-live-2` | 실계좌 2 장기투자 실행기(09:40\~14:30 주문 창, 14:40까지 미체결 정리) |
 | 11:30·13:30·14:30 | Claude | `trading-intraday-report` | 장중 진행 보고(대화) |
@@ -90,15 +90,15 @@ gantt
 | `vibe-longterm` | 장기투자 실행기 | `vibe_longterm.py --run` | 평일 08:40 | `vibe-longterm` |
 | `market-movers` | 순위·관심종목 계산기 | `market_movers.py` | 평일 08:50 | `shared-etf-paper` |
 | `live-follow-1` | 실계좌 1 미러 실행기 | `nh_live_follow.py --execute --account live-1` | 평일 08:58 | `live-follow` |
-| `trading-day-start` | 거래일 시작 | `trading_day_start.py` | 평일 09:00 | `shared-etf-paper` |
-| `longterm-live-2` | 실계좌 2 장기투자 실행기 | `longterm_live.py --account live-2` (`--execute` 없음 = 계획만) | 평일 09:35 | `longterm-live` |
+| `trading-day-start` | 거래일 준비 | `trading_day_start.py` | 평일 08:55 | `shared-etf-paper` |
+| `longterm-live-2` | 실계좌 2 장기투자 실행기 | `longterm_live.py --execute --account live-2` | 평일 09:35 | `longterm-live` |
 | `trading-backup` | 거래 데이터 백업 | `backup_trading_data.py` | 평일 15:50 | `shared-etf-paper` |
 | `state-sync` | 상태 백업 | `state_sync.py export` | 평일 16:55 | `shared-etf-paper` |
 | `exit-replay` | 청산 재현 | `exit_replay.py` | 금 16:10 | `shared-etf-paper` |
 | `us-ideas` | 미국 종목 아이디어 | `us_ideas.py --scheduled` (참고 정보, 주문 없음) | 금 07:00 · 07:30 | `vibe-longterm` |
 
 > [!IMPORTANT]
-> `live-follow-1`은 `--execute`로 등록돼 있지만 실제 주문은 계좌별 실주문 스위치(기본 꺼짐)·자동매매 스위치·HALT 꺼짐일 때만 실행됩니다. 그 밖에는 계획만 기록합니다. `longterm-live-2`는 `--execute`가 없어 계획만 냅니다. 실주문 전환은 별도 사용자 승인입니다. [안전장치](safety.md)를 보세요.
+> 저장소가 생성하는 `live-follow-1`과 `longterm-live-2` 정의에는 `--execute`가 들어 있습니다. 실제 설치에 등록된 인자는 다를 수 있습니다. 실주문은 실행 인자 외에도 계좌별 자동매매·실주문 스위치, HALT 상태와 주문 보호 조건을 확인합니다. [실주문이 나가는 조건](live-accounts.md#실주문이-나가는-조건)
 
 **퇴역한 서비스** (2026-11-17, plist는 `~/.vibe-trading/nhplug/retired-launchd-2026-11-17/`에 보관): `vibe-advisor`, `vibe-paper`, `vibe-fast-exit-observer`, `vibe-event-advisor`, `vibe-event-replay`, `live-follow-2`, `jev-virtual`. 다시 쓰려면 별도 승인과 재등록이 필요합니다.
 
@@ -178,11 +178,11 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 
 ## 거래일 시작
 
-launchd `trading-day-start`(평일 09:00, `scripts/trading_day_start.py`)가 그날 실행기를 띄웁니다.
+launchd `trading-day-start`(평일 08:55, `scripts/trading_day_start.py`)가 그날 실행기를 준비합니다. 주문 판단은 개장부터 시작합니다.
 
 ```mermaid
 flowchart LR
-  A["09:00"] --> B{"KRX 거래일?"}
+  A["08:55"] --> B{"KRX 거래일?"}
   B -- 아니오 --> S1["skip_closed"]
   B -- 예 --> C{"STOP 파일?"}
   C -- 있음 --> S2["skip_stop_file"]

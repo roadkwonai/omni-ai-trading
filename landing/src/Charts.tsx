@@ -21,7 +21,8 @@ const SCHEDULE = [
   point('사전 점검', '08:20', '장전'), point('사전 점검', '08:53', '장전'),
   point('장전 상세 분석', '08:31', '장전'),
   point('장기 판단·리포트', '08:45', '장기투자'), point('장기 판단·리포트', '08:50', '장기투자'),
-  { label: 'Jev 실시간 트레이딩', start: at('09:00'), end: at('15:20'), group: '장중' },
+  point('Jev 실행기 준비', '08:55', '장전'),
+  { label: 'Jev 실시간 트레이딩', start: at('09:00'), end: at('15:00'), group: '장중' },
   ...['09:20', '10:20', '11:20', '12:20', '13:20', '14:20', '15:20'].map((t) => point('장중 감사', t, '장중')),
   { label: '장기 계좌 주문 창', start: at('09:40'), end: at('14:30'), group: '장기투자' },
   point('마감 요약', '15:40', '마감'), point('개선안·매매일지', '16:15', '마감'), point('개선안·매매일지', '16:40', '마감'),
@@ -32,7 +33,7 @@ export function ScheduleChart() {
   return (
     <Charts>
       <ChartCard title="평일 자동 일정" subtitle="한국 시간, 기본 설정 기준. 점은 한 번 도는 작업입니다" accent="Jev"
-        takeaway="장중 6시간 20분은 Jev가 1분마다 판단하고, 감사는 매시 20분에 돌아갑니다">
+        takeaway="Jev는 개장부터 자료와 진입 조건을 확인합니다. 장중 감사는 매시 20분에 돌아갑니다.">
         <Timeline data={SCHEDULE} highlight="Jev 실시간 트레이딩" height={330} xType="date"
           referenceLines={[{ x: at('09:00'), label: '개장' }, { x: at('15:30'), label: '장 마감' }]}
           ariaLabel="평일 자동 일정 타임라인" />

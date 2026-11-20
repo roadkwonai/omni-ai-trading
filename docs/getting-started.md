@@ -20,7 +20,7 @@ flowchart LR
   C --> D["NH MCP 설치·패치·연결"]
   D --> E["대시보드로 계좌·한도 확인"]
   E --> F["서비스 정의 만들기·등록"]
-  F --> G["평일 09:00 거래일 시작<br/>개장부터 주문"]
+  F --> G["평일 08:55 거래일 준비<br/>개장부터 보호 조건 확인"]
 ```
 
 > [!NOTE]
@@ -54,6 +54,10 @@ python3.11 -m venv .venv
 ```
 
 `pip install -e .`는 원본 Vibe-Trading의 의존성을, `requirements-nh.txt`는 대시보드(Streamlit)와 웹소켓 모니터 의존성을 설치합니다.
+
+### 공개 v0.1.3 설치 후 확인
+
+공개 v0.1.3에는 Jev 모의 실행기가 간접적으로 참조하는 `strategies.kr_swing_v5.signal_engine`이 빠져 있습니다. 공개 소스만 설치하면 Jev 모의 실행과 이를 참조하는 일부 미러·NXT 검증이 `ModuleNotFoundError`에서 중단됩니다. 이 오류가 나면 해당 서비스 등록을 보류하고 NH 시세 연결부터 확인하세요. [NH 공식 MCP 연결](#4-nh-공식-mcp-연결) · [실행기의 시세 함수 참조](../scripts/nh_paper_isolated.py#L30) · [전략 모듈 참조](../scripts/kr_swing_v5_forward.py#L24)
 
 ## 3. 키 설정 (.env)
 
@@ -183,12 +187,12 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
 | 1 | `shared-etf-dashboard` | 로그인 시 | 대시보드 |
 | 2 | `shared-etf-regime`, `market-movers`, `premarket`, `preflight` | 로그인 시 / 평일 08:50 / 평일 07:40\~09:10 / 평일 08:20·08:53 | 국면 관측, 순위 후보, 장전 자료, 장전 사전 점검(모두 읽기 전용) |
 | 3 | `shared-etf-learning`, `trading-backup`, `state-sync`, `discord-notify` | 로그인 시 / 평일 15:50 / 평일 16:55 / 로그인 시 | 학습 관찰·일지, 백업, 설정 정리본, 알림 |
-| 4 | `shared-etf-paper`, `trading-day-start` | 로그인 시 / 평일 09:00 | 공유 모의 실행기(`--execute` 모의 주문)와 거래일 시작 |
+| 4 | `shared-etf-paper`, `trading-day-start` | 로그인 시 / 평일 08:55 | 공유 모의 실행기(`--execute` 모의 주문)와 거래일 준비 |
 | 5 | `vibe-longterm`, `us-ideas` | 평일 08:40 / 금 07:00·07:30 | 장기 엔진(dry-run), 미국 종목 아이디어 |
 | 별도 승인 | `live-follow-1`, `longterm-live-2` | 평일 08:58 / 평일 09:35 | 실계좌 미러, 장기투자 실계좌 |
 
 > [!WARNING]
-> `shared-etf-paper`는 `--execute`로 **모의 주문**을 냅니다. 계좌 한도와 [안전장치](safety.md)를 먼저 확인하세요. 실계좌 서비스(`live-follow-*`, `longterm-live-*`), 그 `--execute`, 계좌별 실주문 스위치는 사용자 승인 뒤에만 켭니다. 스위치가 꺼져 있으면 실계좌 실행기는 계획만 기록합니다.
+> `shared-etf-paper`는 `--execute`로 **모의 주문**을 냅니다. 계좌 한도와 [안전장치](safety.md)를 먼저 확인하세요. 이 저장소가 생성하는 `live-follow-1`과 `longterm-live-2` 정의에는 모두 `--execute`가 들어 있습니다. 등록 전 실제 사용할 정의와 계좌 설정을 확인하고, 실계좌 서비스 등록과 실주문 전환에는 사용자 승인이 필요합니다. [실주문이 나가는 조건](live-accounts.md#실주문이-나가는-조건)
 
 서비스 일정 전체와 재시작 절차는 [운영 가이드](operations.md), Claude 예약 작업은 [자동 작업](automation.md)에 있습니다.
 
@@ -200,8 +204,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
 | 08:40 | 장기 엔진 시작 |
 | 08:50 | 순위 후보 수집 |
 | 08:53 | 장전 사전 점검 2차 |
-| 09:00 | 거래일 시작, 실행기 기동, 주문 가능(이월 포지션 개장 판단) |
-| 09:08 무렵 | 완료 분봉 6개가 쌓여 첫 진입 판단 |
+| 08:55 | 거래일 확인, 실행기와 관찰기 준비 |
+| 개장부터(기본 09:00) | 이월 보유와 신규 진입 판단. 자료와 보호 조건을 충족하면 주문 |
 
 1. **장전 사전 점검**을 손으로 돌려 봅니다. 읽기 전용이고, `--no-send`면 Discord로 보내지 않습니다.
 
@@ -209,9 +213,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
    PYTHONPATH=agent:scripts .venv/bin/python scripts/preflight.py --no-send
    ```
 
-2. 평일 09:00에 `trading-day-start`가 휴장·STOP·중복 실행을 확인하고 실행기를 띄웁니다. 30초 뒤 살아 있지 않으면 최대 5번 다시 띄웁니다.
+2. 평일 08:55에 `trading-day-start`가 휴장·STOP·중복 실행을 확인하고 실행기를 준비합니다. 30초 뒤에도 실행기가 시작되지 않으면 최대 5번 다시 띄웁니다.
 3. 대시보드 **운영 → 운영 상태**에 모의 실행기 `실행 중`이 뜨고, **트레이딩 현황**에 Jev 의견과 대기 사유가 쌓이는지 봅니다. 기록은 `~/.vibe-trading/nhplug/shared-etf-paper/events.jsonl`에 남습니다.
-4. 주문은 개장(09:00)부터 실행됩니다. 진입 판단은 완료 분봉 6개가 필요해 09:08 무렵부터입니다.
+4. 개장 첫 8분은 당일 완료 분봉이 부족하면 전 거래일 마감 분봉이나 확인 가능한 당일 NXT 프리마켓 분봉으로 보완합니다. 이때도 자료 신선도와 보호 조건을 통과해야 주문합니다. [장전 분석과 개장 준비](strategy.md#장전-분석과-개장-준비)
 
 처음 며칠은 매수가 없어도 정상일 수 있습니다. 진입 조건이 모두 맞아야 사기 때문입니다. 대기 사유는 **운영 → 운영 상태 → 모의 실행기 하루 요약**과 [FAQ](faq.md#실행기가-매수를-안-합니다)에서 확인합니다.
 
