@@ -30,6 +30,9 @@ LABELS = {'now_rule': '지금 규칙 (장중 하락 멈춤 · +1.5% · 저가−
           'v2_plan': '선별 v2 낙주매매 (절반 → 다음 날 2차 · +8% 절반 · +15% · 3일 · 평균가−2% 손절)'}
 
 
+V2_RULE_VERSION = 'v2-avg-stop-close-replay-2026-11-23'
+
+
 def run_v2(daily, i, kind, settings=None):
     """The paper runners' 선별 v2 plan on daily bars: half at the close of day i, the other half at the next close when
     it closed lower and above the stop; half sold at +half_tp of the average, the rest at +tp, otherwise at the close
@@ -40,7 +43,7 @@ def run_v2(daily, i, kind, settings=None):
     v = {**DEFAULTS, **(settings or {})}
     hold, stop_pct = int(v['oversold_v2_hold_days']), v['oversold_v2_stop_pct']
     if i + hold >= len(daily):
-        return {'pending': True}
+        return {'pending': True, 'rule_version': V2_RULE_VERSION, 'settings': {k: v[k] for k in v if k.startswith('oversold_v2_')}}
     first = daily[i][4]
     stop = first * (1 - stop_pct / 100)
     lots = [(first, 0.5 if v['oversold_v2_add_on'] else 1.0)]
@@ -67,7 +70,8 @@ def run_v2(daily, i, kind, settings=None):
         j = i + hold
     if sold < qty:
         value += (qty - sold) * daily[j][4]
-    return {**_result(value / qty, average, why, j - i, worst, best, COST.get(kind, 0.2)), 'added': len(lots) == 2}
+    return {**_result(value / qty, average, why, j - i, worst, best, COST.get(kind, 0.2)), 'added': len(lots) == 2,
+            'rule_version': V2_RULE_VERSION, 'settings': {k: v[k] for k in v if k.startswith('oversold_v2_')}}
 
 
 def run(daily, i, kind, atr_pct=None, name='close_5d'):

@@ -1,8 +1,9 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import nh_paper_isolated as p
@@ -56,6 +57,22 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(oversold.atr_pct(rows), 4.0)
         self.assertIsNone(oversold.atr_pct(rows[:5]))
 
+    def test_failed_daily_atr_retries_after_five_minutes_and_keeps_success_for_the_day(self):
+        reader = Mock()
+        reader.call_tool.side_effect = [TimeoutError, {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_1': []}},
+                                        {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_1': [
+                                            {'bsop_date': f'202610{d:02d}', 'stck_hgpr': 102, 'stck_lwpr': 98, 'stck_prpr': 100}
+                                            for d in range(1, 25)]}}]
+        with patch.dict(oversold._ATR, {}, clear=True):
+            self.assertIsNone(oversold.daily_atr(reader, '005930', NOW))
+            self.assertIsNone(oversold.daily_atr(reader, '005930', NOW + timedelta(minutes=4, seconds=59)))
+            self.assertEqual(reader.call_tool.call_count, 1)
+            self.assertIsNone(oversold.daily_atr(reader, '005930', NOW + timedelta(minutes=5)))
+            self.assertEqual(reader.call_tool.call_count, 2)
+            self.assertEqual(oversold.daily_atr(reader, '005930', NOW + timedelta(minutes=10)), 4.0)
+            self.assertEqual(oversold.daily_atr(reader, '005930', NOW + timedelta(hours=2)), 4.0)
+            self.assertEqual(reader.call_tool.call_count, 3)
+
     def test_universe_file_and_history(self):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(oversold.universe(d), oversold.DEFAULT_UNIVERSE)
@@ -77,6 +94,17 @@ class RunnerTests(unittest.TestCase):
 
     def test_trend_upgrade_keeps_a_rebound_plan(self):
         self.assertIn('oversold', p.OWN_EXIT_PROFILES)  # the strong-tape upgrade skips rebound plans
+
+    def test_runner_records_unknown_atr_once_even_without_trigger_then_records_recovery(self):
+        unknown = {'code': '005930', 'atr_status': 'unknown', 'triggered': False, 'need_pct': 6.0, 'drop_pct': -4.0}
+        confirmed = {**unknown, 'atr_status': 'confirmed', 'need_pct': 8.0}
+        with patch.object(p, '_OVERSOLD_LOGGED', set()), patch.object(oversold, 'universe', return_value={'005930': '삼성전자'}), \
+                patch.object(oversold, 'scan', side_effect=[[unknown], [unknown], [confirmed]]), \
+                patch.object(p, 'journal_event') as log:
+            for _ in range(3):
+                self.assertIsNone(p.oversold_entry(None, None, {}, {}, [], None, {'jev': True}, 'test'))
+        self.assertEqual([c.args[1] for c in log.call_args_list], ['oversold_atr_status', 'oversold_atr_status'])
+        self.assertEqual([c.kwargs['status'] for c in log.call_args_list], ['unknown', 'confirmed'])
 
     def test_plan_size_and_carry(self):
         plan = p.new_plan('005930', 'oversold', target=1.5, basis={'stop_pct': 0.94})
@@ -184,6 +212,73 @@ class V2GateTests(unittest.TestCase):
         r = rows[0]
         self.assertEqual((r['stop_price'], r['hold_days'], r['rel_drop'], r['half_tp_pct'], r['target_pct']), (90, 3, -2.0, 8.0, 15.0))  # price 92 x 0.98 (stop under the buy price, user 2026-11-17)
         self.assertEqual(oversold.v2_candidates(FakeRead(self.QUOTES), self.gate(), DEFAULTS, ['005930'], held={'005930'}), [])
+
+    def test_candidates_only_expose_a_fresh_ask(self):
+        gate = self.gate()
+        read = Mock()
+        price = FakeRead(self.QUOTES).call_tool('get_stock_price', {'stock_code': '005930'})['data']['Output_0']
+        quote = {**price, 'askp': 93, 'market_status': '1', 'hoga_bsop_hour': '11:00:00'}
+        read.call_tool.side_effect = [
+            {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': quote}},
+            {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': {**quote, 'hoga_bsop_hour': '10:55:00'}}},
+        ]
+        with patch.object(oversold, 'datetime', wraps=datetime) as clock:
+            clock.now.return_value = NOW
+            fresh = oversold.v2_candidates(read, gate, DEFAULTS, ['005930'])
+            stale = oversold.v2_candidates(read, gate, DEFAULTS, ['005930'])
+        self.assertEqual(fresh[0]['ask'], 93)
+        self.assertIsNone(stale[0]['ask'])
+        self.assertEqual(read.call_tool.call_count, 2)
+
+    def test_runner_skips_unaffordable_candidate_until_price_or_budget_allows_one_share(self):
+        now = NOW.replace(hour=14, minute=35)
+        gate = {'kospi': {'pass': True, 'low_pct': -9.0}, 'kosdaq': {'pass': False}, 'nasdaq_prev': -1.0}
+        expensive = {'code': '000660', 'price': 1_090_000, 'ask': 1_091_000, 'drop_pct': -11.0, 'market': 'kospi',
+                     'market_low_pct': -9.0, 'rel_drop': -2.0, 'stop_pct': 2.0, 'hold_days': 3}
+        affordable = {**expensive, 'code': '005930', 'price': 178_000, 'ask': 178_100, 'drop_pct': -10.0}
+        with (
+            tempfile.TemporaryDirectory() as d,
+            patch.object(p, 'datetime', wraps=datetime) as clock,
+            patch.object(p, '_V2_BOUGHT', {}), patch.object(p, '_V2_LOGGED', set()), patch.object(p, '_V2_VERDICT', {}),
+            patch.object(p, 'OVERSOLD', {**DEFAULTS, 'oversold_v2_add_on': True, 'oversold_v2_size_pct': 100,
+                                        'oversold_v2_boost_pct': 100}),
+            patch.object(p, 'SHARED_SINGLE_ORDER_KRW', 1_500_000), patch.object(p, 'SPLIT_TRANCHE_KRW', 1_000_000),
+            patch.object(oversold, 'v2_gate', return_value=gate), patch.object(oversold, 'universe', return_value={}),
+            patch.object(oversold, 'v2_candidates', return_value=[expensive, affordable]),
+            patch.object(p, 'fresh_rows', return_value=[{}] * 6) as bars,
+            patch.object(p, 'v2_research', return_value=('normal', 1.0, {'engine': None})),
+            patch.object(p, 'journal_event') as events,
+        ):
+            clock.now.return_value = now
+            self.assertEqual(p.oversold_v2_entry(None, d, {}, 'first')[0], '005930')
+            expensive['ask'] = 1_094_000
+            self.assertEqual(p.oversold_v2_entry(None, d, {}, 'still-over')[0], '005930')
+            expensive['ask'] = None
+            self.assertEqual(p.oversold_v2_entry(None, d, {}, 'unconfirmed')[0], '005930')
+            self.assertEqual([c.args[1] for c in bars.call_args_list], ['005930'] * 3)
+
+            expensive['ask'] = 500_000
+            self.assertEqual(p.oversold_v2_entry(None, d, {}, 'lower-price')[0], '000660')
+            expensive['ask'] = 1_094_000
+            with patch.object(p, 'SPLIT_TRANCHE_KRW', 2_200_000):
+                self.assertEqual(p.oversold_v2_entry(None, d, {}, 'higher-budget')[0], '000660')
+
+            deferred = [c.kwargs for c in events.call_args_list if c.kwargs.get('reason') == 'single_order_limit']
+            self.assertEqual([(e['symbol'], e['price'], e['buy_budget_krw']) for e in deferred],
+                             [('000660', 1_091_000, 500_000)])
+
+    def test_order_limit_deduplication_survives_same_day_restart(self):
+        event = {'time': NOW.isoformat(), 'event': 'v2_execution_gate', 'reason': 'single_order_limit',
+                 'symbol': '000660', 'source': 'oversold_v2'}
+        with tempfile.TemporaryDirectory() as d, patch.object(p, '_V2_LOGGED', set()), patch.object(p, 'journal_event') as log:
+            path = Path(d) / 'events.jsonl'
+            path.write_text(json.dumps(event) + '\n')
+            p.restore_single_order_limits(path, NOW.date())
+            self.assertTrue(p.v2_unaffordable(d, NOW.date(), '000660', 'oversold_v2', 1_091_000, 500_000, 'retry'))
+            log.assert_not_called()
+            self.assertTrue(p.v2_unaffordable(d, NOW.date() + timedelta(days=1), '000660', 'oversold_v2',
+                                             1_091_000, 500_000, 'new-day'))
+            log.assert_called_once()
 
     def test_runner_window_research_veto_add_and_plan(self):
         saved = dict(p.OVERSOLD)

@@ -82,6 +82,7 @@ def test_the_yeo_method_is_a_strategy_choice_with_its_settings_and_summary(tmp_p
     monkeypatch.setenv('VIBE_TRADING_SETTINGS_HISTORY', str(tmp_path / 'h.sqlite3'))
     import longterm_account_view as A
     monkeypatch.setattr(A, 'nh_price', lambda code: {'379810': 23_870, '0261H0': 9_825}.get(code))
+    monkeypatch.setattr('src.config.paths.get_runtime_root', lambda: tmp_path)
 
     def view(root):
         import longterm_account_view
@@ -145,7 +146,9 @@ def test_the_yeo_method_lists_the_etfs_it_buys_with_their_names(tmp_path):
 
 def test_the_yeo_methods_mixed_etf_shows_in_the_allocation_picks_and_charts():
     # user 2026-11-18: "0261H0이 매수 종목에 안 보임 — 여운봉 저수지 매매법의 핵심 종목"
-    rows = {r['key']: r for r in V.allocation_rows({'NDX': 0.7, 'NDXMIX': 0.3}, {'0261H0': 10}, {'NDXMIX': (9_800, 'p')}, 500_000)}
-    assert '0261H0' in rows['NDXMIX']['종목'] and rows['NDXMIX']['보유 금액'] == 98_000 and rows['NDXMIX']['목표 %'] == 30.0
+    rows = V.allocation_comparison({'NDX': 0.7, 'NDXMIX': 0.3}, {'0261H0': {'평가금액': 98_000}},
+                                  500_000, {}, '449170')
+    mixed = next(row for row in rows if row['종목'] == '0261H0')
+    assert mixed['평가금액'] == 98_000 and mixed['목표 비중'] == 30.0
     import app
     assert any('0261H0' in label for label in app.chart_universe('longterm', [], {}))

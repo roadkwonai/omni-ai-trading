@@ -14,9 +14,11 @@ Research and paper trading only; nothing here places orders.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
@@ -73,20 +75,26 @@ def atr_pct(rows):
 
 
 _ATR = {}
+ATR_RETRY_SECONDS = 300
 
 
 def daily_atr(read, code, now):
-    """atr_pct() of NH daily bars, cached for the day."""
+    """Cache a successful ATR for the day and retry failed reads after five minutes."""
     key = (code, now.astimezone(KST).date())
-    if key not in _ATR:
-        try:
-            response = read.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {
-                'market_cd': 'KRX', 'iem_cd': code, 'gubun': '1', 'array_cnt': '30', 'view_main_yn': 'Y', 'today_cls_code': '0'}})
-            data = (response.get('data') or {}) if response.get('status') == 'ok' else {}
-            _ATR[key] = atr_pct(data.get('Output_1')) if data.get('rsp_cd') == '00000' else None
-        except Exception:  # a failed read only means no ATR: the % threshold alone then decides
-            _ATR[key] = None
-    return _ATR[key]
+    cached = _ATR.get(key)
+    if cached and (cached[1] is not None or 0 <= (now - cached[0]).total_seconds() < ATR_RETRY_SECONDS):
+        return cached[1]
+    try:
+        response = read.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {
+            'market_cd': 'KRX', 'iem_cd': code, 'gubun': '1', 'array_cnt': '30', 'view_main_yn': 'Y', 'today_cls_code': '0'}})
+        data = (response.get('data') or {}) if response.get('status') == 'ok' else {}
+        value = atr_pct(data.get('Output_1')) if data.get('rsp_cd') == '00000' else None
+    except Exception:
+        value = None
+    if value is not None and not math.isfinite(value):
+        value = None
+    _ATR[key] = (now, value)
+    return value
 
 
 def evaluate(code, quote, bars, atr, settings, now):
@@ -104,6 +112,7 @@ def evaluate(code, quote, bars, atr, settings, now):
         return None  # research: no edge for 2x ETFs, so they are not watched unless switched on
     floor = settings[f'oversold_{k}_drop_pct']
     need = max(floor, settings['oversold_atr_mult'] * atr) if atr else floor
+    atr_status = 'not_required' if not settings['oversold_atr_mult'] else 'unknown' if atr is None else 'confirmed'
     drop = (low / prev - 1) * 100            # deepest point today
     now_drop = (price / prev - 1) * 100
     calm = int(settings['oversold_calm_min'])
@@ -121,7 +130,8 @@ def evaluate(code, quote, bars, atr, settings, now):
     target = min(price * (1 + settings['oversold_tp_pct'] / 100), low + gap * settings['oversold_recover_pct'] / 100)
     stop = low * (1 - settings['oversold_stop_pct'] / 100)
     return {'code': code, 'kind': k, 'price': price, 'prev_close': prev, 'low': low, 'drop_pct': round(drop, 2),
-            'now_drop_pct': round(now_drop, 2), 'atr_pct': atr, 'atr_multiple': round(-drop / atr, 2) if atr else None,
+            'now_drop_pct': round(now_drop, 2), 'atr_pct': atr, 'atr_status': atr_status,
+            'atr_multiple': round(-drop / atr, 2) if atr else None,
             'need_pct': round(need, 2), 'triggered': -drop >= need, 'no_new_low_min': calm if no_new_low else 0,
             'bounce_pct': round(bounce, 2), 'stabilized': no_new_low and bounce >= settings['oversold_rebound_pct'],
             'target_price': round(target), 'target_pct': round((target / price - 1) * 100, 2),
@@ -213,7 +223,7 @@ def analyst(code, timeout=6):
 
 def brief(row, name=None, with_analyst=True):
     """Compact facts for an engine prompt (Jev extra_state / vibe context)."""
-    out = {k: row.get(k) for k in ('drop_pct', 'now_drop_pct', 'atr_pct', 'atr_multiple', 'need_pct', 'triggered',
+    out = {k: row.get(k) for k in ('drop_pct', 'now_drop_pct', 'atr_pct', 'atr_status', 'atr_multiple', 'need_pct', 'triggered',
                                    'stabilized', 'bounce_pct', 'target_pct', 'stop_pct', 'market_low_pct')}
     if name:
         out['name'] = name
@@ -322,6 +332,7 @@ def v2_candidates(read, gate, settings, codes, held=()):
     oversold_v2_rel_max_pct beyond their market (a 2x ETF against twice it); deepest first. Each row carries the
     stop (oversold_v2_stop_pct under the buy price; user 2026-11-17) and the holding sessions."""
     import oversold_cases
+    from kr_swing_v5_forward import fresh_quote
     out = []
     for code in codes:
         if code in held or code in oversold_cases.INVERSE:
@@ -334,7 +345,9 @@ def v2_candidates(read, gate, settings, codes, held=()):
         if not facts.get('pass'):
             continue
         try:
-            q = (read.call_tool('get_stock_price', {'stock_code': code}).get('data') or {}).get('Output_0') or {}
+            result = read.call_tool('get_stock_price', {'stock_code': code})
+            data = result.get('data') or {}
+            q = data.get('Output_0') or {}
             price, prev, low = (float(q[f]) for f in ('stck_prpr', 'stck_prdy_clpr', 'stck_lwpr'))
         except Exception:
             continue
@@ -344,8 +357,15 @@ def v2_candidates(read, gate, settings, codes, held=()):
         rel = drop - facts['low_pct'] * (2 if k == 'lev' else 1)
         if drop > -oversold_cases.THRESHOLD[k] or rel <= -settings['oversold_v2_rel_max_pct']:
             continue
+        ask = None
+        if result.get('status') == 'ok':
+            try:
+                ask = fresh_quote(data, code, datetime.now(KST)).get('askp')
+            except ValueError:
+                pass
         stop = price * (1 - settings['oversold_v2_stop_pct'] / 100)
-        out.append({'code': code, 'kind': k, 'price': price, 'prev_close': prev, 'low': low, 'drop_pct': round(drop, 2),
+        out.append({'code': code, 'kind': k, 'price': price, 'ask': ask if type(ask) is int and ask > 0 else None,
+                    'prev_close': prev, 'low': low, 'drop_pct': round(drop, 2),
                     'market': market, 'market_low_pct': facts['low_pct'], 'rel_drop': round(rel, 2),
                     'stop_price': round(stop), 'stop_pct': round((1 - stop / price) * 100, 2),
                     'half_tp_pct': float(settings['oversold_v2_half_tp_pct']), 'target_pct': float(settings['oversold_v2_tp_pct']),

@@ -35,7 +35,8 @@ def response(adapter, tool, args):
     return result['data']
 
 
-def valid_bars(data, code, now):
+def valid_bars(data, code, now, *, required=6):
+    """Validate the required completed candles and return up to ten, or more when requested."""
     if data.get('rsp_cd') != '00000' or data.get('Output_0', {}).get('iem_cd') != code:
         raise ValueError('bar response invalid')
     rows = data.get('Output_1')
@@ -46,12 +47,13 @@ def valid_bars(data, code, now):
     bars = [r for r in rows if isinstance(r, dict) and r.get('bsop_date') == now.strftime('%Y%m%d')
             and r.get('bsop_time', '999999') < cutoff]
     bars.sort(key=lambda r: r['bsop_time'], reverse=True)
-    if len(bars) < 6 or len({r['bsop_time'] for r in bars[:6]}) != 6:
+    if len(bars) < required or len({r['bsop_time'] for r in bars[:required]}) != required:
         raise ValueError('insufficient bars')
     latest = datetime.strptime(now.strftime('%Y%m%d') + bars[0]['bsop_time'], '%Y%m%d%H%M%S').replace(tzinfo=KST)
     if not timedelta(0) <= now - latest <= timedelta(minutes=4):
         raise ValueError('stale bars')
-    return [{k: r[k] for k in ('bsop_time', 'stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr', 'vol')} for r in bars[:10]]
+    return [{k: r[k] for k in ('bsop_time', 'stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr', 'vol')}
+            for r in bars[:max(10, required)]]
 
 
 def volatility(bars):

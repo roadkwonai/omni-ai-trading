@@ -5,6 +5,26 @@ from src.tools.nhplug_live_guard import LiveOrderGuard, LiveOrderBlocked
 from test_nh_live_broker import FakeReader, A, NOW, FIELDS
 
 
+def test_buy_audit_uses_guarded_quote_without_extra_calls(tmp_path, monkeypatch):
+ monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+ monkeypatch.setattr(x, 'halt_flag_set', lambda *_: False)
+ monkeypatch.setattr(x, 'datetime', type('Clock', (), {'now': staticmethod(lambda _: NOW)}))
+ reader = FakeReader()
+ snapshots = __import__('nh_live_broker').collect_snapshots(reader, A, NOW, sleep=lambda _: None)
+ snapshots['quote']['data']['Output_0']['stck_prdy_clpr'] = '1250'
+ monkeypatch.setattr(x, 'collect_snapshots', lambda *_, **__: snapshots)
+ def transport(*args, **kwargs):
+  assert kwargs['pre_send_check']()
+  return {'rsp_cd': '00048', 'rsp_msg': '매수주문이 완료되었습니다', 'Output_0': {'mkt_orr_no': 42}}
+ monkeypatch.setattr(x, '_transport', transport)
+ calls = len(reader.calls)
+ audit = {}
+ x.execute(reader, LiveOrderGuard(A, tmp_path / 'guard'), {}, 'krstockOrderCashBuy', FIELDS, quote_audit=audit)
+ assert len(reader.calls) == calls
+ assert audit['ask'] == 1400 and audit['previous_close'] == 1250 and audit['gap_pct'] == 12.0
+ assert audit['previous_close_date'] is None and audit['reason'] == 'previous_close_date_not_provided'
+
+
 def test_guarded_write_never_retries_unknown(tmp_path,monkeypatch):
  monkeypatch.setenv('VIBE_TRADING_HOME',str(tmp_path/'runtime'))
  monkeypatch.setattr(x,'halt_flag_set',lambda *_:False)

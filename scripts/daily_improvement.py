@@ -48,7 +48,7 @@ def paths_today(root, day):
 
 def round_trips(rows, day, paths, events=()):
     import engine_compare as ec
-    submitted = [e for e in events if e.get('event') == 'submitted' and 'high_gap_pct' in e]
+    submitted = [e for e in events if e.get('event') == 'submitted' and ('high_gap_pct' in e or 'entry_timing' in e)]
     out = []
     for e in ec.episodes(rows):
         if not e['open'].startswith(day):
@@ -64,6 +64,7 @@ def round_trips(rows, day, paths, events=()):
                     'held_min': held, 'entry_route': e['entry'], 'entry_basis': buy.get('basis'), 'exit': e['exit'] or None,
                     'pnl': round(e['pnl']), 'return_pct': e['return_pct'], 'cost': round(e['cost']),
                     'entry_vs_day_high_pct': context.get('high_gap_pct'), 'entry_vs_open_pct': context.get('open_gap_pct'),
+                    'entry_timing': context.get('entry_timing'),
                     'mfe_pct': path.get('mfe_pct'), 'mae_pct': path.get('mae_pct'), 'after_30m_pct': path.get('after_30m_pct'),
                     # how much of the best point while held was given back (only meaningful when the best was a gain)
                     'left_on_table_pct': (round(path['mfe_pct'] - e['return_pct'], 2)

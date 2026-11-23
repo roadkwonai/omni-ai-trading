@@ -268,6 +268,46 @@ def reader(bid, ask):
     return r
 
 
+@pytest.mark.parametrize(('remaining', 'refreshed_held'), [(0, 29), (0, 0), (29, 29)])
+def test_cancelled_live_sell_rechecks_and_replaces_in_same_cycle(tmp_path, remaining, refreshed_held):
+    code = '090710'
+    paper(tmp_path / 'shared-etf-paper', [])
+    guard = LiveOrderGuard(A, tmp_path, symbols=(code,))
+    with guard._db() as db:
+        db.execute('INSERT INTO live_adoptions VALUES (?,?,?,?)', (guard.scope, '20261106', code, 29))
+        db.executemany('INSERT INTO live_intents VALUES (?,?,?,?,?,?,?,?,?)', [
+            ('original', guard.scope, '20261106', 'krstockOrderCashSell', code, 29, 42, 'acknowledged', 0),
+            ('cancellation', guard.scope, '20261106', 'krstockOrderCancel', code, 29, 42, 'acknowledged', 0),
+        ])
+    snap = snapshots([(code, 29, 5200)])
+    snap['history']['Output_0'] = [
+        {'itg_orr_no': 42, 'iem_cd': code, 'orr_qty': 29, 'tot_cns_qty': 0, 'ny_cns_qty': remaining,
+         'can_qty': 29 - remaining, 'sby_dit_cd_nm': '현금매도'},
+        {'itg_orr_no': 43, 'iem_cd': code, 'orr_qty': 29, 'tot_cns_qty': 0, 'ny_cns_qty': 0,
+         'can_qty': 0, 'orr_rjt_rsn_cd_nm': '확인'},
+    ]
+    refreshed = snapshots([(code, refreshed_held, 5200)])
+    refreshed['history'] = snap['history']
+    record = {'kind': 'live', 'engine': 'jev', 'auto': True, 'live_orders': True, 'budget': RECORD['budget'], 'rules': {}}
+    with patch('nh_live_broker.collect_snapshots', side_effect=[snap, refreshed]) as collect, \
+            patch('src.live.halt.halt_flag_set', return_value=False), \
+            patch('nh_guarded_live.execute', return_value='replacement') as send:
+        plan = f.step(reader(5280, 5290), A, {}, record, execute_orders=True, root=tmp_path, now=NOW, key='live-1')
+    if remaining:
+        assert plan['action'] == 'RECONCILE' and plan['pending'] == 2
+        assert collect.call_count == 1
+        send.assert_not_called()
+    elif not refreshed_held:
+        assert plan['action'] == 'BLOCK' and plan['reason'] == 'ledger holds more than the broker balance'
+        assert collect.call_count == 2
+        send.assert_not_called()
+    else:
+        assert (plan['action'], plan['qty'], plan['price']) == ('SELL', 29, 5280)
+        assert collect.call_count == 2
+        assert send.call_args.kwargs['replacement_of'] == 'original'
+        assert plan['same_cycle_replacement'] is True
+
+
 class Step(unittest.TestCase):
     def run_step(self, d, *, fills, holdings=(), bid=50_000, ask=50_100, execute=False, engine='jev', rules=None, evidence=False,
                  may_cancel=None, loss=0, now=NOW, jev=(None, 'not asked in tests'), send=None, rd=None):

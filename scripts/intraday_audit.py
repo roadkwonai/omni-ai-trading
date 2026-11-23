@@ -146,6 +146,14 @@ def ledger(root, day, since):
     if events is None:
         return {**out, 'events': None}
     window = [e for e in events if since is None or (_time(e.get('time')) or since) >= since]
+    strength_blocks = {}
+    for event in window:
+        reasons = event.get('strength_reasons')
+        if event.get('event') != 'v2_entry_gate' or event.get('permitted') is not False or not isinstance(reasons, dict):
+            continue
+        for symbol, reason in reasons.items():
+            if isinstance(reason, str) and reason:
+                strength_blocks.setdefault(symbol, Counter())[reason] += 1
     newest = max(filter(None, (_time(e.get('time')) for e in events)), default=None)
     restarts, _ = day_rows(root / 'restarts.jsonl', day)
     recorded = {(r.get('stopped') or {}).get('time') for r in restarts or () if isinstance(r, dict)}
@@ -171,12 +179,15 @@ def ledger(root, day, since):
         entry_blocks=dict(Counter(e.get('reason') for e in window
                                   if e.get('event') in ('v2_entry_gate', 'v2_execution_gate') and e.get('permitted') is False
                                   ).most_common()),
+        strength_blocks={symbol: dict(reasons) for symbol, reasons in strength_blocks.items()},
         repeat_blocks=repeat_blocks(window),
         pick_cooldowns=sum(e.get('event') == 'pick_cooldown' for e in window),
         errors=dict(Counter(e.get('event') for e in window if 'error' in str(e.get('event'))).most_common()),
         jev_busy=sum('JevRequestBusy' in json.dumps(e, ensure_ascii=False) for e in window),
         overnight_hold=[{k: e.get(k) for k in ('time', 'symbol', 'permitted', 'reason')}
                         for e in events if e.get('event') == 'overnight_hold'],
+        oversold_atr=[{k: e.get(k) for k in ('time', 'symbol', 'status', 'need_pct', 'drop_pct', 'retry_seconds')}
+                      for e in window if e.get('event') == 'oversold_atr_status'],
         oversold={name: {'count': sum(e.get('event') == name for e in window),
                          'premarket_audit': dict(Counter((e.get('premarket_audit') or {}).get('status')
                                                          for e in window if e.get('event') == name)),
@@ -212,16 +223,22 @@ def premarket(nhplug, day):
             'model_inputs': by_question if rows is not None else None}
 
 
-def live(nhplug, day):
+def live(nhplug, day, since=None):
     rows, _ = day_rows(Path(nhplug) / 'live-follow.jsonl', day)
-    last = {}
+    last, replacement_checks = {}, []
     for row in rows or ():
-        last[row.get('account')] = {k: row.get(k) for k in ('time', 'mode', 'action', 'reason', 'execution')}
+        last[row.get('account')] = {k: row.get(k) for k in (
+            'time', 'mode', 'action', 'reason', 'execution', 'pending', 'lag_alert',
+            'symbol', 'qty', 'price', 'held', 'target', 'cancelled_sells',
+            'same_cycle_replacement', 'replacement_recheck_seconds')}
+        if row.get('replacement_recheck_seconds') is not None and (since is None or (_time(row.get('time')) or since) >= since):
+            replacement_checks.append({'account': row.get('account'), **last[row.get('account')]})
     try:
         from accounts import load
         records = {key: rec for key, rec in load(Path(nhplug) / 'accounts.json').items() if rec.get('kind') == 'live'}
     except Exception as exc:  # report, never guess a switch state
-        return {'last': last, 'live_orders': {'error': type(exc).__name__}, 'accounts': None}
+        return {'last': last, 'replacement_checks': replacement_checks, 'live_orders': {'error': type(exc).__name__},
+                'accounts': None}
     import live_fills
     accounts = {}
     for key, rec in records.items():
@@ -230,7 +247,8 @@ def live(nhplug, day):
         accounts[key] = {'engine': rec.get('engine'), 'balance_rows': len(snaps),
                          'balance_last': snaps[-1].get('time') if snaps else None, 'fills_today': len(fills),
                          'fill_time_unknown': sum('T00:00:00' in r['time'] for r in fills)}  # rows() found no order time
-    return {'last': last, 'live_orders': {key: bool(rec.get('live_orders')) for key, rec in records.items()},
+    return {'last': last, 'replacement_checks': replacement_checks,
+            'live_orders': {key: bool(rec.get('live_orders')) for key, rec in records.items()},
             'accounts': accounts}
 
 
@@ -279,7 +297,7 @@ def jev_inputs(root, day, since=None):
                       ((since.isoformat() if since else day),))
     if rows is None:
         return None
-    from etf_news import RECENT
+    from etf_news import JEV_NEWS_MAX_MINUTES, RECENT
     recent = RECENT.total_seconds() / 60
     # each question's first evidence answer: a call after it without one is a regression (watchlist never asks)
     evidence_from = dict(_query(Path(root) / 'market-research.sqlite3',
@@ -304,11 +322,14 @@ def jev_inputs(root, day, since=None):
         except (ValueError, KeyError, TypeError):
             continue
         present.update(k for k in JEV_INPUT_KEYS if state.get(k))
-        ages = [(at - _time(n.get('published'))).total_seconds() / 60 for n in state.get('recent_news_headlines') or []
+        checked_at = _time(state.get('news_checked_at'))
+        news_at = checked_at if checked_at is not None and checked_at <= at else at
+        ages = [(news_at - _time(n.get('published'))).total_seconds() / 60 for n in state.get('recent_news_headlines') or []
                 if isinstance(n, dict) and _time(n.get('published'))]
         if ages:
             news_age.append(min(ages))
-        old = sum(age > recent for age in ages)
+        market_news_limit = JEV_NEWS_MAX_MINUTES if state.get('news_max_age_minutes') == JEV_NEWS_MAX_MINUTES else recent
+        old = sum(age > market_news_limit for age in ages)
         fixes['news_old_calls'] += bool(old)
         fixes['news_old_headlines'] += old
         fixes['stock_news_old'] += sum(  # recent_stock_headlines gives {title, age_min <= 90}; bare strings were the bug
@@ -453,7 +474,7 @@ def anomalies(facts, now, skipped=None):
             found['jev.data_insufficient'] = '자료 충분 응답 비율 40% 미만: ' + json.dumps(data, ensure_ascii=False)
     fixes = jev.get('fix_checks') or {}
     if ran(in_session, 'jev.news_old') and fixes.get('news_old_calls'):  # the fix filters every headline: one old one is a regression
-        found['jev.news_old'] = f"Jev 호출 {fixes['news_old_calls']}건에 90분 넘은 시장 헤드라인 {fixes['news_old_headlines']}건"
+        found['jev.news_old'] = f"Jev 호출 {fixes['news_old_calls']}건에 적용된 최신성 기준을 넘긴 시장 헤드라인 {fixes['news_old_headlines']}건"
     if ran(in_session, 'jev.stock_news_old') and fixes.get('stock_news_old'):
         found['jev.stock_news_old'] = f"시각 없음 또는 90분 넘은 종목 헤드라인 {fixes['stock_news_old']}건"
     for key, bad, total, label in (
@@ -499,6 +520,19 @@ def anomalies(facts, now, skipped=None):
     for key, on in facts['live']['live_orders'].items():
         if on is True:
             found[f'live.switch_on:{key}'] = '실계좌 실주문 스위치 켜짐'
+    for key, row in facts['live'].get('last', {}).items():
+        alert = row.get('lag_alert')
+        if row.get('mode') != 'execute' or not alert or not alert.get('excess'):
+            continue
+        held, target = row.get('held') or {}, row.get('target') or {}
+        remaining = {symbol: qty for symbol, qty in alert['excess'].items()
+                     if symbol not in held or held[symbol] > target.get(symbol, 0)}
+        if not remaining:
+            continue
+        excess = ', '.join(f'{symbol} {qty}주' for symbol, qty in sorted(remaining.items()))
+        pending = f" · 미종결 {row['pending']}건" if type(row.get('pending')) is int else ''
+        found[f'live.mirror_exit_lag:{key}'] = (
+            f"{excess} 청산 지연 {alert['minutes']}분 · {row['time']} {row['action']}{pending}")
     for key, account in (facts['live'].get('accounts') or {}).items():
         if account['fill_time_unknown']:
             found[f'live.fill_time_unknown:{key}'] = f"오늘 체결 {account['fills_today']}건 중 {account['fill_time_unknown']}건 시각 없음(T00:00:00)"
@@ -557,7 +591,7 @@ def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=No
              'trading_day': now.weekday() < 5 and now.date() not in holidays, 'holiday_source': holiday_note,
              'roles': roles, 'services': services(run),
              'ledgers': {name: ledger(Path(nhplug) / name, day, since) for name in LEDGERS},
-             'premarket': premarket(nhplug, day), 'live': live(nhplug, day),
+             'premarket': premarket(nhplug, day), 'live': live(nhplug, day, since),
              'shadow': _json(Path(nhplug) / 'shared-etf-paper' / 'shadow-status.json'),
              'databases': database_health(nhplug),
              'learning': learning_rounds(Path(nhplug) / 'shared-etf-paper' / 'com.vibetrading.shared-etf-learning.log', day),

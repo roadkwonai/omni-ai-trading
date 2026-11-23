@@ -213,7 +213,7 @@ def alerts(runtime, states, follow, today, now=None):
     exit requests, live blocks and errors today, and external APIs failing or late today (api_status_view)."""
     found = []
     for label, state in states.items():
-        if any(word in label for word in ('실행기', '판단기')) and state not in ('실행 중', '종료', '미등록'):
+        if any(word in label for word in ('실행기', '판단기')) and state not in ('실행 중', '종료', '미등록', '확인 중'):
             found.append(f'{label}: {state}')
     runtime = Path(runtime)
     found += stopped_in_session(runtime, states, now or datetime.now().astimezone())
@@ -281,22 +281,28 @@ def realized_section(items, now):
     table_frame(frame.style.map(_tone, subset=['오늘 실현']))
 
 
-def balance_snapshots(path, today):
-    """(latest row, today's first row) of a balance log (account-snapshots.jsonl, live-balance-<key>.jsonl)."""
+def balance_records(path):
+    """Read usable total-asset observations from the dashboard balance log."""
     try:
         lines = Path(path).read_text().splitlines()
     except OSError:
-        return None, None
-    last = first = None
+        return
     for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
             continue
-        if isinstance(row, dict) and isinstance(row.get('total_assets'), (int, float)):
-            last = row
-            if first is None and str(row.get('time', '')).startswith(today):
-                first = row
+        if isinstance(row, dict) and type(row.get('total_assets')) in (int, float) and isinstance(row.get('time'), str):
+            yield row
+
+
+def balance_snapshots(path, today):
+    """(latest row, today's first row) of a balance log."""
+    last = first = None
+    for row in balance_records(path):
+        last = row
+        if first is None and row['time'].startswith(today):
+            first = row
     return last, first
 
 
@@ -386,7 +392,7 @@ def principal_form(items, records):
                 values[item['key']] = col.number_input(f"{item['label']} 원금(원)", min_value=0, step=10_000,
                                                        value=int(current[item['key']]) if item['key'] in current else None,
                                                        placeholder='입력 필요', key=f"principal_{item['key']}")
-            if st.form_submit_button('원금 저장', icon=':material/save:'):
+            if st.form_submit_button('원금 저장', type='primary', icon=':material/save:'):
                 for key, value in values.items():
                     if value and value != current.get(key):
                         A.save_one(PRINCIPAL_RECORD.get(key, key), {'principal_krw': int(value)})
@@ -470,8 +476,8 @@ def render(runtime, records, states, names, refresh_balances=None):
              'sub': f'매수 {buys} · 매도 {sells}', 'pulse': bool(trades)},
             {'label': '보유', 'value': f'{held}건', 'tone': 'up' if held else 'off', 'icon': 'inventory_2',
              'sub': ', '.join(f"{i['label']} {len(i['holdings'])}" for i in items if i['holdings']) or '없음'},
-            {'label': '실행기 · 주의', 'value': f'{running}/{len(watched)} 실행', 'icon': 'monitor_heart',
-             'tone': 'alert' if warnings else 'ok', 'sub': f'주의 {len(warnings)}건' if warnings else '주의 없음',
+            {'label': '실행기 · 주의', 'value': '확인 중' if '확인 중' in watched.values() else f'{running}/{len(watched)} 실행', 'icon': 'monitor_heart',
+             'tone': 'alert' if warnings else 'off' if '확인 중' in watched.values() else 'ok', 'sub': f'주의 {len(warnings)}건' if warnings else '주의 없음',
              'help': '실행기·판단기 중 실행 중인 수(장 밖에는 종료가 정상)와 확인이 필요한 항목 수입니다.'}])
     todays_all = [{**r, '계좌': i['label'], 'kind': i['kind']} for i in items for r in ec.in_period(i['rows'], today)]
     detail = st.columns(5)

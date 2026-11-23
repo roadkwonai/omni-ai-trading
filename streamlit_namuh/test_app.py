@@ -3,8 +3,11 @@ import unittest
 import sqlite3
 import json
 import tempfile
+import time
+from concurrent.futures import Future
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -297,13 +300,18 @@ def _quick_sell_page():
     import streamlit as st
     import app
     sent = st.session_state.setdefault('sent', [])
-    app.quick_sell_panel([('114800', 'KODEX 인버스', 496), ('005930', '삼성전자', 3)], st.session_state.get('pending', {}),
+    app.quick_sell_panel([('114800', 'KODEX 인버스', 496), ('005930', '삼성전자 (005930)', 3),
+                          ('0261H0', '0261H0', 2), ('379810', '379810', 2)], st.session_state.get('pending', {}),
                          lambda code, qty: sent.append(('SELL', code, qty)), lambda code, qty: sent.append(('BUY', code, qty)), 'qs', '테스트')
 
 
 def test_quick_trade_buttons_file_quantity_sells_buys_and_sell_alls():
     ui = AppTest.from_function(_quick_sell_page, default_timeout=30).run()
     assert not ui.exception
+    labels = {item.value for item in ui.markdown}
+    assert '**삼성전자 (005930)** · 보유 3주' in labels
+    assert '**KODEX 미국나스닥100미국채혼합50 (0261H0)** · 보유 2주' in labels
+    assert '**KODEX 미국나스닥100 (379810)** · 보유 2주' in labels
     ui.number_input(key='qs_qty_114800').set_value(100).run()
     ui.button(key='qs_sell_114800').click().run()
     assert ui.session_state['sent'] == [('SELL', '114800', 100)]  # a chosen quantity
@@ -316,7 +324,7 @@ def test_quick_trade_buttons_file_quantity_sells_buys_and_sell_alls():
     assert ui.session_state['sent'] == [('SELL', '005930', 3)]  # never more than held
     ui.session_state['sent'] = []
     ui.button(key='qs_sell_all').click().run()
-    assert sorted(ui.session_state['sent']) == [('SELL', '005930', None), ('SELL', '114800', None)]
+    assert sorted(ui.session_state['sent']) == [('SELL', code, None) for code in ('005930', '0261H0', '114800', '379810')]
     ui.session_state['pending'] = {'114800': '100주 매도'}
     ui.run()
     assert ui.button(key='qs_sell_114800').disabled  # one request at a time per holding
@@ -439,9 +447,19 @@ class SubmitTest(unittest.TestCase):
         with patch('src.config.loader.load_agent_config', return_value=configs), \
              patch('src.tools.mcp.MCPServerAdapter', side_effect=[Adapter(), Adapter()] * 10), \
              patch('nh_paper_isolated.paper_pages', side_effect=response) as pages, \
-             patch('automation_status.processes', return_value={'공유 모의 ETF 실행기': '종료', '공유 모의 ETF 데이터 관찰기': '실행 중'}):
+             patch('automation_status.peek_processes', return_value={'공유 모의 ETF 실행기': '종료', '공유 모의 ETF 데이터 관찰기': '실행 중'}):
             ui = app_test('트레이딩 현황').run()
+            self.assertTrue(any('잔고·주문을 불러오는 중' in str(c.value) for c in ui.caption))
+            next(button for button in ui.button if button.label == 'ETF 현황 새로고침').click().run()
             self.assertEqual(ui.session_state['etf_broker_snapshot']['holdings'][0]['보유수량'], 1)
+            from datetime import timedelta
+            ui.session_state['etf_broker_snapshot']['time'] -= timedelta(minutes=3)
+            ui.session_state['etf_broker_attempt'] = 0
+            pages.reset_mock()
+            ui.run()
+            self.assertTrue(any('잔고·주문을 불러오는 중' in str(c.value) for c in ui.caption))
+            self.assertEqual(pages.call_count, 0)
+            self.assertTrue(any('최근 2분 안의 증권사 잔고가 없어' in str(c.value) for c in ui.caption))
             pages.side_effect = ValueError('조회 실패')
             next(button for button in ui.button if button.label == 'ETF 현황 새로고침').click().run()
             self.assertTrue(ui.session_state['etf_broker_error'])
@@ -449,6 +467,31 @@ class SubmitTest(unittest.TestCase):
                 ui.session_state['etf_broker_snapshot']
             self.assertTrue(any('빈 계좌로 간주하지' in str(error.value) for error in ui.error))
             self.assertTrue(any('실행기가 작동하지 않아' in str(warning.value) for warning in ui.warning))
+
+    def test_shared_etf_ui_shows_the_ledger_while_a_broker_read_is_pending(self):
+        config = SimpleNamespace(args=['--mode', 'paper', '--account', 'paper'])
+        configs = SimpleNamespace(mcp_servers={'nhplug_paper': config, 'nhplug_readonly': config})
+        with patch('src.config.loader.load_agent_config', return_value=configs), \
+             patch('src.tools.mcp.MCPServerAdapter', side_effect=[Adapter(), Adapter()] * 10), \
+             patch('nh_paper_isolated.paper_pages') as pages, \
+             patch('automation_status.peek_processes', return_value={'공유 모의 ETF 실행기': '실행 중'}):
+            ui = app_test('트레이딩 현황').run()
+            pending = Future()
+            ui.session_state['etf_broker_future'] = pending
+            ui.run()
+            self.assertFalse(ui.exception)
+            self.assertTrue(any('Jev 보유·오늘 매도' in str(markdown.value) for markdown in ui.markdown))
+            self.assertTrue(any('잔고·주문을 불러오는 중' in str(caption.value) for caption in ui.caption))
+            pages.assert_not_called()
+
+            snapshot = {'holdings': [], 'time': datetime.now(app.KST),
+                        'orders': [], 'cash': None, 'aggregate': None}
+            pending.set_result((snapshot, time.monotonic()))
+            ui.run()
+            self.assertFalse(ui.exception)
+            self.assertEqual(ui.session_state['etf_broker_snapshot'], snapshot)
+            self.assertFalse(any('잔고·주문을 불러오는 중' in str(caption.value) for caption in ui.caption))
+            pages.assert_not_called()
     def test_regime_observation_reports_fresh_stale_and_missing(self):
         now = datetime(2026, 11, 11, 10, 10, tzinfo=app.KST)
         with tempfile.TemporaryDirectory() as directory:
@@ -1389,6 +1432,26 @@ def test_a_kept_broker_snapshot_is_fetched_again_before_the_chart_calls_it_stale
         with patch.object(app, 'refresh_s', return_value=refresh):
             assert app.snapshot_due({'time': now - timedelta(seconds=min(refresh, app.SNAPSHOT_MAX_AGE) + 1)}, now)
             assert not app.snapshot_due({'time': now - timedelta(seconds=10)}, now)
+
+
+def test_dashboard_reads_share_running_requests_without_blocking_other_reads():
+    started, release = Event(), Event()
+
+    def slow_broker_read():
+        started.set()
+        return release.wait(5)
+
+    slow = app.start_dashboard_read(('test', 'broker'), slow_broker_read)
+    try:
+        assert started.wait(2)
+        duplicate = app.start_dashboard_read(('test', 'broker'), lambda: 'duplicate')
+        states = app.start_dashboard_read(('test', 'states'), lambda: '확인됨')
+        assert duplicate is slow
+        assert states.result(timeout=2) == '확인됨'
+        assert not slow.done()
+    finally:
+        release.set()
+        assert slow.result(timeout=2) is True
 
 
 def test_account_settings_rerun_alone_so_the_slider_follows_the_box_at_once():

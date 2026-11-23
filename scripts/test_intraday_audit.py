@@ -39,7 +39,8 @@ def _nhplug(tmp_path):
             [day + '07:30:00+09:00', day + '09:10:00+09:00', day + '09:11:00+09:00', day + '09:20:00+09:00',
              day + '10:19:30+09:00'],
             [{'time': day + '09:15:00+09:00', 'event': 'v2_entry_gate', 'permitted': False, 'reason': 'trend_not_rising'},
-             {'time': day + '10:15:00+09:00', 'event': 'v2_entry_gate', 'permitted': False, 'reason': 'volume_not_rising'},
+             {'time': day + '10:15:00+09:00', 'event': 'v2_entry_gate', 'permitted': False, 'reason': 'volume_not_rising',
+              'strength_reasons': {'090710': 'careful_reentry_chase', '005930': 'jev_below_min'}},
              {'time': day + '10:16:00+09:00', 'event': 'oversold_signal', 'premarket_audit': {'status': 'included_in_recorded_input'}},
              {'time': day + '10:17:00+09:00', 'event': 'v2_error', 'error': 'JevRequestBusy'}])
     _ledger(nhplug / 'vibe-paper', [day + '09:10:00+09:00'])  # the retired intraday vibe book, still on disk
@@ -58,6 +59,7 @@ def test_collect_reports_facts_and_keys(tmp_path):
     assert shared['cycles'] == 4  # the 07:30 pre-session line is not a cycle
     assert shared['long_gaps'] == [{'after': '09:11:00', 'minutes': 9.0}, {'after': '09:20:00', 'minutes': 59.5}]
     assert shared['entry_blocks'] == {'volume_not_rising': 1}  # only the --since window
+    assert shared['strength_blocks'] == {'090710': {'careful_reentry_chase': 1}, '005930': {'jev_below_min': 1}}
     assert shared['jev_busy'] == 1 and shared['errors'] == {'v2_error': 1}
     assert shared['oversold']['oversold_signal']['premarket_audit'] == {'included_in_recorded_input': 1}
     # vibe's intraday book, quote snapshots, event pipeline and replay are retired (user 2026-11-17): not read, no keys
@@ -205,6 +207,24 @@ def test_session_calls_without_intraday_market_sections_fire(tmp_path):
     assert 'jev.market_intraday_missing' not in _keys(present)
 
 
+def test_market_news_age_uses_dispatch_time_instead_of_response_record_time(tmp_path):
+    nhplug = _nhplug(tmp_path)
+    _jev_calls(nhplug, [('10:00', 'candidate', _good_call('10:00',
+                        news_checked_at=f'{DAY}09:59:59.500+09:00',
+                        recent_news_headlines=[{'published': f'{DAY}08:29:59.900+09:00', 'title': '경계 기사'}]))])
+    assert 'jev.news_old' not in _keys(nhplug)
+
+
+def test_market_news_audit_uses_the_new_60_minute_policy_for_versioned_inputs(tmp_path):
+    articles = [{'published': f'{DAY}08:50:00+09:00', 'title': '70분 전 기사'}]
+    legacy, current = _nhplug(tmp_path / 'legacy'), _nhplug(tmp_path / 'current')
+    _jev_calls(legacy, [('10:00', 'candidate', _good_call('10:00', recent_news_headlines=articles))])
+    _jev_calls(current, [('10:00', 'candidate', _good_call('10:00', news_max_age_minutes=60,
+                                                         recent_news_headlines=articles))])
+    assert 'jev.news_old' not in _keys(legacy)
+    assert 'jev.news_old' in _keys(current)
+
+
 def test_candidate_figures_older_than_the_ranking_window_fire(tmp_path):
     times = [f'10:{m:02d}' for m in range(6)]
     for name, suffix in (('old', ' (09:45 기준)'), ('untimed', '')):  # 15+ minutes old, or the watchlist's figure
@@ -310,6 +330,31 @@ def test_live_balance_gaps_and_unrecovered_fill_times_fire(tmp_path):
     _live_fill(nhplug, 'live-1', '09:31:05')
     keys = _keys(nhplug)
     assert {k for k in keys if k.startswith(('live.balance_missing', 'live.fill_time_unknown'))} == {'live.balance_missing:live-2'}
+
+
+def test_live_mirror_exit_lag_reports_pending_and_clears_after_reconciliation(tmp_path):
+    nhplug = _nhplug(tmp_path)
+    _live_accounts(nhplug)
+    log = nhplug / 'live-follow.jsonl'
+    lagging = {'account': 'live-1', 'time': DAY + '10:19:30+09:00', 'mode': 'execute', 'action': 'RECONCILE',
+               'pending': 2, 'held': {'090710': 29}, 'target': {},
+               'lag_alert': {'minutes': 5.2, 'excess': {'090710': 29}}}
+    replacement = {**lagging, 'time': DAY + '10:18:00+09:00', 'action': 'SELL',
+                   'replacement_recheck_seconds': 2.5, 'same_cycle_replacement': True}
+    log.write_text(json.dumps(replacement) + '\n' + json.dumps(lagging) + '\n')
+    facts = audit.collect(nhplug, NOW, run=_launchctl, holidays=frozenset())
+    assert [row['replacement_recheck_seconds'] for row in facts['live']['replacement_checks']] == [2.5]
+    assert audit.live(nhplug, NOW.date().isoformat(), NOW)['replacement_checks'] == []
+    last = facts['live']['last']['live-1']
+    assert last['pending'] == 2 and last['held'] == {'090710': 29} and last['target'] == {}
+    finding = next(row for row in facts['findings'] if row['key'] == 'live.mirror_exit_lag:live-1')
+    assert '090710 29주' in finding['detail']
+    assert '미종결 2건' in finding['detail']
+
+    with log.open('a') as stream:
+        stream.write(json.dumps({**lagging, 'time': DAY + '10:19:59+09:00', 'action': 'RECONCILED',
+                                 'pending': 0, 'held': {'090710': 0}}) + '\n')
+    assert 'live.mirror_exit_lag:live-1' not in _keys(nhplug)
 
 
 def test_every_audit_run_folds_its_findings_into_the_incident_history(tmp_path):

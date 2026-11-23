@@ -251,7 +251,8 @@ def test_regular_model_marks_busy_during_network_call(tmp_path):
          patch.object(nh_jev_compare.plt, 'subplots', return_value=(figure, axes)), \
          patch.object(nh_jev_compare.plt, 'close'), patch.object(runner.urllib.request, 'urlopen', side_effect=fake_urlopen), \
          patch('research_store.record_input', return_value='a' * 64):
-        result = runner.jev_holding7(bars, [], SYMBOLS['INV'], 100, 101)
+        news = [{'title': '시장', 'published': runner.datetime.now(runner.old.KST).isoformat()}]
+        result = runner.jev_holding7(bars, news, SYMBOLS['INV'], 100, 101)
     assert result['holding']['choice'] == 'HOLD'
     assert not regular_request_busy(path)
 

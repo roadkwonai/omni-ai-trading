@@ -35,6 +35,8 @@ BACKOFF = timedelta(minutes=5)    # and nobody retries the feed for this long af
 # got only Bing items 2-10 hours old (its 24-hour window). A topic without a story this recent is left out; with none at all
 # the call fails closed (the runner waits). Overnight and premarket stories reach Jev through premarket_context instead.
 RECENT = timedelta(minutes=90)
+JEV_NEWS_PRIORITY_MINUTES = 30
+JEV_NEWS_MAX_MINUTES = 60
 
 
 def cache_path() -> Path:
@@ -74,6 +76,27 @@ def _still_recent(rows: list, now: datetime) -> list | None:
     return kept or None
 
 
+def jev_market_headlines(rows, now):
+    """Keep recent headlines and use older ones only to fill a missing known topic."""
+    topics = {topic for topic, *_ in FEEDS}
+    preferred, fallback = [], []
+    priority = timedelta(minutes=JEV_NEWS_PRIORITY_MINUTES)
+    maximum = timedelta(minutes=JEV_NEWS_MAX_MINUTES)
+    for row in rows:
+        try:
+            age = now - datetime.fromisoformat(row['published'])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not timedelta(0) <= age <= maximum:
+            continue
+        if age <= priority:
+            preferred.append({**row, 'news_role': 'priority'})
+        elif row.get('topic') in topics:
+            fallback.append({**row, 'news_role': 'topic_fallback'})
+    covered = {row.get('topic') for row in preferred}
+    return preferred + [row for row in fallback if row.get('topic') not in covered]
+
+
 def headlines7(now: datetime) -> list[dict[str, str]]:
     """The recent, relevant headlines (within RECENT; shared cache, see FRESH and SOURCES); fails closed with none."""
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
@@ -102,17 +125,17 @@ def headlines7(now: datetime) -> list[dict[str, str]]:
     return rows
 
 
-def _read(url: str) -> bytes:
+def _read(url: str, *, timeout=10) -> bytes:
     request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = response.read(300_001)
     if len(payload) > 300_000:
         raise ValueError('news feed too large')
     return payload
 
 
-def _rss(url: str):
-    root = ET.fromstring(_read(url))
+def _rss(url: str, *, timeout=None):
+    root = ET.fromstring(_read(url) if timeout is None else _read(url, timeout=timeout))
     if root.tag != 'rss' or root.find('channel') is None:
         raise ValueError('news feed invalid')
     for item in root.findall('./channel/item'):
@@ -125,8 +148,9 @@ def _rss(url: str):
         yield item.findtext('title'), publisher, published, (item.findtext('link') or '').strip()
 
 
-def _naver():
-    data = json.loads(_read('https://m.stock.naver.com/api/news/list?category=mainnews&pageSize=50&page=1'))
+def _naver(*, timeout=None):
+    url = 'https://m.stock.naver.com/api/news/list?category=mainnews&pageSize=50&page=1'
+    data = json.loads(_read(url) if timeout is None else _read(url, timeout=timeout))
     if not isinstance(data, list):
         raise ValueError('news feed invalid')
     for row in data:
@@ -139,15 +163,85 @@ def _naver():
         yield html.unescape(str(row.get('tit') or '')), html.unescape(str(row.get('ohnm') or '')), published, link
 
 
-def _items(source: str, topic: str, query: str, shared: dict):
+def _items(source: str, topic: str, query: str, shared: dict, *, timeout=None):
     if source == 'naver_finance_news':  # one list serves every topic
         if 'naver' not in shared:
-            shared['naver'] = list(_naver())
+            shared['naver'] = list(_naver() if timeout is None else _naver(timeout=timeout))
         return shared['naver']
     if source == 'bing_news_rss':
-        return _rss('https://www.bing.com/news/search?q=' + quote(query.replace(' when:1d', '')) +
-                    '&format=rss&setlang=ko&cc=KR&qft=' + quote('interval="7"'))  # interval 7 = last 24 hours
-    return _rss('https://news.google.com/rss/search?q=' + quote(query) + '&hl=ko&gl=KR&ceid=KR:ko')
+        url = ('https://www.bing.com/news/search?q=' + quote(query.replace(' when:1d', '')) +
+               '&format=rss&setlang=ko&cc=KR&qft=' + quote('interval="7"'))  # interval 7 = last 24 hours
+    else:
+        url = 'https://news.google.com/rss/search?q=' + quote(query) + '&hl=ko&gl=KR&ceid=KR:ko'
+    return _rss(url) if timeout is None else _rss(url, timeout=timeout)
+
+
+def _topic_rows(items, now, topic, keywords, source, recent, links=False):
+    kept = []
+    for title, publisher, published, *rest in items:
+        title, publisher = (title or '').strip(), (publisher or '').strip()
+        if published is None or published.tzinfo is None or published.utcoffset() is None:
+            continue
+        published = published.astimezone(timezone.utc)
+        text = (title + ' ' + publisher).casefold()
+        if (not title or not publisher or not any(keyword in title.casefold() for keyword in keywords)
+                or any(name in text for name in RESTRICTED_PUBLISHERS)
+                or not timedelta(0) <= now - published <= recent):
+            continue
+        kept.append({'title': title[:200], 'published': published.isoformat(), 'source': source,
+                     'topic': topic, 'publisher': publisher[:80], **({'link': str(rest[0])[:500]} if links and rest and rest[0] else {})})
+    return sorted(kept, key=lambda row: row['published'], reverse=True)[:3]
+
+
+_JEV_TOPIC_CACHE = {}
+JEV_TOPIC_BUDGET_SECONDS = 2.4
+
+
+def supplement_jev_topics(rows, now):
+    """Probe alternate feeds only for missing topics, with per-topic cache/backoff."""
+    import time
+
+    settings = {topic: (query, keys) for topic, query, keys in FEEDS}
+    original = {row['topic'] for row in rows if row.get('topic') in settings}
+    if not original:
+        return rows, None  # no topic provenance to supplement
+    selected = {row.get('topic') for row in jev_market_headlines(rows, now)}
+    missing = [topic for topic in settings if topic not in selected]
+    if not missing:
+        return rows, None
+
+    start = time.monotonic()
+    collected, shared, probes = [], {}, 0
+    sources = (*[source for source in SOURCES if source not in FALLBACK], *FALLBACK)
+    for topic in missing:
+        prior = frozenset(row.get('source') for row in rows if row.get('topic') == topic)
+        key = (topic, prior)
+        cached = _JEV_TOPIC_CACHE.get(key)
+        if cached and timedelta(0) <= now - cached[0] < (FRESH if cached[1] else BACKOFF):
+            collected.extend(cached[1])
+            continue
+        query, keywords = settings[topic]
+        found, attempted = [], False
+        for source in sources:
+            if source in prior:
+                continue
+            remaining = JEV_TOPIC_BUDGET_SECONDS - (time.monotonic() - start)
+            if remaining <= 0:
+                break
+            attempted = True
+            probes += 1
+            try:
+                items = list(_items(source, topic, query, shared, timeout=min(1.2, remaining)))
+                found = _topic_rows(items, now, topic, keywords, source, timedelta(minutes=JEV_NEWS_MAX_MINUTES))
+            except (OSError, ValueError, ET.ParseError):
+                continue
+            if found:
+                break
+        if attempted:
+            _JEV_TOPIC_CACHE[key] = (now, found)
+        collected.extend(found)
+    return [*rows, *collected], {'missing_before': missing, 'probes': probes,
+                                 'elapsed_ms': round((time.monotonic() - start) * 1000, 1)}
 
 
 def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=False) -> list[dict[str, str]]:
@@ -164,22 +258,9 @@ def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=Fals
             except (OSError, ValueError, ET.ParseError) as exc:
                 error = exc
                 break  # blocked, offline or malformed: the next source takes the remaining topics
-            kept = []
-            for title, publisher, published, *rest in items:
-                title, publisher = (title or '').strip(), (publisher or '').strip()
-                if published is None or published.tzinfo is None or published.utcoffset() is None:
-                    continue
-                published = published.astimezone(timezone.utc)
-                text = (title + ' ' + publisher).casefold()
-                if (not title or not publisher or not any(keyword in title.casefold() for keyword in keywords)
-                        or any(name in text for name in RESTRICTED_PUBLISHERS)
-                        or not timedelta(0) <= observed - published <= recent):
-                    continue
-                kept.append({'title': title[:200], 'published': published.isoformat(), 'source': source,
-                             'topic': topic, 'publisher': publisher[:80], **({'link': str(rest[0])[:500]} if links and rest and rest[0] else {})})
+            kept = _topic_rows(items, observed, topic, keywords, source, recent, links)
             if kept:
-                # Feeds are ordered by relevance; take the newest three so yesterday's story doesn't crowd out today's.
-                found[topic] = sorted(kept, key=lambda row: row['published'], reverse=True)[:3]
+                found[topic] = kept
             else:
                 error = ValueError('no eligible recent news for ' + topic)
         if len(found) == len(feeds):

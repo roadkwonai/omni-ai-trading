@@ -322,16 +322,20 @@ def account_state(root, now, max_age=timedelta(minutes=5)):
         return None
 
 
-def live_journal(record, engine_rows, today, today_events=()):
+def live_journal(record, engine_rows, today, today_events=(), *, simulate_today=True):
     """Estimate a live account's trades from the engine ledger and base stop, in journal() form.
     The estimate does not reproduce the regime-dependent 1% stop. The decision path/basis comes
     from the engine trade with the same time and symbol; a live-only trade (the live stop) keeps the mirror's reason.
     `today_events` (recorded 1-minute closes) lets today's live stop run; earlier days have no bars here."""
     from nh_live_shadow import account_shadow
     by_fill = {(r['time'], r['symbol'], r['side']): r for r in engine_rows}
-    days = sorted({r['time'][:10] for r in engine_rows} | {today})
+    days = {r['time'][:10] for r in engine_rows}
+    if simulate_today:
+        days.add(today)
+    else:
+        days.discard(today)
     books, rows = {}, []
-    for day in days:
+    for day in sorted(days):
         result = account_shadow(record, list(today_events) if day == today else [], day)
         for t in result['trades']:
             qty_held, avg, cost, pnl, ret = apply_fill(*books.get(t['symbol'], (0, 0.0)), t['side'], t['qty'], t['price'])
@@ -370,9 +374,9 @@ def real_journal(fills, engine_rows, window=timedelta(minutes=30)):
 
 
 @lru_cache(maxsize=8)
-def _cached_live(record_key, stamps, today, minute):
+def _cached_live(record_key, stamps, today, minute, simulate_today=True):
     record, engine_rows = json.loads(record_key)
-    return live_journal(record, engine_rows, today, _today_bars(today))
+    return live_journal(record, engine_rows, today, _today_bars(today) if simulate_today else (), simulate_today=simulate_today)
 
 
 def _today_bars(today):
@@ -382,23 +386,28 @@ def _today_bars(today):
             if str(e.get('time', '')).startswith(today) and e.get('market_bars')]
 
 
-def cached_live(record, engine_rows, root, now):
+def cached_live(record, engine_rows, root, now, *, simulate_today=True):
     """live_journal() recomputed when the engine ledger changes or once a minute (today's live stop)."""
     orders = Path(root) / 'orders.sqlite3'
     key = json.dumps([record, engine_rows], sort_keys=True, default=str)
-    return _cached_live(key, orders.stat().st_mtime if orders.exists() else 0, now.strftime('%Y-%m-%d'), now.strftime('%H%M'))
+    return _cached_live(key, orders.stat().st_mtime if orders.exists() else 0, now.strftime('%Y-%m-%d'),
+                        now.strftime('%H%M') if simulate_today else '', simulate_today)
 
 
 def account_rows(runtime, key, record, engine_rows, root, now):
     """A live account's trades: broker fills on the days they exist (live_fills), the mirror calculation elsewhere."""
     from live_fills import rows as live_fill_rows
     plain = [{k: r[k] for k in ('time', 'symbol', 'side', 'path', 'basis')} for r in engine_rows]
+    real = real_journal(live_fill_rows(runtime, key), engine_rows)
+    real_days = {r['time'][:10] for r in real}
+    today = now.strftime('%Y-%m-%d')
+    # When today's simulated trades would all be discarded, their only remaining use is as basis for later simulations.
+    simulate_today = today not in real_days or any(r['time'][:10] > today for r in plain)
     try:
-        mirrored = cached_live({k: v for k, v in record.items() if k != 'mode'}, plain, root, now)
+        mirrored = cached_live({k: v for k, v in record.items() if k != 'mode'}, plain, root, now,
+                               simulate_today=simulate_today)
     except Exception:
         mirrored = []
-    real = real_journal(live_fill_rows(runtime, key), engine_rows)
-    real_days = {r['time'][:10] for r in real}  # a day with broker fills shows those, never the computed mirror
     merged = [{**r, 'source': '가상(기본 손절 추정)'} for r in mirrored if r['time'][:10] not in real_days] + real
     return sorted(merged, key=lambda r: r['time'])
 

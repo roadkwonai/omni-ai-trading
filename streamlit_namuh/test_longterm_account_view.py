@@ -51,6 +51,99 @@ def test_fill_history_is_newest_first_with_realized_pnl(tmp_path):
     assert rows[0]['종목'] == 'KODEX 미국나스닥100 (379810)'
 
 
+def _longterm_desk_page(nhplug):
+    import longterm_account_view as view
+
+    view.desk('live-2', {'kind': 'live', 'engine': 'longterm', 'budget': {'capital_krw': 500_000}},
+              nhplug, [], '종료')
+
+
+def test_first_step_estimate_uses_saved_free_cash_and_alert_ask_without_counting_alert_as_order():
+    import yeo_method as Y
+
+    plan = {'day': '2026-11-23', 'info': {'nav': 482_820, 'invested': 64_910, 'weights': {'RES': 0}}}
+    events = [{'action': 'DCA_ALERT', 'time': '2026-11-23T09:45:14+09:00',
+               'orders': [{'code': '379810', 'price': 22_825}, {'code': '0261H0', 'price': 9_660}]}]
+    base, rows = V.first_step_estimate(Y.pairs(Y.clean({}))[0], .7, plan, None, events)
+    assert base == 417_910
+    assert [(r['예상 배정액'], r['예상 수량']) for r in rows] == [('117,015원', '5주'), ('50,149원', '5주')]
+    assert all('매수호가 기록' in r['가격 근거'] for r in rows)
+
+
+def _longterm_assets_page(nhplug, snapshot):
+    import streamlit as st
+    import longterm_account_view as view
+
+    def load_assets(refresh):
+        if st.session_state.get('loaded_once'):
+            raise TimeoutError
+        st.session_state['loaded_once'] = True
+        return snapshot
+
+    view.desk('live-2', {'kind': 'live', 'engine': 'longterm', 'principal_krw': 500_000,
+                         'budget': {'capital_krw': 500_000}}, nhplug, [], '실행 중', load_assets=load_assets)
+
+
+def test_assets_tab_displays_broker_valuation_and_preserves_last_success(tmp_path, monkeypatch):
+    from datetime import datetime
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(L, 'ROOT', tmp_path)
+    snapshot = {'time': datetime.fromisoformat('2026-11-23T10:20:30+09:00'),
+                'account': {'총자산': 499_200, '주문가능금액': 453_200},
+                'aggregate': {'평가손익': -800, '수익률(%)': -1.71},
+                'holdings': [{'종목코드': '379810', '종목': 'KODEX 미국나스닥100', '보유수량': 2, '평균매입가': 23_400,
+                              '현재가': 23_000, '평가금액': 46_000, '평가손익': -800, '수익률(%)': -1.71}]}
+    ui = AppTest.from_function(_longterm_assets_page, args=(str(tmp_path), snapshot)).run()
+    assert not ui.exception
+    assert any('불러오는 중' in caption.value for caption in ui.caption)
+    ui.button(key='lt_asset_refresh_live-2').click().run()
+    for attempt in range(2):
+        assert not ui.exception
+        row = next(table.value for table in ui.dataframe if '현재가' in table.value).iloc[0]
+        assert list(row[['현재가', '평가금액', '평가손익', '수익률']]) == ['23,000원', '46,000원', '-800원', '-1.71%']
+        assert any('2026-11-23 10:20:30 KST' in caption.value for caption in ui.caption)
+        if attempt == 0:
+            ui.button(key='lt_asset_refresh_live-2').click().run()
+    assert any('마지막 성공 조회 결과' in warning.value for warning in ui.warning)
+
+
+def test_desk_shows_remaining_holding_from_raw_broker_fills(tmp_path, monkeypatch):
+    import sqlite3
+    import live_fills
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setattr(L, 'ROOT', tmp_path)
+    (tmp_path / 'longterm-live').mkdir()
+    (tmp_path / 'longterm-live' / 'state-live-2.json').write_text(json.dumps({
+        'orders': [{'key': 'NDX', 'code': '379810', 'side': 'BUY', 'qty': 10, 'price': 20_000,
+                    'status': 'dry_run'}]}))
+    with sqlite3.connect(tmp_path / live_fills.NAME) as db:
+        db.execute(live_fills.SCHEMA)
+        db.executemany('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?)', [
+            ('live-2', '20261118', 1, '379810', 'BUY', 10, 20_000, '2026-11-18T09:41:00+09:00', 'x'),
+            ('live-2', '20261119', 2, '379810', 'SELL', 4, 21_000, '2026-11-19T09:42:00+09:00', 'x'),
+        ])
+    live_fills.balance_file(tmp_path, 'live-2').write_text('\n'.join([
+        json.dumps({'time': '2026-11-18T14:00:00+09:00', 'total_assets': 500_000, 'cash': 300_000}),
+        'broken',
+        json.dumps({'time': '2026-11-19T06:00:00+00:00', 'total_assets': 505_000, 'cash': 384_000}),
+        json.dumps({'time': '2026-11-19T09:40:00+09:00', 'total_assets': 499_000, 'cash': 300_000}),
+    ]))
+
+    ui = AppTest.from_function(_longterm_desk_page, args=(str(tmp_path),)).run()
+    assert not ui.exception
+    holdings = next(table.value for table in ui.dataframe if '평균 매입가' in table.value)
+    ndx = holdings.loc[holdings['종목'].str.endswith('(379810)')].iloc[0]
+    assert (ndx['보유 수량'], ndx['매입 금액']) == (6, '120,000원')
+    assert [tab.label for tab in ui.tabs] == ['자산·보유', '주문·체결', '가상 비교', '증권사 조회·보호']
+    assert len(ui.get('vega_lite_chart')) == 2
+    allocation = next(table.value for table in ui.dataframe if '실계좌 비중' in table.value)
+    assert allocation['실계좌 비중'].isna().all()
+    assert [(day, row['total_assets']) for day, _, row in V.daily_balance_history(
+        live_fills.balance_file(tmp_path, 'live-2'))] == [('2026-11-18', 500_000), ('2026-11-19', 505_000)]
+
+
 def test_live_diagram_shows_the_long_term_path():
     import guides
     dot = guides.live_dot(guides.values())
@@ -225,11 +318,17 @@ def test_shadow_summary_gives_the_accounts_virtual_result_and_both_return_curves
     assert V.shadow_summary([], nav, {}) is None
 
 
-def test_allocation_rows_compare_the_target_with_what_the_account_holds():
-    weights = {k: 0 for k in L.ASSETS} | {'NDX': 0.5, 'RES': 0.5}
-    rows = {r['key']: r for r in V.allocation_rows(weights, {'379810': 10}, {'NDX': (24_000, 'p'), 'RES': (100_000, 'p')}, 500_000)}
-    assert (rows['NDX']['목표 금액'], rows['NDX']['보유 금액'], rows['NDX']['목표 %'], rows['NDX']['보유 %']) == (250_000, 240_000, 50.0, 48.0)
-    assert (rows['RES']['보유 금액'], rows['RES']['차이 %p']) == (0, -50.0)
+def test_allocation_shows_actual_reservoir_gap_and_unknown_valuation():
+    rows = V.allocation_comparison({'NDX': 0.5, 'SPX': 0, 'RES': 0.5},
+                                  {'379810': {'평가금액': 200_000}, '0261H0': {'평가금액': None}},
+                                  500_000, {}, '357870')
+    assert [r['종목'] for r in rows] == ['379810', '357870', '0261H0']
+    assert (rows[0]['목표 비중'], rows[0]['실계좌 비중'], rows[0]['비중 차이']) == (50, 40, -10)
+    assert (rows[1]['목표 금액'], rows[1]['실계좌 비중']) == (250_000, 0)
+    assert rows[2]['실계좌 비중'] is None and rows[2]['비중 차이'] is None
+    chart = V.allocation_chart(rows).to_dict()
+    assert chart['height'] == {'step': 42}
+    assert [layer['mark']['type'] for layer in chart['layer']] == ['bar', 'tick']
 
 
 def test_flow_dot_marks_where_the_account_stops_today():

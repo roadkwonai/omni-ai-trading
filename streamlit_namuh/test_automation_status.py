@@ -10,6 +10,20 @@ import automation_status as status
 
 
 class AutomationStatusTest(unittest.TestCase):
+    def test_process_cache_peek_never_runs_launchctl_and_failure_expires(self):
+        with patch.object(status.time, 'monotonic', return_value=100), \
+                patch.object(status.subprocess, 'run', side_effect=OSError) as run:
+            status.forget_processes()
+            self.assertIsNone(status.peek_processes(max_age=5))
+            run.assert_not_called()
+            self.assertTrue(all(value == '확인 불가' for value in status.processes(max_age=5).values()))
+            self.assertTrue(all(value == '확인 불가' for value in status.peek_processes(max_age=5).values()))
+            status.processes(max_age=5)
+            self.assertEqual(run.call_count, 1)
+        with patch.object(status.time, 'monotonic', return_value=106):
+            self.assertIsNone(status.peek_processes(max_age=5))
+        status.forget_processes()
+
     def test_processes_distinguishes_running_stopped_and_missing(self):
         result = SimpleNamespace(stdout='PID Status Label\n123 0 com.vibetrading.shared-etf-paper\n- 0 com.vibetrading.live-follow-1\n'
                                         '9 0 com.vibetrading.live-policy-auto\n')

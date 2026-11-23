@@ -85,9 +85,10 @@ def render(tabs, states, records, alerts, engines=None):
     running = sum(1 for s in mirrors if s == '실행 중')
     armed = sum(1 for r in live.values() if r.get('live_orders') is True)
     st.markdown(CSS + (stat_html('운영 엔진', engines, gray if engines == '모두 끔' else green) if engines else '')
-                + stat_html('모의 실행기', runner, green if runner == '실행 중' else red  # 종료 is normal unless alerts() flags it
+                + stat_html('모의 실행기', runner, green if runner == '실행 중' else gray if runner == '확인 중' else red  # 종료 is normal unless alerts() flags it
                             if runner != '종료' or any(a.startswith('공유 모의 ETF 실행기:') for a in alerts) else gray)
-                + stat_html('실계좌 실행기', f'{running}/{len(live)} 실행', green if live and running == len(live) else gray if not running else orange)
+                + stat_html('실계좌 실행기', '확인 중' if '확인 중' in mirrors else f'{running}/{len(live)} 실행',
+                            green if live and running == len(live) else gray if not running else orange)
                 + stat_html('실주문 스위치', f'{armed}개 켜짐' if armed else '모두 꺼짐', orange if armed else gray)
                 + stat_html('주의 항목', f'{len(alerts)}건', red if alerts else green), unsafe_allow_html=True)
     a, b = st.columns(2)

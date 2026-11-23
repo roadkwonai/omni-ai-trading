@@ -31,12 +31,12 @@ FACTS = {'per': 'PER', 'pbr': 'PBR', 'hts_avls': '시가총액(억)', 'bstp_kor_
          'w52_lwpr': '52주 최저', 'for_rate': '외국인 보유율(%)', 'stck_oprc': '시가', 'stck_hgpr': '고가', 'stck_lwpr': '저가'}
 
 
-def stock_news(name, now, limit=3):
+def stock_news(name, now, limit=3, *, timeout=10):
     """Newest same-day Google News headlines that mention the stock name (no restricted publisher, as etf_news)."""
     from etf_news import RESTRICTED_PUBLISHERS
     url = 'https://news.google.com/rss/search?q=' + quote(f'"{name}" when:1d') + '&hl=ko&gl=KR&ceid=KR:ko'
     request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         root = ET.fromstring(response.read(300_001))
     rows = []
     for item in root.findall('./channel/item'):
@@ -191,8 +191,9 @@ def select(read, candidates, now):
 
 
 def due(now, path=ROOT / 'watchlist.json'):
-    """A selection is due at 09:05+ when none exists today or the last is 30 minutes old."""
-    if now.astimezone(KST).strftime('%H:%M') < '09:05':
+    """Start selection after six same-day completed bars can pass validation."""
+    # valid_bars excludes the current and previous minutes. Allow the opening bars time to arrive.
+    if now.astimezone(KST).strftime('%H:%M') < '09:08':
         return False
     try:
         at = datetime.fromisoformat(json.loads(Path(path).read_text())['time'])

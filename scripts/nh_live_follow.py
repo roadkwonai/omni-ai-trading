@@ -717,14 +717,26 @@ def pending_step(reader, guard, credentials, account, snapshots, info, may_cance
             db.execute('INSERT OR IGNORE INTO observed_pending VALUES (?,?)', (row[0], time.time()))
     if pending:  # reconcile fills/remainders separately from submission; never submit while anything is open
         left = []
+        cancelled_sells = set()
         for fingerprint, state, operation, number, symbol in pending:
             if state == 'acknowledged':
                 try:
-                    info.setdefault('reconciled', {})[fingerprint[:12]] = guard.reconcile(fingerprint, snapshots['history'])
+                    outcome = guard.reconcile(fingerprint, snapshots['history'])
+                    info.setdefault('reconciled', {})[fingerprint[:12]] = outcome
+                    if operation == 'krstockOrderCashSell' and outcome['filled'] == 0 and outcome['cancelled'] > 0:
+                        cancelled_sells.add(symbol)
                     continue
                 except LiveOrderBlocked:
                     pass
             left.append((fingerprint, state, operation, number, symbol))
+        if cancelled_sells:
+            # Reconciling the original order can also close the cancellation from the input list.
+            with guard._db() as db:
+                still_open = {r[0] for r in db.execute(
+                    "SELECT fingerprint FROM live_intents WHERE scope=? AND state!='terminal'", (guard.scope,))}
+            left = [row for row in left if row[0] in still_open]
+            if not still_open:
+                info['cancelled_sells'] = sorted(cancelled_sells)
         has_cancel = any(r[2] == 'krstockOrderCancel' for r in left)
         for fingerprint, state, operation, number, symbol in left:
             with guard._db() as db:
@@ -744,6 +756,22 @@ _QUIET = {}  # (runtime root, account key) -> when a full read last found nothin
 
 
 def step(reader, account, credentials, record, *, execute_orders=False, root, now=None, key=None, may_cancel=None):
+    result = _step(reader, account, credentials, record, execute_orders=execute_orders, root=root, now=now,
+                   key=key, may_cancel=may_cancel)
+    cancelled_sells = result.get('cancelled_sells')
+    if not execute_orders or result['action'] != 'RECONCILED' or not cancelled_sells:
+        return result
+    started = time.monotonic()
+    replacement = _step(reader, account, credentials, record, execute_orders=True, root=root, now=now,
+                        key=key, may_cancel=False, replacement_only=cancelled_sells)
+    replacement['reconciled'] = result['reconciled']
+    replacement['cancelled_sells'] = cancelled_sells
+    replacement['replacement_recheck_seconds'] = round(time.monotonic() - started, 2)
+    replacement['same_cycle_replacement'] = replacement.get('execution') == 'ACKNOWLEDGED_NOT_FILLED'
+    return replacement
+
+
+def _step(reader, account, credentials, record, *, execute_orders, root, now, key, may_cancel, replacement_only=()):
     from etf_universe import SYMBOLS
     from nh_guarded_live import execute
     from nh_live_broker import collect_snapshots
@@ -781,7 +809,7 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
     quiet_key, owned_now = (str(root), key), {c for c in guard.symbols if guard.owned(c)}
     since = _QUIET.get(quiet_key) if key else None
     if (since is not None and timedelta(0) <= now - since < QUIET_RECHECK and book is not None and not any(target.values())
-            and not owned_now and not hand and not requests['exit'] and not requests['buy']):
+            and not owned_now and not hand and not requests['exit'] and not requests['buy'] and not replacement_only):
         return {'action': 'HOLD', 'reason': 'quiet: broker re-read every 5 minutes',
                 'idle': True, 'paper_ledger': source.parent.name if source else None, 'paper': {}, 'target': {}, 'owned': {}, 'held': {},
                 'quiet_since': since.isoformat(timespec='seconds')}
@@ -906,6 +934,9 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
                   halted=risk['halted'], exits=exits, buy_paused=not buy_allowed(root), clock=clock,
                   **(dict(zip(('late', 'late_until'), v2_late_buys(source))) if source is not None else {}))
     plan.update(info)
+    if replacement_only and plan['action'] in CASH and (
+            plan['action'] != 'SELL' or plan.get('symbol') not in replacement_only):
+        return {**info, 'action': 'RECONCILED', 'pending': 0, 'reason': 'no current matching replacement sell'}
     if plan['action'] not in CASH:
         plan['execution'] = 'NO_ORDER'
         return plan
@@ -956,8 +987,12 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
     options = {'pre_reserve_check': lambda: follow_order_current(
         account, root, record, plan['action'], source, book,
         protective=plan['action'] == 'SELL' and plan.get('reason') != 'paper runner holds less')}
-    if plan['action'] == 'SELL' and (prior := cancelled_sell(guard, code)):  # a verified cancelled sell is replaced explicitly
-        options['replacement_of'] = prior
+    if plan['action'] == 'SELL':
+        prior = cancelled_sell(guard, code)
+        if replacement_only and prior is None:
+            return {**info, 'action': 'RECONCILED', 'pending': 0, 'reason': 'replacement sale identity unavailable'}
+        if prior is not None:  # a verified cancelled sell is replaced explicitly
+            options['replacement_of'] = prior
     hand_qty = qty - mirrored.get(code, 0) if plan['action'] == 'BUY' else 0
     if hand_qty > 0:  # spent before sending: an unknown outcome never buys it twice
         spend_hand_buy(root, record, code, hand_qty)

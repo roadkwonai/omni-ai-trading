@@ -222,6 +222,12 @@ class LedgerTests(unittest.TestCase):
   self.assertNotIn('secret',json.dumps(result))
   event['error_type']='secret'
   self.assertNotIn('error_type',t.sanitize(event))
+ def test_oversold_atr_transition_is_preserved_in_the_ledger(self):
+  event = {'event': 'oversold_atr_status', 'time': '2026-11-06T11:42:01+09:00', 'symbol': '005930',
+           'status': 'unknown', 'need_pct': 6.0, 'drop_pct': -4.0, 'retry_seconds': 300}
+  self.assertEqual(t.sanitize(event), event)
+  self.assertNotIn('status', t.sanitize({**event, 'status': 'private-value'}))
+
  def test_cycle_identity_and_risk_event_are_sanitized(self):
   event={'event':'v2_risk_exit','time':'2026-11-06T11:42:01+09:00','cycle_id':'a'*32,'symbol':'114800'}
   self.assertEqual(t.sanitize(event)['cycle_id'],'a'*32)
@@ -387,6 +393,15 @@ class GuardDetailTests(unittest.TestCase):
 
 
 class EntryContextLedgerTests(unittest.TestCase):
+    def test_entry_timing_survives_on_orders_and_protective_refusals(self):
+        timing = {'gate_time': '2026-11-23T11:29:36.000+09:00', 'quote_time_kst': '11:29:39',
+                  'decision_bar_time': '112700', 'decision_price': 33700, 'order_ask': 33900, 'recent_low': 33450,
+                  'recent_low_bars': 6, 'ask_vs_decision_pct': 0.593, 'ask_vs_recent_low_pct': 1.345}
+        for kind in ('submitted', 'v2_execution_gate'):
+            result = t.sanitize({'time': '2026-11-23T11:29:55+09:00', 'event': kind,
+                                 'entry_timing': {**timing, 'private': 'ignored'}})
+            self.assertEqual(result['entry_timing'], timing)
+
     def test_submitted_keeps_signed_entry_context_within_bounds(self):
         event = {'time': '2026-11-13T13:24:35+09:00', 'event': 'submitted', 'symbol': '074600', 'qty': 34, 'limit': 29200,
                  'high_gap_pct': -1.35, 'open_gap_pct': 12.4}

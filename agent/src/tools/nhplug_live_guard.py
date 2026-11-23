@@ -115,8 +115,9 @@ def _rows(snapshot, account, day):
         counts = [row.get(k) for k in ('orr_qty', 'tot_cns_qty', 'ny_cns_qty', 'can_qty')]
         if any(type(v) is not int or v < 0 for v in counts):
             raise LiveOrderBlocked('order quantities invalid')
-        # NH acknowledgement rows are not terminal orders and cannot reconcile an intent.
-        if sum(counts[1:]) != counts[0] and not (row.get('orr_rjt_rsn_cd_nm') == '확인' and counts == [1, 0, 0, 0]):
+        # NH reports the requested quantity on a confirmation row and leaves execution counts at zero.
+        confirmation = row.get('orr_rjt_rsn_cd_nm') == '확인' and counts[0] > 0 and not any(counts[1:])
+        if sum(counts[1:]) != counts[0] and not confirmation:
             raise LiveOrderBlocked('order quantities invalid')
     return rows
 

@@ -403,6 +403,36 @@ def rereplay(db=DB):
     return len(updates)
 
 
+def refresh_v2_versioned(db=DB, settings=None):
+    """Archive previous v2 results and atomically refresh only v2 using stored daily bars."""
+    import oversold_replay
+    run_id = datetime.now(KST).isoformat(timespec='microseconds')
+    with sqlite3.connect(Path(db), timeout=30) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        conn.execute('CREATE TABLE IF NOT EXISTS v2_replay_history (run_id TEXT NOT NULL, case_key TEXT NOT NULL, previous TEXT, updated TEXT NOT NULL, PRIMARY KEY(run_id, case_key))')
+        rows = conn.execute('SELECT key,code,day,data FROM cases').fetchall()
+        by_code = {}
+        for key, code, day, data in rows:
+            by_code.setdefault(code, []).append((key, day, json.loads(data)))
+        updates, archive = [], []
+        for code, items in by_code.items():
+            daily = conn.execute('SELECT day,o,h,l,c,v FROM series WHERE symbol=? ORDER BY day', (symbol_of(code),)).fetchall()
+            index = {row[0]: n for n, row in enumerate(daily)}
+            for key, day, case in items:
+                i = index.get(day)
+                if i is None or i < 1:
+                    continue
+                replay = case.setdefault('replay', {})
+                old = replay.get('v2_plan')
+                new = oversold_replay.run_v2(daily, i, case['kind'], settings)
+                archive.append((run_id, key, json.dumps(old, ensure_ascii=False), json.dumps(new, ensure_ascii=False)))
+                replay['v2_plan'] = new
+                updates.append((json.dumps(case, ensure_ascii=False, default=str), key))
+        conn.executemany('INSERT INTO v2_replay_history VALUES (?,?,?,?)', archive)
+        conn.executemany('UPDATE cases SET data=? WHERE key=?', updates)
+    return {'run_id': run_id, 'updated': len(updates), 'rule_version': oversold_replay.V2_RULE_VERSION}
+
+
 _CACHE = {}
 
 

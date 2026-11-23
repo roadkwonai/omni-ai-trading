@@ -58,6 +58,9 @@ class WatchlistTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'watchlist.json'
             self.assertFalse(w.due(NOW.replace(hour=9, minute=1), path))
+            self.assertFalse(w.due(NOW.replace(hour=9, minute=5), path))
+            self.assertFalse(w.due(NOW.replace(hour=9, minute=7), path))
+            self.assertTrue(w.due(NOW.replace(hour=9, minute=8), path))
             self.assertTrue(w.due(NOW, path))
             record = {'time': (NOW - timedelta(minutes=10)).isoformat(), 'selected': ['000001', 'bad'],
                       'stocks': {'000001': {'name': 'A'}, 'bad': {}}}

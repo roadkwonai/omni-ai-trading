@@ -5,11 +5,14 @@ import sys
 import time
 import math
 import json
+import hashlib
 import re
 import sqlite3
 import statistics
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'agent'))
@@ -54,16 +57,66 @@ def configured_account(config, mode):
     return args[args.index('--account') + 1]
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def _read_cache():
     return {}
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def _nh_starts():
-    import threading
     from collections import deque
-    return threading.Lock(), deque(maxlen=NH_CALLS_PER_S)
+    return Lock(), deque(maxlen=NH_CALLS_PER_S)
+
+
+@st.cache_resource(show_spinner=False)
+def _dashboard_reads():
+    return ThreadPoolExecutor(max_workers=2, thread_name_prefix='dashboard-read'), Lock(), {}
+
+
+def start_dashboard_read(key, fetch):
+    """Share an in-flight display read across sessions. Workers never access Streamlit session state."""
+    pool, lock, running = _dashboard_reads()
+    with lock:
+        future = running.get(key)
+        if future is not None and not future.done():
+            return future
+        future = running[key] = pool.submit(fetch)
+
+    def forget(done):
+        with lock:
+            if running.get(key) is done:
+                running.pop(key)
+
+    future.add_done_callback(forget)
+    return future
+
+
+def rerun_when_read_completes(start):
+    armed = False
+    future = None
+
+    @st.fragment(run_every='300ms')
+    def check():
+        nonlocal armed, future
+        if not armed:
+            armed = True
+            return
+        if future is None:
+            future = start()
+        if future.done():
+            st.rerun()
+    check()
+
+
+def display_process_states():
+    from automation_status import LABELS, PROCESS_CACHE_S, peek_processes
+    if PROCESS_CACHE_S <= 0:
+        return processes()
+    states = peek_processes()
+    if states is not None:
+        return states
+    rerun_when_read_completes(lambda: start_dashboard_read('process-states', processes))
+    return dict.fromkeys(LABELS, '확인 중')
 
 
 QUOTE_CACHE_S = setting('quote_cache_s')  # display-only NH reads (운영 조정값)
@@ -691,6 +744,8 @@ def new_listing_panel(now):
 def market_watch_panel(watch, movers, now):
     """What Jev weighs when picking today's stocks: market backdrop, the watchlist, every candidate and the rankings."""
     at = event_time((watch or {}).get('time'))
+    if at is None or at.astimezone(KST).date() != now.astimezone(KST).date():
+        watch, at = None, None
     market = (watch or {}).get('market') or {}
     k200, kq150, picked = st.columns(3)
     for column, key, label in ((k200, 'K200', '코스피200 (KODEX 200)'), (kq150, 'KQ150', '코스닥150 (KODEX 코스닥150)')):
@@ -701,9 +756,9 @@ def market_watch_panel(watch, movers, now):
                       delta_color='red' if (change or 0) > 0 else 'blue' if (change or 0) < 0 else 'off', border=True)
     picked.metric('관심종목 선정', f'{at:%H:%M}' if at else '없음',
                   f"Jev 1순위 {stock_names().get((watch or {}).get('jev_choice'), (watch or {}).get('jev_choice') or '—')}"
-                  if watch else '평일 09:05부터 30분마다', delta_color='violet', delta_arrow='off', border=True)
+                  if watch else '오늘 선정 대기', delta_color='violet', delta_arrow='off', border=True)
     if not watch:
-        st.caption('관심종목 선정 기록이 없습니다. 순위 계산기가 09:05부터 30분마다 Jev에 물어 3개를 고릅니다.')
+        st.caption('완료 분봉이 확보되면 Jev가 순위 후보를 평가합니다. 선정 결과는 30분 간격으로 갱신합니다.')
     else:
         age = (now - at).total_seconds() / 60 if at else None
         if age is None or age > 45:
@@ -2358,7 +2413,7 @@ def account_form(key, record, records, prefix=''):
                                  f'{prefix}{key}_paper_max_qty', slider=slide) if order_on else 0
             total_quantity = num_input(q2, '전체 보유 최대 수량 (주)', 1, 1_000_000, saved_total_qty or 1000,
                                        f'{prefix}{key}_paper_total_qty', slider=slide) if total_on else 0
-            if st.button('수량 제한 저장', key=f'{prefix}{key}_save_paper_max_qty'):
+            if st.button('수량 제한 저장', key=f'{prefix}{key}_save_paper_max_qty', type='primary'):
                 try:
                     tunables.save({'paper_max_order_qty': int(quantity), 'paper_max_total_qty': int(total_quantity)})
                     st.success('수량 제한을 저장했습니다. 최신 실행기는 다음 주기부터 적용합니다.')
@@ -3344,7 +3399,7 @@ def oversold_universe_editor(prefix=''):
     code_col, name_col, add_col = st.columns([1, 2, 1], vertical_alignment='bottom')
     new_code = code_col.text_input('종목코드', key=f'{prefix}oversold_new_code', placeholder='예: 005380')
     new_name = name_col.text_input('이름', key=f'{prefix}oversold_new_name', placeholder='예: 현대차')
-    if add_col.button('감시 종목 저장', key=f'{prefix}oversold_save', width='stretch', icon=':material/save:'):
+    if add_col.button('감시 종목 저장', key=f'{prefix}oversold_save', type='primary', width='stretch', icon=':material/save:'):
         chosen = {c: codes[c] for c in keep}
         if new_code.strip():
             if not re.fullmatch(r'\d{6}', new_code.strip()):
@@ -4663,7 +4718,17 @@ def quick_sell_panel(items, pending, sell, buy, key, note):
                 st.error('요청을 저장하지 못했습니다.')
         # visible on the row (user 2026-11-17: the controls hidden in one popover looked missing); each order still
         # asks for a confirm in its own popover
+        from vibe_longterm import ASSETS, RESERVOIRS
+        from yeo_method import EXTRA
+
+        known_names = {code: name for code, name, *_ in (*ASSETS.values(), *EXTRA.values())} | RESERVOIRS
+        labeled = []
         for code, name, qty in items:
+            if not name or name == code:
+                name = known_names.get(code, code)
+            if name != code and not name.endswith(f'({code})'):
+                name = f'{name} ({code})'
+            labeled.append((code, name, qty))
             label, size, sell_col, buy_col, all_col = st.columns([3, 2, 2, 2, 2], vertical_alignment='bottom')
             label.markdown(f'**{name}** · 보유 {qty:,}주')
             n = int(size.number_input('수량 (주)', min_value=1, max_value=max(qty, 1_000_000), value=min(qty, max(1, qty // 2)),
@@ -4682,7 +4747,7 @@ def quick_sell_panel(items, pending, sell, buy, key, note):
                 if st.button('전량 매도 확인', key=f'{key}_sellall_{code}', width='stretch', disabled=busy):
                     filed(lambda: sell(code, None))
         with st.popover('전체 종목 매도', icon=':material/delete_sweep:'):
-            st.write('보유 종목 ' + ', '.join(f'{n} {q:,}주' for _, n, q in items) + '를 모두 전량 매도합니다.')
+            st.write('보유 종목 ' + ', '.join(f'{n} {q:,}주' for _, n, q in labeled) + '를 모두 전량 매도합니다.')
             if st.button('전체 매도 확인', type='primary', key=f'{key}_sell_all', width='stretch'):
                 filed(lambda: [sell(c, None) for c, _, _ in items])
 
@@ -5040,6 +5105,23 @@ def live_balances_view(read, rows, records, numbers, scope):
         st.caption('조회된 당일 주문이 없습니다.')
 
 
+def live_buy_controls(root, *, mirror=True):
+    start, stop = st.columns(2) if mirror else (None, st)
+    if stop.button('실계좌 신규 매수 중단', icon=':material/pause_circle:', width='stretch',
+                   help='신규 매수 중단 표시를 저장합니다. 다시 허용하려면 실행 기록을 대조한 뒤 별도로 해제해야 합니다.'):
+        try:
+            if stop_live(root):
+                st.warning('신규 매수 중단을 요청했습니다. 계좌별 실행 기록과 미체결 상태를 확인하세요.')
+            else:
+                st.error('신규 매수 중단 표시를 확인하지 못했습니다. 실행 상태와 증권사 주문을 확인하세요.')
+        except Exception:
+            st.error('중단 요청을 저장하지 못했습니다. 실행 상태를 확인하세요.')
+    if start is not None:
+        start.button('실계좌 자동매매 시작', icon=':material/play_circle:', disabled=True, width='stretch',
+                     help='모의 검증과 별도 승인 전에는 이 화면에서 시작할 수 없습니다.')
+        st.caption('Jev·Decision 확인과 AI 관찰기가 모두 확인돼야 실계좌 시작을 허용합니다. 모의 주문·체결 검증 후 설정을 연결합니다.')
+
+
 def live_tab_panel(root, read, configs, all_records):
     """Live accounts: a combined view of every live account, every account's orders (the old 주문·정리 tab, 2026-11-19)
     and one view per account (executor, mirror, virtual run, limits, orders, balance), then the shared controls and the
@@ -5069,15 +5151,20 @@ def live_tab_panel(root, read, configs, all_records):
                 'icon': 'gpp_bad' if halted else 'verified_user',
                 'help': '전역 중단 표시입니다. 켜져 있으면 실계좌 주문 경로가 막힙니다. 다른 증권사 HALT와는 별개입니다.'}]
     if pick == views[0]:
-        running = sum(r['state'] == '실행 중' for r in rows)
-        executing = sum(r['mode'] == '실주문' for r in rows)
+        import longterm_account_view as ltv
+        nhplug = root / 'nhplug'
+        longterm_rows = {k: ltv.status(k, record, nhplug) for k, record in longterm.items()}
+        longterm_states = {k: states.get(f"{record.get('label', k)} 장기투자 실행기", '확인 불가')
+                           for k, record in longterm.items()}
+        executor_states = [r['state'] for r in rows] + list(longterm_states.values())
+        running = executor_states.count('실행 중')
         realized = sum(int(r['result']['realized']) for r in rows)
-        sc.row([{'label': '미러 실행기', 'value': f'{running}/{len(rows)} 실행 중', 'tone': 'ok' if running == len(rows) else 'off' if not running else 'warn',
+        sc.row([{'label': '실계좌 실행기', 'value': f'{running}/{len(executor_states)} 실행 중',
+                 'tone': 'off' if not running else 'ok' if running == len(executor_states) else 'warn',
                  'icon': 'sync_alt', 'pulse': bool(running),
-                 'sub': f'실주문 {executing}개 · 계획만 {len(rows) - executing}개',
-                 'help': '계좌마다 엔진 원장을 계좌 설정 크기로 따라가는 실행기(nh_live_follow)입니다. 평일 08:58에 시작해 15:20에 끝납니다. '
-                         '실주문(--execute)은 계좌별 별도 승인이며 기본은 계획만 기록합니다.'},
-                {'label': '오늘 가상 실현', 'value': f'{realized:+,}원', 'tone': sc.signed(realized), 'icon': 'science',
+                 'sub': f"미러 {sum(r['state'] == '실행 중' for r in rows)}/{len(rows)} · 장기투자 {list(longterm_states.values()).count('실행 중')}/{len(longterm)}",
+                 'help': '미러와 장기투자 실계좌의 프로세스 상태입니다. 실주문 설정, 주문 계획과 보유 현황은 아래에서 확인합니다.'},
+                {'label': '미러 오늘 가상 실현', 'value': f'{realized:+,}원' if rows else '—', 'tone': sc.signed(realized), 'icon': 'science',
                  'sub': f"가상 매매 {sum(len(r['result']['trades']) for r in rows)}건 · 수수료·세금 미반영",
                  'help': '각 계좌가 엔진 원장을 미러했을 때 오늘의 실현손익 합계입니다(실제 체결 아님).'},
                 *control])
@@ -5088,31 +5175,66 @@ def live_tab_panel(root, read, configs, all_records):
                     + [('자세히 · 실행 기록', 'live_d_events', dlg.live_events_dialog,
                         ('실계좌 미러 실행 기록', recent_events(root / 'nhplug/live-follow.jsonl'), LL))], columns=4)
         st.markdown('##### 계좌별 한눈에 보기')
+        import engine_compare as ec
+        import live_fills
+        names = ltv.asset_names_by_code() | stock_names()
+        holdings = {}
+        for key in records:
+            fills = live_fills.rows(nhplug, key)
+            positions = ec.positions(ec.real_journal(fills, []))
+            holdings[key] = (' · '.join(f"{names.get(code, code)} ({code}) {p['qty']:,}주" for code, p in sorted(positions.items()))
+                             or ('원장상 0주' if fills else '체결 기록 없음'))
         table = []
         for r in rows:
             target = r['target']
             table.append({'계좌': r['label'], '엔진': r['engine'], '따라가는 원장': r['role'], '실행기': r['state'], '모드': r['mode'],
                           '마지막 기록': (f"{r['stamp']:%m/%d %H:%M} {LL.ACTIONS.get(r['event'].get('action'), r['event'].get('action', ''))}"
                                            f" · {LL.reason(r['event'].get('reason'))}" if r['stamp'] else '없음'),
-                          '미러 목표': ('확인 불가' if target is None else ' · '.join(f'{stock_names().get(c, c)} {n}주' for c, n in target.items()) or '0주'),
+                          '체결 원장 보유': holdings[r['key']],
+                          '미러 목표': ('확인 불가' if target is None else ' · '.join(f'{names.get(c, c)} {n}주' for c, n in target.items()) or '0주'),
                           '오늘 가상 매매': f"{len(r['result']['trades'])}건", '오늘 가상 실현': f"{int(r['result']['realized']):+,}원",
                           '매수 크기': '1주' if r['rules']['sizing'] == 'share' else f"{r['rules']['tranche_krw'] // 10_000:,}만 원",
                           '한도 (운용금 · 1주 상한 · 하루 손실 · 손절)': f"{r['budget']['capital_krw'] // 10_000:,}만 · {r['budget']['order_price_max_krw'] // 10_000:,}만 · "
                                                                 f"{r['budget']['daily_loss_krw'] // 10_000:,}만 · −{r['stop']:g}%"})
-        st.dataframe(table, hide_index=True, width='stretch')
+        for key, data in longterm_rows.items():
+            table.append({'계좌': records[key].get('label', key), '엔진': '장기투자', '따라가는 원장': '장기투자 엔진 계획',
+                          '실행기': longterm_states[key], '모드': data['mode'], '마지막 기록': data['today'].get('day') or '없음',
+                          '체결 원장 보유': holdings[key], '미러 목표': '—', '오늘 가상 매매': '—', '오늘 가상 실현': '—',
+                          '매수 크기': '계좌 전략 기준', '한도 (운용금 · 1주 상한 · 하루 손실 · 손절)': '계좌 설정 참조'})
+        if table:
+            st.dataframe(table, hide_index=True, width='stretch')
+            st.caption('체결 원장 보유는 기록된 실체결을 누적한 수량입니다. 증권사 최신 잔고는 아래 잔고·주문 조회에서 확인할 수 있습니다.')
         if longterm:
-            import longterm_account_view
             st.markdown('##### 장기투자 실계좌')
             for k, record in longterm.items():
-                longterm_account_view.status_card(k, record, root / 'nhplug')
+                ltv.status_card(k, record, nhplug, data=longterm_rows[k])
         selected = rows + [{'key': k, 'label': r.get('label', k)} for k, r in longterm.items()]
         st.caption('계좌 이름을 위에서 누르면 그 계좌의 규칙·오늘 가상 매매·잔고를 자세히 봅니다. 한도는 계좌·자동매매 탭에서 계좌마다 정합니다.')
     elif (chosen := next((k for k, r in longterm.items() if r.get('label', k) == pick), None)):
         import longterm_account_view
         label = longterm[chosen].get('label', chosen)
+        selected = [{'key': chosen, 'label': label}]
+
+        def broker_view():
+            live_balances_view(read, selected, records, live_linked_numbers(read, records), chosen)
+            st.caption('신규 매수 중단은 실계좌 전체에 적용됩니다.')
+            live_buy_controls(root, mirror=False)
+
+        def load_assets(refresh):
+            number = live_number(read, records, chosen)
+            if not number:
+                raise ValueError('증권사 연결 계좌 확인 불가')
+
+            def fetch():
+                balance = live_balance(read, number)
+                return broker_snapshot(balance, {'Output_0': []}, datetime.now(KST))
+
+            return shared_snapshot('longterm-assets', number, fetch, refresh)
+
         longterm_account_view.desk(chosen, longterm[chosen], root / 'nhplug', control,
-                                   states.get(f'{label} 장기투자 실행기', '확인 불가'))
-        selected = [{'key': chosen, 'label': longterm[chosen].get('label', chosen)}]
+                                   states.get(f'{label} 장기투자 실행기', '확인 불가'), broker_view=broker_view,
+                                   load_assets=load_assets, chart=tradingview_chart)
+        return
     else:
         r = next(row for row in rows if row['label'] == pick)
         record = records[r['key']]
@@ -5162,19 +5284,7 @@ def live_tab_panel(root, read, configs, all_records):
         st.caption('손절 감시: 조회 완료 후 30초 간격 · 미체결 매수 취소 시도: 최초 확인 30초 후. 실제 주기는 조회 지연에 따라 길어질 수 있습니다.')
         st.warning('중단은 신규 매수 중단입니다. 실행기가 작동 중이면 미체결 매수를 취소·대조하고 보유분 손절·익절 관리는 계속합니다. '
                    '매도와 취소가 실제로 체결·완료된다는 보장은 아닙니다.')
-        start, stop = st.columns(2)
-        if stop.button('실계좌 신규 매수 중단', icon=':material/pause_circle:', width='stretch',
-                       help='신규 매수 중단 표시를 저장합니다. 다시 허용하려면 실행 기록을 대조한 뒤 별도로 해제해야 합니다.'):
-            try:
-                if stop_live(root):
-                    st.warning('신규 매수 중단을 요청했습니다. 미체결 취소·대조와 손절 감시 상태를 확인하세요.')
-                else:
-                    st.error('신규 매수 중단 표시를 확인하지 못했습니다. 실행 상태와 증권사 주문을 확인하세요.')
-            except Exception:
-                st.error('중단 요청을 저장하지 못했습니다. 실행 상태를 확인하세요.')
-        start.button('실계좌 자동매매 시작', icon=':material/play_circle:', disabled=True, width='stretch',
-                     help='모의 검증과 별도 승인 전에는 이 화면에서 시작할 수 없습니다.')
-        st.caption('Jev·Decision 확인과 AI 관찰기가 모두 확인돼야 실계좌 시작을 허용합니다. 모의 주문·체결 검증 후 설정을 연결합니다.')
+        live_buy_controls(root)
         st.markdown('**최근 실행 기록**')
         if live_events:
             st.dataframe([{k: str(e.get(k, '')) for k in ('time', 'account', 'mode', 'action', 'symbol', 'reason', 'execution')}
@@ -5284,7 +5394,7 @@ def prefs_form():
         quotes = st.toggle('자동 갱신 기본 켜기 (전체 화면)', value=current['quotes_auto'])
         unit = st.segmented_control('기본 금액 단위', PREFS.UNITS, default=current['money_unit'],
                                     help='계좌·자동매매 금액 칸이 처음 열릴 때의 단위입니다.')
-        if st.form_submit_button('저장', icon=':material/save:', width='stretch'):
+        if st.form_submit_button('저장', type='primary', icon=':material/save:', width='stretch'):
             st.session_state.prefs = PREFS.save(prefs_path(), {**current, 'status_blink': blink, 'start_tab': start, 'refresh_s': refresh or current['refresh_s'],
                                                                 'quotes_auto': quotes, 'money_unit': unit or current['money_unit'],
                                                                 'font_scale': font_scale})
@@ -5343,7 +5453,9 @@ def main():
     with st.sidebar:
         import overview
         import sidebar
-        states = processes()
+        states = display_process_states()
+        if '확인 중' in states.values():
+            st.caption('실행기 상태 확인 중')
         import engine_ops
         alerts = overview.alerts(get_runtime_root() / 'nhplug', states, overview.latest_follow(get_runtime_root() / 'nhplug'),
                                  datetime.now(KST).strftime('%Y-%m-%d'))
@@ -5405,7 +5517,7 @@ def main():
         with summary_tab:
             help_row('summary')
             import overview
-            overview.render(get_runtime_root() / 'nhplug', records, processes(),
+            overview.render(get_runtime_root() / 'nhplug', records, states,
                             stock_names(), refresh_balances=lambda: record_live_balances(read, records))
     if journal_tab.open:
         with journal_tab:
@@ -5494,27 +5606,78 @@ def main():
                 etf_auto = auto_on()  # the header's one switch (user 2026-11-17)
                 toggle.caption(f'자동 갱신 켜짐 · {refresh_s()}초 (장중 09:00~15:30)' if etf_auto else '자동 갱신 꺼짐 · 상단에서 켭니다',
                                help=f'{refresh_s()}초 간격 REST 조회입니다. 실시간 틱이나 체결 스트림이 아니며 지연·실패가 있을 수 있습니다.')
+                first_trading_render = True
+
                 @st.fragment(run_every=live_every())
                 def etf_status():
-                    service_states = processes()
+                    nonlocal first_trading_render
+                    service_states = states if first_trading_render else display_process_states()
+                    first_trading_render = False
                     runner_state = service_states.get('공유 모의 ETF 실행기', '확인 불가')
                     learning_state = service_states.get('공유 모의 ETF 데이터 관찰기', '확인 불가')
                     line, button = st.columns([4, 1], vertical_alignment='center')
                     mark = ':green[●]' if runner_state == '실행 중' else ':red[●]'
                     line.markdown(f'{mark} 실행기 {runner_state} · 학습 관찰기 {learning_state} · 조회 {datetime.now(KST):%H:%M:%S}')
                     refresh = button.button('ETF 현황 새로고침', key='etf_status_refresh', width='stretch')
-                    if runner_state == '확인 불가':
+                    if runner_state == '확인 중':
+                        st.caption('실행기 상태 확인 중입니다.')
+                    elif runner_state == '확인 불가':
                         st.warning('모의 실행기 상태를 확인할 수 없어 자동 주문과 손절·익절 감시를 보장할 수 없습니다.')
                     elif runner_state != '실행 중':
                         st.warning('모의 실행기가 작동하지 않아 자동 주문과 손절·익절 감시를 보장할 수 없습니다.')
-                    kept = st.session_state.get('etf_broker_snapshot')
-                    if refresh or etf_auto or (snapshot_due(kept, datetime.now(KST)) and not (kept is None and st.session_state.get('etf_broker_error'))):
+                    identity = hashlib.sha256(str(account).encode()).hexdigest()
+                    if st.session_state.get('etf_broker_identity') != identity:
+                        st.session_state.pop('etf_broker_snapshot', None)
+                        st.session_state.pop('etf_broker_error', None)
+                        st.session_state.pop('etf_broker_attempt', None)
+                        st.session_state.pop('etf_broker_future', None)
+                        st.session_state.etf_broker_identity = identity
+
+                    def fetch_snapshot(fresh):
+                        now = datetime.now(KST)
                         try:
-                            st.session_state.etf_broker_snapshot = shared_snapshot('paper', account, lambda: shared_etf_broker_snapshot(read, paper, account, datetime.now(KST)), refresh)
-                            st.session_state.etf_broker_error = False
+                            snapshot = shared_snapshot('paper', account, lambda: shared_etf_broker_snapshot(read, paper, account, now), fresh)
                         except Exception:
+                            snapshot = None
+                        return snapshot, time.monotonic()
+
+                    def apply_snapshot(value):
+                        snapshot, attempted_at = value
+                        if snapshot is None:
                             st.session_state.pop('etf_broker_snapshot', None)
-                            st.session_state.etf_broker_error = True
+                        else:
+                            st.session_state.etf_broker_snapshot = snapshot
+                        st.session_state.etf_broker_error = snapshot is None
+                        st.session_state.etf_broker_attempt = attempted_at
+
+                    request = st.session_state.get('etf_broker_future')
+                    if request is not None and request.done():
+                        apply_snapshot(request.result())
+                        st.session_state.pop('etf_broker_future', None)
+                        request = None
+                    if refresh and request is None:
+                        apply_snapshot(fetch_snapshot(True))
+
+                    kept = st.session_state.get('etf_broker_snapshot')
+                    last_attempt = st.session_state.get('etf_broker_attempt')
+                    due = snapshot_due(kept, datetime.now(KST))
+                    can_retry = last_attempt is None or time.monotonic() - last_attempt >= refresh_s()
+                    pending_refresh = request is not None or (
+                        not refresh and can_retry and (etf_auto or (due and not st.session_state.get('etf_broker_error')))
+                    )
+                    pending_first = kept is None and pending_refresh
+                    if pending_refresh:
+                        st.caption('증권사 잔고·주문을 불러오는 중입니다. 실행기 원장부터 표시합니다.')
+                        if kept is not None:
+                            st.caption(f"기존 증권사 잔고 조회 시각 {kept['time']:%m/%d %H:%M:%S} KST")
+                        def start_broker_read():
+                            pending = st.session_state.get('etf_broker_future')
+                            if pending is None:
+                                key = ('paper-snapshot', identity, datetime.now(KST).date())
+                                pending = start_dashboard_read(key, lambda: fetch_snapshot(False))
+                                st.session_state.etf_broker_future = pending
+                            return pending
+                        rerun_when_read_completes(start_broker_read)
                     if st.session_state.get('etf_broker_error'):
                         st.error('증권사 잔고 또는 전체 주문을 확인하지 못했습니다. 빈 계좌로 간주하지 마세요.')
                     snapshot = st.session_state.get('etf_broker_snapshot')
@@ -5529,8 +5692,9 @@ def main():
                             books = realized_by_symbol(db, datetime.now(KST).strftime('%Y-%m-%d'))
                     except sqlite3.Error:
                         recent_fills, books = None, None
-                    portfolio_overview(snapshot, recent, recent_fills, datetime.now(KST), books,  # the numbers first
-                                       sell=lambda: paper_quick_sell('paper_top'))
+                    if not pending_first:
+                        portfolio_overview(snapshot, recent, recent_fills, datetime.now(KST), books,
+                                           sell=lambda: paper_quick_sell('paper_top'))
                     import trading_positions
                     position_data = trading_positions.snapshot(get_runtime_root() / 'nhplug')
                     position_names = stock_names()
@@ -5571,7 +5735,10 @@ def main():
                     if movers_tab.open:
                         with movers_tab:
                             market_watch_panel(watchlist_snapshot(), movers_snapshot(), datetime.now(KST))
-                            new_listing_panel(datetime.now(KST))
+                            listings = st.expander('신규 상장 종목', key='paper_new_listings', on_change='rerun')
+                            if listings.open:
+                                with listings:
+                                    new_listing_panel(datetime.now(KST))
                     if reasons.open:
                         with reasons:
                             jev_evidence_panel(recent, read, refresh or etf_auto)

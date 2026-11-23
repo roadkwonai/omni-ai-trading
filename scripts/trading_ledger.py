@@ -18,7 +18,7 @@ DATABASE = ROOT / 'trading-ledger.sqlite3'
 SYMBOLS = set(ETF_SYMBOLS.values()) | {'005930', '035420', '035720'}
 CHOICES = {'WAIT', 'HOLD', 'SELL', 'SAMSUNG', 'NAVER', 'KAKAO'} | set(ETF_SYMBOLS)
 EVENT_TYPES = {'started', 'stopped', 'decision', 'market_context', 'jev_shadow', 'jev_error', 'jev_holding_decision', 'error', 'submitted', 'sell_submitted', 'order_status', 'buy_unfilled', 'roundtrip_verified', 'order_limit', 'v2_started', 'v2_stopped', 'v2_error', 'v2_submitted', 'v2_cancel_submitted', 'v2_order_status', 'v2_holding_decision', 'v2_holding_decision_error', 'v2_entry_gate', 'v2_risk_exit', 'v2_risk_exit_error', 'v2_execution_gate', 'v2_news_error', 'manual_exit', 'split_add', 'split_take_profit', 'strategy_settings', 'vibe_exit', 'exit_plan', 'overnight_hold', 'watchlist_strength', 'new_listing', 'direction_switch', 'oversold_scan', 'oversold_signal', 'oversold_v2_gate', 'oversold_v2_signal', 'strength_shadow',
-               'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown', 'ipo_seen'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
+               'oversold_atr_status', 'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown', 'ipo_seen'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
 
 REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_reentry_no_session', 'careful_reentry_jev_wait',
     'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'strength_trend', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
@@ -72,6 +72,11 @@ def sanitize(event):
     if event.get('side') in ('Buy', 'Sell'): result['side'] = event['side']
     if event.get('reason') in REASONS:
         result['reason'] = event['reason']
+    if event['event'] == 'v2_execution_gate' and event.get('reason') == 'single_order_limit':
+        for key in ('price', 'buy_budget_krw'):
+            value = event.get(key)
+            if type(value) in (int, float) and 0 <= value < 1e9:
+                result[key] = value
     if type(event.get('permitted')) is bool: result['permitted'] = event['permitted']
     # 2026-11-12 audit: plan profile, split tranche, stop reason and internal error text were being dropped
     if event.get('profile') in ('defensive', 'trend', 'ipo', 'inverse_quick', 'inverse_crash', 'oversold'): result['profile'] = event['profile']
@@ -114,8 +119,14 @@ def sanitize(event):
         result['bar_problem'] = event['bar_problem']
     if isinstance(event.get('input_digest'), str) and re.fullmatch(r'[0-9a-f]{64}', event['input_digest']):
         result['input_digest'] = event['input_digest']
-    if event['event'] in ('oversold_scan', 'oversold_signal', 'oversold_v2_signal'):  # 낙폭과대: the measured fall and the answer
-        for key in ('drop_pct', 'atr_multiple', 'bounce_pct', 'target_pct', 'stop_pct', 'confidence', 'score', 'market_low_pct', 'rel_drop'):
+    if event['event'] in ('oversold_scan', 'oversold_atr_status', 'oversold_signal', 'oversold_v2_signal'):
+        if event.get('atr_status') in ('unknown', 'confirmed', 'not_required'):
+            result['atr_status'] = event['atr_status']
+        if event['event'] == 'oversold_atr_status' and event.get('status') in ('unknown', 'confirmed'):
+            result['status'] = event['status']
+            if type(event.get('retry_seconds')) is int and 0 < event['retry_seconds'] <= 3600:
+                result['retry_seconds'] = event['retry_seconds']
+        for key in ('drop_pct', 'need_pct', 'atr_multiple', 'bounce_pct', 'target_pct', 'stop_pct', 'confidence', 'score', 'market_low_pct', 'rel_drop'):
             if type(event.get(key)) in (int, float) and -100 <= event[key] <= 100:
                 result[key] = event[key]
         for key in ('stabilized', 'permitted'):
@@ -143,6 +154,29 @@ def sanitize(event):
         value = event.get(key)                                                        # review #3) and the VI triggers (11/17)
         if event['event'] == 'submitted' and type(value) in (int, float) and -100 <= value <= 1000:
             result[key] = value
+    timing = event.get('entry_timing')
+    if event['event'] in ('submitted', 'v2_execution_gate') and isinstance(timing, dict):
+        kept = {}
+        for key in ('order_ask', 'decision_price', 'recent_low', 'ask_vs_decision_pct', 'ask_vs_recent_low_pct'):
+            value = timing.get(key)
+            if type(value) in (int, float) and (-100 <= value <= 1000 if key.endswith('_pct') else 0 < value < 1e9):
+                kept[key] = value
+        if timing.get('recent_low_bars') == 6:
+            kept['recent_low_bars'] = 6
+        for key, pattern in (('decision_bar_time', r'[0-2][0-9][0-5][0-9][0-5][0-9]'),
+                             ('quote_time_kst', r'[0-2][0-9]:[0-5][0-9]:[0-5][0-9]')):
+            value = timing.get(key)
+            if isinstance(value, str) and re.fullmatch(pattern, value):
+                kept[key] = value
+        if isinstance(timing.get('gate_time'), str):
+            try:
+                gate = datetime.fromisoformat(timing['gate_time'])
+                if gate.tzinfo and gate <= timestamp:
+                    kept['gate_time'] = gate.isoformat(timespec='milliseconds')
+            except ValueError:
+                pass
+        if kept:
+            result['entry_timing'] = kept
     for key, allowed in (('overheat_code', '012345'), ('alarm_code', '012345'), ('vi_halt', '12')):  # NH warnings (11/17)
         value = event.get(key)
         if event['event'] == 'submitted' and isinstance(value, str) and len(value) == 1 and value in allowed:

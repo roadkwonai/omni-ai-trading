@@ -189,17 +189,25 @@ def card_rows(record, mode=None):
             ('실행', mode or mode_of(record))]
 
 
-def fill_rows(key, nhplug):
+def asset_names_by_code():
+    from yeo_method import EXTRA
+
+    return {code: name for code, name, *_ in (*L.ASSETS.values(), *EXTRA.values())} | L.RESERVOIRS
+
+
+def fill_rows(key, nhplug, *, fills=None):
     """The account's recorded broker fills, newest first, with the moving-average realized P&L (실계좌 탭 체결 이력)."""
     import engine_compare as ec
     import live_fills
-    names = {a[0]: a[1] for a in L.ASSETS.values()}
+    names = asset_names_by_code()
     held, avg, out = {}, {}, []
-    for r in live_fills.rows(nhplug, key):
+    for r in live_fills.rows(nhplug, key) if fills is None else fills:
         h, a, _, pnl, ret = ec.apply_fill(held.get(r['symbol'], 0), avg.get(r['symbol'], 0.0), r['side'], r['qty'], r['price'])
         held[r['symbol']], avg[r['symbol']] = h, a
-        out.append({'시각': r['time'][5:16].replace('T', ' '), '종목': f"{names.get(r['symbol'], r['symbol'])} ({r['symbol']})",
-                    '매수/매도': '매수' if r['side'] == 'BUY' else '매도', '수량': r['qty'], '가격': f"{r['price']:,}원",
+        code = r['symbol']
+        out.append({'시각': r['time'][:16].replace('T', ' '), '종목': f'{names[code]} ({code})' if code in names else code,
+                    '매수/매도': '매수' if r['side'] == 'BUY' else '매도', '수량': r['qty'], '가격': f"{r['price']:,.0f}원",
+                    '체결 금액': f"{r['price'] * r['qty']:,.0f}원",
                     '실현손익': '' if pnl is None else f"{pnl:+,.0f}원", '보유 후': h})
     return out[::-1]
 
@@ -213,17 +221,19 @@ def order_rows(today):
 
 def summary_cards(data):
     plan, today = data['plan'], data['today']
+    day = datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
     regime = L.REGIMES.get(plan.get('regime'), ('판단 전',))[0]
-    info = today.get('info') or {}
+    has_today = today.get('day') == day
+    info = (today.get('info') or {}) if has_today else {}
     sc.row([{'label': '운용 방식', 'value': '장기투자', 'tone': 'ai', 'icon': 'savings', 'sub': '미국 지수·테마 ETF · 거장 모듈'},
             {'label': '실행 모드', 'value': data['mode'], 'icon': 'bolt' if data['mode'] == '실주문' else 'edit_note',
              'tone': 'warn' if data['mode'] == '실주문' else 'off',
              'sub': checklist_text(data['checklist']),
              'help': f"실행기 {data['service'] or '미정의'} · 평일 09:35~14:40. ① launchd 등록 인자(ProgramArguments)에 --execute가 있어야 "
                      '하고(재등록은 별도 승인) ② 이 계좌의 실주문 스위치(accounts.json live_orders)가 켜져야 실제 주문이 실행됩니다.'},
-            {'label': '오늘 엔진 판단', 'value': regime, 'tone': 'ai', 'icon': 'insights',
+            {'label': '엔진 판단', 'value': regime, 'tone': 'ai', 'icon': 'insights',
              'sub': f"{plan.get('day') or '—'} · {L.MODES.get(plan.get('mode'), plan.get('mode') or '—')} 모드"},
-            {'label': '오늘 계좌 계획', 'value': f"{len(today.get('orders') or [])}건" if today.get('day') == plan.get('day') else '아직 없음',
+            {'label': '오늘 계좌 계획', 'value': f"{len(today.get('orders') or [])}건" if has_today else '아직 없음',
              'tone': 'off', 'icon': 'receipt_long', 'sub': info.get('why') or '09:40 첫 회차에 계산'}])
 
 
@@ -332,7 +342,7 @@ def reservoir_panel(key, prefix, root, capital=None, held=None):
                  '(가상 체결이 꺼져 있으면 계획에만 적습니다).' if key == 'actual' else
                  f'지금 {L.RESERVOIRS[now]}를 들고 있어 그 종목을 다 판 뒤부터 {L.RESERVOIRS[picked]}로 바뀝니다.')
                 + ' 한 장부는 저수지 ETF를 한 종목만 들어 평가 가격이 섞이지 않게 합니다.', icon=':material/swap_horiz:')
-    if st.button('저수지 ETF 저장', key=f'{prefix}lt_res_save_{key}', icon=':material/save:', disabled=choice == book['reservoir']):
+    if st.button('저수지 ETF 저장', key=f'{prefix}lt_res_save_{key}', type='primary', icon=':material/save:', disabled=choice == book['reservoir']):
         try:
             L.save_settings(root, {'books': {key: {'reservoir': choice}}})
         except (OSError, ValueError) as exc:
@@ -532,7 +542,7 @@ def strategy_panel(key, prefix='', root=None, capital=None):
         import yeo_method as Y
         st.warning(Y.switch_note(yeo_cfg), icon=':material/warning:')
         confirmed = st.checkbox('보유한 위험·혼합 ETF를 정한 비율로 맞추려고 팔 수 있음을 확인했습니다', key=f'{prefix}lt_book_yeo_ok_{key}')
-    if st.button('전략 저장', key=f'{prefix}lt_book_save_{key}', icon=':material/save:', type='primary' if changed else 'secondary',
+    if st.button('전략 저장', key=f'{prefix}lt_book_save_{key}', icon=':material/save:', type='primary',
                  disabled=not confirmed):
         try:
             L.save_settings(root, {'books': {key: {'strategy': choice, **({'modules': modules} if choice == 'custom' else {}),
@@ -597,17 +607,21 @@ def settings_panel(key, record, capital, prefix=''):
     st.caption('Jev 트레이딩으로 산 보유 종목은 장기투자 실행기가 사거나 팔지 않습니다. 정리하려면 트레이딩 현황 → 즉시 매도를 쓰세요.')
 
 
-def status_card(key, record, nhplug):
+def status_card(key, record, nhplug, *, data=None):
     """트레이딩 현황 → 실계좌: the long-term account's day in one card."""
-    data = status(key, record, nhplug)
+    if data is None:
+        data = status(key, record, nhplug)
     with st.container(border=True):
         st.markdown(f"**{record.get('label', key)}** · 장기투자")
         summary_cards(data)
-        rows = order_rows(data['today']) if data['today'].get('day') == data['plan'].get('day') else []
+        today = datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
+        rows = order_rows(data['today']) if data['today'].get('day') == today else []
         if rows:
             st.dataframe(rows, hide_index=True, width='stretch')
+        elif data['today'].get('day') == today:
+            st.caption('오늘 계좌 판단을 기록했습니다. 주문 계획은 0건입니다.')
         else:
-            st.caption('오늘 이 계좌의 장기투자 주문 계획이 아직 없습니다(엔진 08:45 판단 → 09:40 첫 회차).')
+            st.caption('오늘 계좌 주문 계획이 아직 기록되지 않았습니다. 첫 주문 판단은 09:40부터입니다.')
         st.caption('보호 장치: ' + PROTECTION)
 
 
@@ -646,20 +660,6 @@ def shadow_summary(rows, nav, contributed):
             'series': [(d, round((v / capital - 1) * 100, 2), curve(d)) for d, v, _ in rows]}
 
 
-def allocation_rows(weights, held, prices, capital):
-    """Per ETF: the target (weight × 운용금) beside what the account holds (shares × the latest recorded price)."""
-    out = []
-    keys = list(L.ASSETS) + [k for k in weights if k not in L.ASSETS]  # 여운봉 매매법 ETF (0261H0 등) when the account trades them
-    for k in keys:
-        price = (prices.get(k) or (0, ''))[0]
-        have = held.get(L.code_of(k), 0) * price
-        want = round((weights.get(k) or 0) * capital)
-        out.append({'key': k, '종목': L.ASSETS[k][1] if k in L.ASSETS else f'{L.asset_name(k)} ({L.code_of(k)})',
-                    '목표 %': round((weights.get(k) or 0) * 100, 1), '보유 %': round(have / capital * 100, 1) if capital else 0.0,
-                    '목표 금액': want, '보유 금액': round(have), '차이 %p': round((have / capital - (weights.get(k) or 0)) * 100, 1) if capital else 0.0})
-    return out
-
-
 def flow_dot(data, strategy, regime, service):
     """The account's day as a graph: the engine's 08:45 call → this account's strategy → its 09:40 plan → the live guard
     → live order or a plan only (the way taken today drawn bold) → the 15:40 virtual run of the same strategy."""
@@ -695,94 +695,562 @@ def flow_spec(data, strategy, regime, service):
         main=['engine', 'strategy', 'plan', 'guard', 'order' if live else 'record'])
 
 
-def desk(key, record, nhplug, control, service_state):
-    """트레이딩 현황 → 실계좌 → a 장기투자 account: status and money cards, today's plan, the virtual run of its own strategy
-    with return curves, target vs held weights, how the account works (graph) and its fills. Read-only, no broker call."""
+def daily_balance_history(path):
+    """Latest valid broker observation per KST date, including the current partial day."""
+    from overview import balance_records
+
+    days = {}
+    for row in balance_records(path):
+        try:
+            stamp = datetime.fromisoformat(row['time'])
+        except ValueError:
+            continue
+        if stamp.tzinfo is None or not math.isfinite(row['total_assets']) or row['total_assets'] < 0:
+            continue
+        stamp = stamp.astimezone(ZoneInfo('Asia/Seoul'))
+        day = stamp.date().isoformat()
+        if day not in days or stamp >= days[day][0]:
+            days[day] = stamp, row
+    return [(d, *days[d]) for d in sorted(days)]
+
+
+def asset_chart(history):
     import altair as alt
-    import pandas as pd
-    import engine_compare as ec
-    import live_fills
-    import overview
+
+    if not history:
+        st.caption('저장된 증권사 잔고 기록이 없습니다.')
+        return
+    if len(history) == 1:
+        st.caption('현재 1거래일 기록이 있습니다. 다음 거래일 기록부터 자산 변화를 비교할 수 있습니다.')
+    frame = pd.DataFrame([{'거래일': d, '총자산': row['total_assets'], '기록 시각': stamp.strftime('%H:%M:%S')}
+                          for d, stamp, row in history[-60:]])
+    chart = alt.Chart(frame).mark_line(point=True, color='#16a34a').encode(
+        x=alt.X('거래일:O', title=None, axis=alt.Axis(labelAngle=0, labelOverlap='greedy')),
+        y=alt.Y('총자산:Q', title='원', scale=alt.Scale(zero=False), axis=alt.Axis(format=',.0f')),
+        tooltip=['거래일', '기록 시각', alt.Tooltip('총자산:Q', format=',.0f')]).properties(height=210)
+    st.altair_chart(chart, width='stretch', alt='실계좌의 거래일별 총자산 추이')
+    st.caption('최근 60일치의 일별 마지막 증권사 잔고 기록입니다. 오늘 값은 장중 기록이며, 총자산 추이에는 입출금이 반영됩니다.')
+
+
+def holding_chart(key, holdings, fills, names, chart):
+    """Display the selected ETF's daily or weekly candles and recorded fills."""
+    from vibe_longterm_view import daily_bars, moving, weekly
+
+    code = st.selectbox('보유 ETF', sorted(holdings), format_func=lambda c: names[c], key=f'lt_real_chart_symbol_{key}')
+    unit = st.segmented_control('봉 단위', ['일', '주'], default='일', key=f'lt_real_chart_unit_{key}') or '일'
+    daily = daily_bars(code)
+    if not daily:
+        st.warning('일봉 기록을 불러오지 못했습니다. 체결은 주문·체결 탭에서 확인할 수 있습니다.')
+        return
+    bars = weekly(daily) if unit == '주' else daily
+    kst = ZoneInfo('Asia/Seoul')
+    dates = {datetime.fromtimestamp(b['time'], kst).date(): b['time'] for b in daily}
+    weekly_times = {datetime.fromtimestamp(b['time'], kst).date().isocalendar()[:2]: b['time'] for b in bars}
+    markers = []
+    for fill in fills:
+        if fill.get('symbol') != code:
+            continue
+        try:
+            day = datetime.fromisoformat(fill['time']).astimezone(kst).date()
+        except (ValueError, TypeError, KeyError):
+            continue
+        if day not in dates:
+            continue
+        stamp = weekly_times.get(day.isocalendar()[:2]) if unit == '주' else dates[day]
+        if stamp is None:
+            continue
+        buy = fill['side'] == 'BUY'
+        markers.append({'time': stamp, 'position': 'belowBar' if buy else 'aboveBar',
+                        'color': '#22c55e' if buy else '#ef4444', 'shape': 'arrowUp' if buy else 'arrowDown',
+                        'text': f"{'매수' if buy else '매도'} {fill['qty']}주 · {day:%m/%d}"})
+    if chart is None:
+        st.caption('TradingView 차트 컴포넌트를 사용할 수 없습니다.')
+        return
+    periods = (20, 50, 200) if unit == '일' else (10, 40)
+    chart(bars, sorted(markers, key=lambda m: m['time']), None,
+          averages={period: moving(bars, period) for period in periods}, volume=True, intraday=False,
+          visible=120 if unit == '일' else 104, alt=f'{names[code]} {unit}봉과 실계좌 체결')
+    st.caption('TradingView 차트 · Yahoo Finance 일봉 · ▲ 매수 / ▼ 매도는 증권사 체결 원장 기준입니다. 날짜가 일봉과 일치하는 체결만 표시합니다.')
+
+
+def virtual_comparison(key):
+    import altair as alt
     import vibe_longterm_view as VV
+
+    nav, contributed = VV.nav_history(L.ROOT)
+    summary = shadow_summary(L.account_nav(L.ROOT, key), nav, contributed)
+    if summary is None:
+        st.caption('이 계좌 전략의 가상 운용 기록이 아직 없습니다.')
+        return
+    st.caption(f"{summary['days']}거래일 · {summary['start']}부터 · 가상 순자산 {summary['value']:,.0f}원 · "
+               f"시작일 대비 {summary['pct']:+.2f}% · 최대 낙폭 {summary['mdd'] * 100:.2f}%")
+    frame = pd.DataFrame([{'거래일': day, '장부': name, '수익률(%)': value} for day, account, engine in summary['series']
+                          for name, value in (('이 계좌 전략(가상)', account), ('장기 엔진(가상)', engine)) if value is not None])
+    chart = alt.Chart(frame).mark_line(point=True).encode(
+        x=alt.X('거래일:O', title=None, axis=alt.Axis(labelAngle=0, labelOverlap='greedy')),
+        y=alt.Y('수익률(%):Q', title='시작일 대비 수익률(%)'),
+        color=alt.Color('장부:N', legend=alt.Legend(orient='top', title=None)),
+        tooltip=['거래일', '장부', alt.Tooltip('수익률(%):Q', format='+.2f')]).properties(height=220)
+    st.altair_chart(chart, width='stretch', alt='가상 운용 두 장부의 시작일 대비 수익률')
+    st.caption('가상 마감 평가 기록을 비교합니다. 실제 자산 추이는 자산·보유 탭에서 확인할 수 있습니다.')
+
+
+def assets_snapshot(key, load_assets, identity=None):
+    """Keep the last successful balance in this session, including across a failed refresh."""
+    if load_assets is None:
+        return None
+    cache_key = f'lt_assets_snapshot_{key}_{identity or ""}'
+    status_key = f'{cache_key}_failed'
+
+    def fetch_balance(refresh):
+        try:
+            st.session_state[cache_key] = load_assets(refresh)
+            st.session_state[status_key] = False
+        except Exception:
+            st.session_state.setdefault(cache_key, None)
+            st.session_state[status_key] = True
+
+    if st.button('보유·평가 새로고침', key=f'lt_asset_refresh_{key}', type='primary', icon=':material/refresh:'):
+        with st.spinner('증권사 잔고 확인 중'):
+            fetch_balance(True)
+    elif cache_key not in st.session_state:
+        st.caption('증권사 잔고를 불러오는 중입니다. 저장된 기록을 먼저 표시합니다.')
+        armed = False
+
+        @st.fragment(run_every=0.3)
+        def initial_balance():
+            nonlocal armed
+            if not armed:
+                armed = True
+                return
+            if cache_key not in st.session_state:
+                fetch_balance(False)
+                st.rerun()
+
+        initial_balance()
+    kept = st.session_state.get(cache_key)
+    if st.session_state.get(status_key):
+        st.warning('증권사 잔고 조회에 실패했습니다. ' + ('마지막 성공 조회 결과를 표시합니다.' if kept else '평가 수치는 확인 불가입니다.'))
+    return kept
+
+
+def display_amount(value, signed=False, pct=False):
+    if type(value) not in (int, float) or not math.isfinite(value):
+        return '—'
+    if pct:
+        return f'{value:+.2f}%'
+    return f'{value:+,.0f}원' if signed else f'{value:,.0f}원'
+
+
+def allocation_comparison(weights, holdings, capital, names, reservoir):
+    """Compare on the configured capital base and keep unavailable valuations unknown."""
+    targets = {L.code_of(asset, reservoir): weight for asset, weight in weights.items() if weight > 0}
+    positions = holdings or {}
+    rows = []
+    for code in dict.fromkeys([*targets, *positions]):
+        position = positions.get(code)
+        evaluation = position.get('평가금액') if position is not None else (0 if holdings is not None else None)
+        if type(evaluation) not in (int, float) or not math.isfinite(evaluation) or evaluation < 0:
+            evaluation = None
+        target = targets.get(code, 0) * 100 if targets else None
+        actual = evaluation / capital * 100 if evaluation is not None and capital > 0 else None
+        rows.append({'종목': names.get(code, code), '목표 비중': target, '실계좌 비중': actual,
+                     '비중 차이': actual - target if actual is not None and target is not None else None,
+                     '목표 금액': target * capital / 100 if target is not None and capital > 0 else None,
+                     '평가금액': evaluation})
+    return rows
+
+
+def allocation_chart(rows):
+    """One fixed-height lane per ETF. The target is a tick on the actual bar's scale."""
+    import altair as alt
+
+    base = alt.Chart(pd.DataFrame(rows)).encode(
+        y=alt.Y('종목:N', title=None, sort=[row['종목'] for row in rows],
+                axis=alt.Axis(labelLimit=235), scale=alt.Scale(paddingInner=0.25, paddingOuter=0.25)),
+        tooltip=['종목:N', alt.Tooltip('목표 비중:Q', title='목표 (%)', format='.1f'),
+                 alt.Tooltip('실계좌 비중:Q', title='실계좌 (%)', format='.1f'),
+                 alt.Tooltip('비중 차이:Q', title='실계좌 − 목표 (%p)', format='+.1f')])
+    axis = alt.Axis(title='운용금 대비 (%)', format='.0f', tickCount=7)
+    actual = base.mark_bar(color='#16a34a', size=14, cornerRadiusEnd=3).encode(
+        x=alt.X('실계좌 비중:Q', axis=axis, scale=alt.Scale(zero=True)))
+    target = base.mark_tick(color='#64748b', thickness=3, size=26, orient='vertical').encode(
+        x=alt.X('목표 비중:Q', axis=axis, scale=alt.Scale(zero=True)))
+    return (actual + target).properties(height=alt.Step(42))
+
+
+def portfolio_panel(rows, capital, basis):
     from dialogs import table_frame
+
+    st.markdown('##### 목표 비중과 실계좌 평가 비중')
+    if not rows or capital <= 0:
+        st.caption('전략 목표나 보유 종목, 운용금이 확인되면 비중을 비교할 수 있습니다.')
+        return
+    st.caption(f'운용금 {capital:,}원 기준 · {basis} · 막대는 실계좌 평가, 세로선은 전략 목표')
+    st.altair_chart(allocation_chart(rows), width='stretch', alt='종목별 실계좌 평가 비중과 전략 목표 비중')
+    table_frame(pd.DataFrame(rows)[['종목', '목표 비중', '실계좌 비중', '비중 차이', '목표 금액', '평가금액']],
+                alt='종목별 목표와 실계좌 비중 차이 및 평가금액',
+                column_config={'목표 비중': st.column_config.NumberColumn('목표 비중', format='%.1f %%'),
+                               '실계좌 비중': st.column_config.NumberColumn('실계좌 비중', format='%.1f %%'),
+                               '비중 차이': st.column_config.NumberColumn('실계좌 − 목표', format='%+.1f %%p'),
+                               '목표 금액': st.column_config.NumberColumn('목표 금액', format='localized'),
+                               '평가금액': st.column_config.NumberColumn('평가금액', format='localized')})
+    if any(row['실계좌 비중'] is None for row in rows):
+        st.caption('증권사 평가금액이 확인되지 않은 종목은 실계좌 비중을 비워 둡니다.')
+
+
+def activity_panel(plan, state, fills, events, dca):
+    import longterm_dca as D
+    from longterm_dca_view import schedule_text
+
+    with st.container(border=True):
+        activity, savings = st.columns(2)
+    with activity:
+        st.markdown('**오늘 운용**')
+        bought = sum(f['side'] == 'BUY' for f in fills)
+        sold = sum(f['side'] == 'SELL' for f in fills)
+        if plan:
+            orders = plan.get('orders') or []
+            progress = f"계획 {len(orders)}건 · 접수 기록 {sum(o.get('status') == 'sent' for o in orders)}건"
+        else:
+            progress = '계획 기록 대기'
+        st.markdown(f'{progress} · 확인 체결 **매수 {bought} / 매도 {sold}건**')
+        if why := (plan.get('info') or {}).get('why'):
+            st.caption(why)
+        if events:
+            event = events[-1]
+            st.caption(f"{event['time'][11:19]} KST · {event_text(event)}")
+    with savings:
+        st.markdown('**적립식**')
+        if not dca['on']:
+            st.caption('매수 꺼짐 · 알림 전용' if dca.get('alert') else '꺼짐')
+        else:
+            st.caption(schedule_text(dca))
+            dca_state = state.get('dca')
+            if dca_state is not None:
+                st.markdown(f'적립 대기 자금 **{D.reserved(dca_state):,.0f}원**')
+            st.caption('오늘 적립 판단 기록됨' if plan.get('dca_check') else '오늘 적립 판단 대기')
+
+
+def first_step_estimate(pair, risk_ratio, account_plan, snapshot, events):
+    """Estimate the stage using the account plan's free cash and any reservoir ETF valuation."""
+    _, risk, safe, _, steps, share = pair
+    info = account_plan.get('info') or {}
+    nav, invested = info.get('nav'), info.get('invested')
+    if not all(type(v) in (int, float) and math.isfinite(v) for v in (nav, invested)):
+        return None, []
+    reserve = 0
+    if (info.get('weights') or {}).get('RES', 0) > 0:
+        holdings = (snapshot or {}).get('holdings') or []
+        reservoir = next((row for row in holdings if row.get('종목코드') == info.get('reservoir')), {})
+        reserve = reservoir.get('평가금액')
+        if type(reserve) not in (int, float) or not math.isfinite(reserve) or reserve <= 0:
+            return None, []
+    base = max(0, nav - invested) + reserve
+    total = base * share * steps[0][1]
+    quotes = {}
+    for event in events:
+        if event.get('action') != 'DCA_ALERT' or not event.get('time'):
+            continue
+        for order in event.get('orders') or []:
+            if type(order.get('price')) in (int, float) and math.isfinite(order['price']) and order['price'] > 0:
+                quotes[order.get('code')] = order['price'], f"{event['time'][5:16].replace('T', ' ')} 매수호가 기록"
+    holdings = {row.get('종목코드'): row for row in (snapshot or {}).get('holdings') or []}
+    rows = []
+    for asset, fraction in ((risk, risk_ratio), (safe, 1 - risk_ratio)):
+        code = L.code_of(asset)
+        price, source = quotes.get(code, (None, '가격 미확인'))
+        if price is None and snapshot:
+            price = holdings.get(code, {}).get('현재가')
+            if type(price) in (int, float) and math.isfinite(price) and price > 0:
+                source = f"{snapshot['time']:%m/%d %H:%M} 증권사 현재가"
+            else:
+                price = None
+        allocated = total * fraction
+        rows.append({'종목': f'{L.asset_name(asset)} ({code})', '예상 배정액': display_amount(allocated),
+                     '기준 가격': display_amount(price), '가격 근거': source,
+                     '예상 수량': f'{int(allocated // (price * (1 + L.FEE))):,}주' if price else '—'})
+    return base, rows
+
+
+def ndx_observation_panel(root, engine_close_day, threshold):
+    """Show the independent US observation alongside the domestic engine's close-based decision."""
+    from ndx_intraday_alert import latest_record
+
+    observation = latest_record(Path(root) / 'vibe-longterm' / 'ndx-intraday') or {}
+    intraday, closing = st.columns(2)
+    with intraday:
+        st.markdown('**미국 장중 −20% 모니터**')
+        session = observation.get('session') or '미확인'
+        if crossing := observation.get('crossing'):
+            stamp = datetime.fromisoformat(crossing['crossed_at']).astimezone(ZoneInfo('Asia/Seoul'))
+            st.caption(f"장중 도달 {crossing['crossed_drawdown']:.2%} · {stamp:%m/%d %H:%M} KST · 미국 거래일 {session}")
+        elif observation.get('status') in ('watching', 'finished'):
+            st.caption(f"완료 1분봉에서 아직 미도달 · 미국 거래일 {session}")
+        else:
+            st.caption(f"{observation.get('reason') or '장중 관측 기록 대기'} · 미국 거래일 {session}")
+    with closing:
+        st.markdown('**미국 종가 확정 · 1단계 조건**')
+        close = observation.get('close') or {}
+        drawdown = close.get('drawdown')
+        if type(drawdown) in (float, int) and math.isfinite(drawdown):
+            close_day = close.get('session') or observation.get('session')
+            verdict = '충족' if drawdown <= threshold else '미충족'
+            st.caption(f"{drawdown:.2%} · {threshold:.2%} 기준 {verdict} · 미국 거래일 {close_day}")
+            st.caption('국내 엔진에 같은 종가일 반영' if close_day == engine_close_day else '국내 엔진 반영 대기')
+        else:
+            st.caption(f"{close.get('reason') or '미국 종가 확인 대기'} · 국내 엔진 적용 종가 {engine_close_day}")
+
+
+def quote_gap_panel(events):
+    from dialogs import table_frame
+
+    audited = [(e, e.get('quote_gap_audit')) for e in events if isinstance(e.get('quote_gap_audit'), dict)]
+    if not audited:
+        st.caption('오늘 국내 매수 호가 감사 기록이 없습니다.')
+        return
+    catalog = asset_names_by_code()
+    rows = []
+    for event, audit in reversed(audited):
+        code = audit.get('symbol') or event.get('symbol') or '—'
+        rows.append({'종목': f'{catalog[code]} ({code})' if code in catalog else code,
+                     '확인 시각(KST)': str(audit.get('observed_at') or event.get('time', ''))[:19].replace('T', ' '),
+                     '매도 1호가': display_amount(audit.get('ask')),
+                     '전일 종가': display_amount(audit.get('previous_close')),
+                     '전일 종가 대비': display_amount(audit.get('gap_pct'), pct=True),
+                     '주문 처리': event_text(event), '호가 출처': audit.get('source') or '—',
+                     '근거': audit.get('note') or '—'})
+    table_frame(rows, alt='국내 장기투자 매수 직전 호가와 전일 종가의 차이')
+
+
+def first_step_panel(cfg, engine_plan, account_plan, snapshot, events, fills, day, nhplug):
+    if cfg is None:
+        return
+    import yeo_method as Y
+    from dialogs import table_frame
+    from longterm_step_execution import read_step_intents, step_order_rows
+
+    pair = next((p for p in Y.pairs(cfg) if p[0] == 'ndx'), None)
+    if pair is None:
+        return
+    threshold, use = pair[4][0]
+    ath = ((engine_plan.get('indicators') or {}).get('ath') or {}).get('ndx') or {}
+    drawdown = ath.get('dd')
+    valid = type(drawdown) in (int, float) and math.isfinite(drawdown)
+    book = ((account_plan.get('book') or {}).get('yeo') or {}).get('ndx') or {}
+    used = threshold in (book.get('used') or [])
+    plan_today = account_plan.get('day') == day
+    engine_today = engine_plan.get('day') == day
+    with st.container(border=True):
+        st.markdown('##### 나스닥100 · 저수지 1단계')
+        cols = st.columns(3)
+        cols[0].metric('종가 기준 낙폭', f'{drawdown:.2%}' if valid else '확인 불가')
+        cols[1].metric(f'1단계 기준 {threshold:.0%}까지', f'{max(0, drawdown - threshold) * 100:.2f}%p' if valid else '—')
+        state = ('1단계 사용 기록 있음' if used else '판단 자료 대기' if not valid or not engine_today else
+                 '계좌 계획 기록됨' if drawdown <= threshold and plan_today else
+                 '조건 충족 · 계획 대기' if drawdown <= threshold else '조건 미충족')
+        cols[2].metric('1단계 상태', state)
+        close_day = ath.get('as_of') or '미확인'
+        st.caption(f'미국 종가 기준일 {close_day} · 국내 계좌 첫 주문 판단 09:40 이후 · 1단계 저수지 {use:.0%} 사용')
+        ndx_observation_panel(nhplug, close_day, threshold)
+        st.caption('계좌 단계 판단은 미국 확정 종가와 과거 최고 종가를 비교합니다.')
+        if not engine_today and valid:
+            st.caption('최근 저장된 엔진 판정입니다. 오늘 엔진 판단을 기다립니다.')
+        today_orders = step_order_rows(account_plan, events, fills, read_step_intents(nhplug, events),
+                                       codes={L.code_of(a) for a in pair[1:3]}, index=pair[3]) if plan_today else []
+        if today_orders:
+            st.markdown('**오늘 1단계 주문·체결**')
+            catalog = asset_names_by_code()
+            shown = {row['종목코드'] for row in today_orders}
+            for row in today_orders:
+                code = row.pop('종목코드')
+                row['종목'] = f"{catalog.get(code, code)} ({code})"
+                row['계획 배정액'] = display_amount(row['계획 배정액'])
+                row['평균 체결가'] = display_amount(row['평균 체결가'])
+                row['사유'] = reason(row['사유'])
+            table_frame(today_orders, column_order=['종목', '구분', '상태', '계획 배정액', '계획 수량', '주문 수량',
+                                                      '확인 체결 수량', '평균 체결가', '사유'],
+                        alt='저수지 1단계 계획과 증권사 주문·체결 대조')
+            st.caption('증권사 주문번호를 대조해 체결을 확인합니다. 같은 날 여러 단계나 적립식이 합산된 경우에는 전체 주문 수량을 표시합니다.')
+            missing = [f'{L.asset_name(asset)} ({L.code_of(asset)})' for asset in pair[1:3] if L.code_of(asset) not in shown]
+            if missing:
+                st.caption('오늘 단계 주문 행을 확인하지 못한 종목: ' + ', '.join(missing))
+        elif not used:
+            if plan_today and engine_today and valid and drawdown <= threshold:
+                st.caption('오늘 계획에서 확인된 1단계 주문이 없습니다. 기록된 회차 판단은 위 오늘 운용에서 확인할 수 있습니다.')
+            base, rows = first_step_estimate(pair, cfg['risk'], account_plan, snapshot, events)
+            if rows:
+                st.caption(f"저수지 추정 기준액 {base:,.0f}원 · {account_plan.get('day') or '시각 미확인'} 계좌 계획의 가용 현금 기준. "
+                           '보유 저수지 ETF는 조회 평가금액을 더합니다. 수량은 수수료를 고려한 추정입니다.')
+                table_frame(rows, alt='저수지 1단계 종목별 예상 배정액과 수량')
+            else:
+                st.caption('가용 현금 또는 저수지 ETF 평가 기록이 확인되면 예상 배정액을 표시합니다.')
+
+
+def desk(key, record, nhplug, control, service_state, *, broker_view=None, load_assets=None, chart=None):
+    """Long-term live account dashboard backed by broker snapshots, confirmed fills and runner records."""
+    import engine_compare as ec
+    from dialogs import table_frame
+    from live_fills import balance_file, rows as read_fills
+    from longterm_live import LOG
+    from longterm_dca import clean as dca_config
+
     nhplug = Path(nhplug)
     data = status(key, record, nhplug)
     settings = L.load_settings(L.ROOT)
     strategy = L.book_strategy_label(settings, key)
     regime = L.REGIMES.get(data['plan'].get('regime'), ('판단 전',))[0]
+    day = datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()
+    plan = data['today'] if data['today'].get('day') == day else {}
+    fills = read_fills(nhplug, key)
+    journal = ec.real_journal(fills, [])
+    positions = ec.positions(journal)
+    catalog = asset_names_by_code()
+    names = {code: f'{catalog[code]} ({code})' if code in catalog else code for code in positions}
+    events = [r for r in ec.recent_events(nhplug / LOG) if r.get('account') == key]
+    today_fills = [f for f in fills if f['time'].startswith(day)]
+    today_events = [r for r in events if str(r.get('time') or '').startswith(day)]
+    capital = (record.get('budget') or {}).get('capital_krw') or 0
+
+    st.markdown(f"#### {record.get('label', key)} · 장기투자")
+    mode = data['mode']
+    if mode == '실주문' and not all(done for _, done in data['checklist']):
+        mode = '실주문 설정 · 실행 조건 미확인'
     tone, icon, pulse = sc.service(service_state)
-    sc.row([{'label': '장기투자 실행기', 'value': service_state, 'tone': tone, 'icon': icon, 'pulse': pulse, 'sub': data['mode'],
-             'help': f"{record.get('label', key)}의 실행기(com.vibetrading.longterm-{key})입니다. 평일 09:35 시작, 주문 창 09:40~14:30."},
-            {'label': '계좌 전략', 'value': strategy, 'tone': 'ai', 'icon': 'account_tree', 'sub': f'엔진 국면 {regime}',
-             'help': '계좌·자동매매 → 장기투자 계좌 "전략"에서 정합니다. 국면·스토리·지표는 엔진 것을 쓰고 모듈만 이 계좌 것입니다.'}, *control])
-    budget = record.get('budget') or {}
-    capital, principal = budget.get('capital_krw') or 0, record.get('principal_krw')
-    today = datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d')
-    last, _ = overview.balance_snapshots(nhplug / f'live-balance-{key}.jsonl', today)
-    total = (last or {}).get('total_assets')
-    gain = total - principal if total is not None and principal else None
-    sc.row([{'label': '운용금', 'value': f'{capital:,}원', 'tone': 'warn', 'icon': 'account_balance_wallet',
-             'help': '장기 엔진 목표 비중을 곱하는 금액이자 매입 합계 상한입니다(계좌·자동매매에서 계좌 잔고 안으로 정함).'},
-            {'label': '하루 실현 손실 한도', 'value': f"{budget.get('daily_loss_krw', 0):,}원", 'tone': 'down', 'icon': 'shield',
-             'sub': '평가손 제외 · 실현 손실+수수료'},
-            {'label': '총자산', 'value': '기록 없음' if total is None else f'{total:,.0f}원', 'tone': 'off', 'icon': 'savings',
-             'sub': f"잔고 기록 {live_labels.clock(last['time'], today)}" if last else '종합 현황 "실계좌 잔고 조회" 또는 실행기 5분 기록'},
-            {'label': '전체 손익 · 원금 대비', 'value': '—' if gain is None else f'{gain:+,.0f}원',
-             'tone': 'off' if not gain else sc.signed(gain), 'icon': 'percent', 'signed_sub': True,
-             'sub': f"{gain / principal * 100:+.2f}% · 원금 {principal:,}원" if gain is not None else '원금은 종합 현황 "원금 설정"'}])
-    status_card(key, record, nhplug)
+    sc.row([{'label': '장기투자 실행기', 'value': service_state, 'tone': tone, 'icon': icon, 'pulse': pulse, 'sub': mode},
+            {'label': '계좌 전략', 'value': strategy, 'tone': 'ai', 'icon': 'account_tree',
+             'sub': f"엔진 국면 {regime} · {data['plan'].get('day') or '판단 기록 없음'}"}, *control])
 
-    st.markdown('##### 가상 운용 · 이 계좌 전략', help='같은 전략(모듈)과 운용금으로 매일 15:40 엔진 마감 때 1주 단위로 종가 가상 체결합니다. '
-                '실주문이 꺼진 동안의 "만약 실행했다면" 기록이며 수수료는 넣고 세금·호가 체결은 빠집니다. 실제 계좌 결과가 아닙니다.')
-    nav, contributed = VV.nav_history(L.ROOT)
-    summary = shadow_summary(L.account_nav(L.ROOT, key), nav, contributed)
-    prices = latest_prices(data['today'], VV.load(L.ROOT)[1])
-    if summary is None:
-        st.info('아직 가상 운용 기록이 없습니다. 장기 엔진이 장 마감(15:40)에 이 계좌 전략으로 첫 기록을 남깁니다. '
-                '그때까지 아래는 오늘 국면에서 이 계좌 전략이 잡는 목표 비중입니다(엔진 가상 계좌와 비교).', icon=':material/hourglass_top:')
-        plan = data['plan']
-        if plan.get('indicators') and plan.get('active') is not None:
-            stories = (L.read_state(L.ROOT, ('story',)).get('story') or {}).get('stories') or {}
-            table_frame(pd.DataFrame(target_compare(plan, stories, {}, L.book_modules(settings, key, plan))))
-    else:
-        sc.row([{'label': '가상 순자산', 'value': f"{summary['value']:,.0f}원", 'tone': sc.signed(summary['gain']), 'icon': 'account_balance',
-                 'signed_sub': True, 'sub': f"{summary['gain']:+,.0f}원 ({summary['pct']:+.2f}%) · 시작 {summary['capital']:,.0f}원"},
-                {'label': '최대 낙폭', 'value': f"{summary['mdd'] * 100:.2f}%", 'tone': 'down' if summary['mdd'] < 0 else 'off', 'icon': 'trending_down'},
-                {'label': '기록', 'value': f"{summary['days']}거래일", 'tone': 'off', 'icon': 'calendar_month', 'sub': f"{summary['start']}부터"}])
-        frame = pd.DataFrame([{'날짜': d, '장부': n, '수익률(%)': v} for d, a, e in summary['series']
-                              for n, v in (('이 계좌 전략(가상)', a), ('엔진 가상 계좌', e)) if v is not None])
-        st.altair_chart(alt.Chart(frame).mark_line(point=True).encode(
-            x=alt.X('날짜:T', title=None), y=alt.Y('수익률(%):Q', title='시작일 대비 수익률(%)'),
-            color=alt.Color('장부:N', scale=alt.Scale(range=['#a855f7', '#94a3b8']), legend=alt.Legend(orient='top', title=None)),
-            tooltip=['날짜:T', '장부:N', alt.Tooltip('수익률(%):Q', format='+.2f')]).properties(height=240), width='stretch')
-        shadow = L.read_state(L.ROOT, (f'account:{key}',)).get(f'account:{key}') or {}
-        book = shadow.get('book') or {}
-        if shadow.get('strategy'):
-            st.caption(f"가상 운용 전략: {shadow['strategy']} · 마지막 판단 {L.why_label((shadow.get('last') or {}).get('why'))}")
-        held = [{'종목': L.asset_name(k), '수량': round(q), '평가': f"{q * prices[k][0]:,.0f}원" if k in prices else '최근 계획 가격 없음'}
-                for k, q in (book.get('qty') or {}).items() if q >= 0.5]
-        held.append({'종목': '현금', '수량': '', '평가': f"{book.get('cash', 0):,.0f}원"})
-        table_frame(pd.DataFrame(held))
+    assets, orders, virtual, ops = st.tabs(['자산·보유', '주문·체결', '가상 비교', '증권사 조회·보호'],
+                                         key=f'lt_desk_tabs_{key}', on_change='rerun')
+    if assets.open:
+        with assets:
+            snapshot = assets_snapshot(key, load_assets, record.get('hash'))
+            if snapshot is not None:
+                st.caption(f"마지막 증권사 조회 {snapshot['time']:%Y-%m-%d %H:%M:%S} KST")
+            history = daily_balance_history(balance_file(nhplug, key))
+            latest = history[-1][2] if history else {}
+            account = snapshot['account'] if snapshot is not None else {}
+            total, cash = (account.get('총자산'), account.get('주문가능금액')) if snapshot is not None else (latest.get('total_assets'), latest.get('cash'))
+            principal = record.get('principal_krw')
+            gain = total - principal if total is not None and principal else None
+            balance_source = ('증권사 조회' if snapshot is not None else f"증권사 기록 {history[-1][1]:%m/%d %H:%M}"
+                              if history else '잔고 기록 없음')
+            aggregate = (snapshot.get('aggregate') or {}) if snapshot is not None else {}
+            pnl, rate = aggregate.get('평가손익'), aggregate.get('수익률(%)')
+            sc.row([{'label': '실계좌 총자산', 'value': display_amount(total), 'tone': 'off', 'icon': 'savings', 'sub': balance_source},
+                    {'label': '원금 대비 손익', 'value': f'{gain:+,.0f}원' if gain is not None else '—',
+                     'tone': sc.signed(gain) if gain is not None else 'off', 'icon': 'percent',
+                     'sub': f'{gain / principal * 100:+.2f}% · 원금 {principal:,.0f}원' if gain is not None else '총자산과 원금 기록 필요',
+                     'help': '총자산과 설정 원금의 차이입니다. 입출금은 총자산에 반영됩니다.'},
+                    {'label': '보유 평가손익', 'value': display_amount(pnl, signed=True), 'tone': sc.signed(pnl) if pnl is not None else 'off',
+                     'icon': 'monitoring', 'sub': f"보유 수익률 {display_amount(rate, pct=True)}"},
+                    {'label': '주문가능금액', 'value': display_amount(cash), 'tone': 'off', 'icon': 'account_balance_wallet', 'sub': balance_source}])
+            holdings = {}
+            if snapshot is not None:
+                holdings = {p['종목코드']: p for p in snapshot['holdings'] if p.get('종목코드')}
+                for code, p in holdings.items():
+                    name = p.get('종목') or catalog.get(code) or code
+                    names[code] = f'{name} ({code})' if name != code and not name.endswith(f'({code})') else name
+            held = ({code: row['보유수량'] for code, row in holdings.items()} if snapshot is not None
+                    else {code: row['qty'] for code, row in positions.items()})
+            res = L.reservoir_code(settings, key, capital, held)
+            realized = ec.summary(journal)
+            sold = sum(fill['side'] == 'SELL' for fill in journal)
+            sc.row([{'label': '설정 운용금', 'value': display_amount(capital) if capital else '—',
+                     'tone': 'warn', 'icon': 'account_balance_wallet',
+                     'sub': f'운용금 대비 보유 평가 {aggregate["평가금액"] / capital:.1%}'
+                     if capital and type(aggregate.get('평가금액')) in (int, float) else None},
+                    {'label': '기록 실현손익', 'value': display_amount(realized['pnl'], signed=True) if realized['sells'] else '—',
+                     'tone': sc.signed(realized['pnl']), 'icon': 'monitoring',
+                     'sub': f"매입가 확인 매도 {realized['sells']} / {sold}건 · 비용 제외" if sold else '매도 체결 기록 없음'},
+                    {'label': '저수지 ETF', 'value': f'{held.get(res, 0):,}주' if snapshot is not None or fills else '—',
+                     'tone': 'off', 'icon': 'savings', 'sub': catalog.get(res, res)}])
+            activity_panel(plan, data['today'], today_fills, today_events, dca_config(settings['dca'].get(key)))
+            first_step_panel(L.yeo_settings(settings, key), data['plan'], data['today'], snapshot, today_events, today_fills, day, nhplug)
 
-    st.markdown('##### 목표 비중 vs 보유', help=f"목표는 {data['basis']} × 운용금, 보유는 증권사 체결 기록의 보유 수량 × 최근 계획 가격입니다.")
-    positions = {c: p['qty'] for c, p in ec.positions(live_fills.rows(nhplug, key)).items() if p['qty'] > 0}
-    rows = allocation_rows(data['weights'], positions, prices, capital)
-    bars = pd.DataFrame([{'종목': r['종목'], '구분': n, '금액(원)': r[col]} for r in rows for n, col in (('목표', '목표 금액'), ('보유', '보유 금액'))])
-    st.altair_chart(alt.Chart(bars).mark_bar().encode(
-        y=alt.Y('종목:N', title=None, sort=None), x=alt.X('금액(원):Q', title=None), yOffset='구분:N',
-        color=alt.Color('구분:N', scale=alt.Scale(range=['#cbd5e1', '#a855f7']), legend=alt.Legend(orient='top', title=None)),
-        tooltip=['종목:N', '구분:N', alt.Tooltip('금액(원):Q', format=',.0f')]).properties(height=260), width='stretch')
-    table_frame(pd.DataFrame([{**{k: v for k, v in r.items() if k != 'key'}, '목표 금액': f"{r['목표 금액']:,}원", '보유 금액': f"{r['보유 금액']:,}원",
-                               '차이 %p': f"{r['차이 %p']:+.1f}"} for r in rows]))
+            plan_reservoir = (plan.get('info') or {}).get('reservoir') or res
+            target_names = {code: f'{name} ({code})' for code, name in catalog.items()} | names
+            allocation = allocation_comparison(data['weights'], holdings if snapshot is not None else None,
+                                               capital, target_names, plan_reservoir)
+            basis = data['basis']
+            engine_day = data['plan'].get('day')
+            if engine_day and engine_day != day:
+                basis = basis.replace('오늘', engine_day)
+            portfolio_panel(allocation, capital, basis)
 
-    with st.expander('이 계좌는 어떻게 움직이나요? (도식)', icon=':material/schema:', expanded=True):
-        import guide_ui as GU
-        GU.flow(f'lt-account-{key}', flow_spec(data, strategy, regime, service_state), flow_dot(data, strategy, regime, service_state))
-        st.caption('굵은 선이 오늘 실제로 가는 길입니다. 점선은 실주문 스위치와 --execute 재등록(별도 승인) 뒤에 열립니다.')
-    fills = fill_rows(key, nhplug)
-    with st.expander(f'체결 이력 · 증권사 체결 {len(fills)}건', icon=':material/receipt_long:'):
-        if fills:
-            st.dataframe(fills, hide_index=True, width='stretch')
-        else:
-            st.caption('아직 체결이 없습니다. 실주문 스위치가 꺼져 있으면 계획만 기록합니다.')
+            st.markdown('##### 실보유 종목')
+            if snapshot is not None:
+                if holdings:
+                    holdings_table = [{'종목': names[code], '보유 수량': p['보유수량'], '평균 매입가': display_amount(p.get('평균매입가')),
+                                       '현재가': display_amount(p.get('현재가')), '평가금액': display_amount(p.get('평가금액')),
+                                       '평가손익': display_amount(p.get('평가손익'), signed=True),
+                                       '수익률': display_amount(p.get('수익률(%)'), pct=True)}
+                                      for code, p in holdings.items()]
+                    table_frame(holdings_table, alt='증권사 조회 기준 실보유 종목과 평가손익')
+                else:
+                    st.caption('증권사 조회 기준 보유 종목이 없습니다.')
+            elif positions:
+                table_frame([{'종목': names[code], '보유 수량': p['qty'], '평균 매입가': display_amount(p.get('avg')),
+                              '매입 금액': display_amount(p['cost']) if p.get('avg') is not None else '—'}
+                             for code, p in sorted(positions.items())], alt='실체결 원장 기준 보유 종목과 매입 금액')
+                st.caption('체결 원장 기준 보유 수량과 평균 매입가입니다.')
+            else:
+                st.caption('표시할 체결 원장 보유 기록이 없습니다.')
 
+            st.markdown('##### 실계좌 자산 추이')
+            if snapshot is not None and total is not None:
+                stamp = snapshot['time']
+                by_day = {d: (ts, row) for d, ts, row in history}
+                d = stamp.date().isoformat()
+                if d not in by_day or stamp >= by_day[d][0]:
+                    by_day[d] = stamp, {'total_assets': total}
+                history = [(d, *by_day[d]) for d in sorted(by_day)]
+            asset_chart(history)
+            if held and chart is not None:
+                holding_details = st.expander('보유 종목 차트 · TradingView', key=f'lt_holding_chart_{key}', on_change='rerun')
+                if holding_details.open:
+                    with holding_details:
+                        holding_chart(key, held, fills, names, chart)
+
+    if orders.open:
+        with orders:
+            st.markdown('##### 오늘 계좌 주문 계획')
+            if planned := order_rows(plan):
+                table_frame(planned, alt='오늘 장기투자 주문 계획')
+            else:
+                st.caption('오늘 기록된 주문 계획이 없습니다.' if not plan else '오늘 계좌 판단을 기록했습니다. 주문 계획은 0건입니다.')
+            st.markdown('##### 증권사 체결 이력')
+            if recorded := fill_rows(key, nhplug, fills=fills):
+                table_frame(recorded, alt='실계좌 증권사 체결 이력')
+            else:
+                st.caption('아직 저장된 증권사 체결이 없습니다.')
+            with st.expander('국내 매수 직전 호가 감사'):
+                quote_gap_panel(today_events)
+            with st.expander('장기투자 실행 기록'):
+                if events:
+                    table_frame([{'시각': str(r.get('time', ''))[:19].replace('T', ' '), '내용': event_text(r)}
+                                 for r in reversed(events[-20:])], alt='해당 실계좌의 최근 장기투자 실행 기록')
+                else:
+                    st.caption('장기투자 실행 기록이 없습니다.')
+
+    if virtual.open:
+        with virtual:
+            virtual_comparison(key)
+
+    if ops.open:
+        with ops:
+            if broker_view is not None:
+                broker_view()
+            with st.expander('계좌 보호 한도와 실행 조건'):
+                st.caption(checklist_text(data['checklist']))
+                st.caption(PROTECTION)
+                capital = (record.get('budget') or {}).get('capital_krw') or 0
+                table_frame(protection_rows(record, capital, settings), alt='장기투자 계좌 보호 한도')
+            flow = st.expander('장기투자 주문 흐름', key=f'lt_desk_flow_{key}', on_change='rerun')
+            if flow.open:
+                with flow:
+                    import guide_ui as GU
+                    GU.flow(f'lt-account-{key}', flow_spec(data, strategy, regime, service_state),
+                            flow_dot(data, strategy, regime, service_state))
+                    st.caption('설정 기준 주문 흐름입니다. 실제 주문과 체결은 주문·체결 탭에서 확인할 수 있습니다.')

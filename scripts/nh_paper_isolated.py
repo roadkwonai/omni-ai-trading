@@ -1190,6 +1190,32 @@ def entry_context(quote, price):
     return out
 
 
+def entry_timing_context(quote, ask, bars, decided_at):
+    """Observation only: compare the quote used for the order to the latest completed candle and recent low."""
+    day = decided_at.astimezone(KST).strftime('%Y%m%d')
+    rows = [row for row in (bars or []) if isinstance(row, dict)
+            and row.get('bsop_date', day) == day and row.get('market', 'KRX') == 'KRX'][:6]
+
+    def price(row, field):
+        try:
+            value = float(row.get(field))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return value if math.isfinite(value) and value > 0 else None
+
+    out = {'gate_time': decided_at.isoformat(timespec='milliseconds'), 'order_ask': ask}
+    if quote.get('hoga_bsop_hour'):
+        out['quote_time_kst'] = quote['hoga_bsop_hour']
+    if rows and (reference := price(rows[0], 'stck_prpr')):
+        out.update(decision_bar_time=rows[0].get('bsop_time'), decision_price=reference,
+                   ask_vs_decision_pct=round((ask / reference - 1) * 100, 3))
+    lows = [price(row, 'stck_lwpr') for row in rows]
+    if len(lows) == 6 and all(low is not None for low in lows):
+        recent = min(lows)
+        out.update(recent_low=recent, recent_low_bars=len(lows), ask_vs_recent_low_pct=round((ask / recent - 1) * 100, 3))
+    return out
+
+
 def minute_bars(read, code, cache=None, prior=False):
     """1-minute bar read, retried once after a failed call (read-only; the API fails now and then under load). `cache`:
     one cycle's successful reads by code, so holding reviews and the entry read each chart once (r3 X3). `prior`: NH's
@@ -1556,11 +1582,14 @@ def oversold_entry(read, root, owned, bars, news, investor, modes, cycle_id):
     None otherwise. Every triggered code is journaled (oversold_scan) so the dashboard and reviews see it."""
     import oversold
     from nh_etf_auto_v2 import jev_oversold7
+    from strategy_settings import DEFAULTS
     names = oversold.universe(root)
+    required = max(6, int(OVERSOLD.get('oversold_calm_min', DEFAULTS['oversold_calm_min'])))
     def rows_of(code):
         response = minute_bars(read, code)
-        rows = valid_bars(response.get('data', {}), code, datetime.now(KST)) if response.get('status') == 'ok' else None
-        if not rows or not fresh_series(rows, datetime.now(KST)):
+        now = datetime.now(KST)
+        rows = valid_bars(response.get('data', {}), code, now, required=required) if response.get('status') == 'ok' else None
+        if not rows or not fresh_series(rows, now):
             raise ValueError('oversold bars unavailable')
         return rows
     rows_cache = {}
@@ -1570,6 +1599,16 @@ def oversold_entry(read, root, owned, bars, news, investor, modes, cycle_id):
     found = oversold.scan(read, datetime.now(KST), OVERSOLD, list(names), held=set(owned), bars_of=bars_of)
     today = datetime.now(KST).date()
     for row in found:
+        atr_status = row.get('atr_status')
+        atr_key = (today, row['code'], 'atr_unknown')
+        if atr_status == 'unknown' and atr_key not in _OVERSOLD_LOGGED:
+            _OVERSOLD_LOGGED.add(atr_key)
+            journal_event(root, 'oversold_atr_status', symbol=row['code'], status='unknown', need_pct=row['need_pct'],
+                          drop_pct=row['drop_pct'], retry_seconds=oversold.ATR_RETRY_SECONDS, cycle_id=cycle_id)
+        elif atr_status == 'confirmed' and atr_key in _OVERSOLD_LOGGED:
+            _OVERSOLD_LOGGED.remove(atr_key)
+            journal_event(root, 'oversold_atr_status', symbol=row['code'], status='confirmed', need_pct=row['need_pct'],
+                          drop_pct=row['drop_pct'], cycle_id=cycle_id)
         if not row['triggered']:
             continue
         ready = row['stabilized'] and row['code'] in rows_cache and row['target_pct'] > 0
@@ -1578,6 +1617,7 @@ def oversold_entry(read, root, owned, bars, news, investor, modes, cycle_id):
         if key not in _OVERSOLD_LOGGED:  # first trigger and each change of state, not every minute
             _OVERSOLD_LOGGED.add(key)
             journal_event(root, 'oversold_scan', symbol=row['code'], drop_pct=row['drop_pct'], atr_multiple=row['atr_multiple'],
+                          atr_status=atr_status, need_pct=row.get('need_pct'),
                           stabilized=row['stabilized'], bounce_pct=row['bounce_pct'], target_pct=row['target_pct'],
                           stop_pct=row['stop_pct'], analyst=facts.get('analyst'), cycle_id=cycle_id)
         if not ready:
@@ -1760,6 +1800,45 @@ def fresh_rows(read, code, now):
     return rows if rows and fresh_series(rows, now) else None
 
 
+def buy_budget(source, size_mult=1, inverse_mult=1):
+    return int(min(SHARED_SINGLE_ORDER_KRW, SPLIT_TRANCHE_KRW * size_factor(source) * size_mult * inverse_mult))
+
+
+def note_single_order_limit(root, today, code, source, price, budget, cycle_id, sizing=None):
+    key = (today, 'one_share', source, code)
+    if key not in _V2_LOGGED:
+        _V2_LOGGED.add(key)
+        journal_event(root, 'v2_execution_gate', permitted=False, reason='single_order_limit', symbol=code,
+                      source=source, price=price, buy_budget_krw=budget, sizing=sizing, cycle_id=cycle_id)
+
+
+def v2_unaffordable(root, today, code, source, ask, budget, cycle_id):
+    if type(ask) is not int or ask <= 0:
+        return (today, 'one_share', source, code) in _V2_LOGGED
+    if ask <= budget:
+        return False
+    note_single_order_limit(root, today, code, source, ask, budget, cycle_id)
+    return True
+
+
+def restore_single_order_limits(path, today):
+    """Keep the daily log deduplication across a runner restart."""
+    prefix = f'"{today.isoformat()}'
+    try:
+        with Path(path).open(encoding='utf-8') as stream:
+            for line in stream:
+                if prefix not in line[:40] or '"single_order_limit"' not in line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get('event') == 'v2_execution_gate' and event.get('reason') == 'single_order_limit':
+                    _V2_LOGGED.add((today, 'one_share', event.get('source'), event.get('symbol')))
+    except OSError:
+        pass
+
+
 def oversold_v2_entry(read, root, owned, cycle_id, bars=None, news=(), investor=None, modes=None, db=None):
     """(code, minute rows, plan basis, source) for 선별 v2 inside its window, or None:
     - 'oversold_v2_add': the second half of a v2 position bought the previous session, when it now trades under the
@@ -1774,9 +1853,11 @@ def oversold_v2_entry(read, root, owned, cycle_id, bars=None, news=(), investor=
     today = now.date()
     plans = exit_plans(root)
     if today not in _V2_BOUGHT:  # first look today (or after a restart): what this runner already sent or vetoed today
-        for source, code in oversold.sent_today(Path(root) / 'events.jsonl', today.isoformat()):
+        events_path = Path(root) / 'events.jsonl'
+        for source, code in oversold.sent_today(events_path, today.isoformat()):
             v2_sent(source, code)
-        _V2_LOGGED.update((today, 'veto', code) for code in v2_vetoed_today(Path(root) / 'events.jsonl', today.isoformat()))
+        _V2_LOGGED.update((today, 'veto', code) for code in v2_vetoed_today(events_path, today.isoformat()))
+        restore_single_order_limits(events_path, today)
         _V2_BOUGHT.setdefault(today, set())  # read once a day
     if OVERSOLD.get('oversold_v2_add_on'):
         for code, plan in plans.items():
@@ -1816,8 +1897,15 @@ def oversold_v2_entry(read, root, owned, cycle_id, bars=None, news=(), investor=
     if not (gate['kospi']['pass'] or gate['kosdaq']['pass']):
         return None
     vetoed = {code for day, kind, code in (k for k in _V2_LOGGED if len(k) == 3) if day == today and kind == 'veto'}
+    half = 0.5 if OVERSOLD.get('oversold_v2_add_on') else 1.0
+    source = 'oversold_v2'
     for row in oversold.v2_candidates(read, gate, OVERSOLD, list(oversold.universe(root)), held=set(owned) | bought | vetoed):
-        rows = fresh_rows(read, row['code'], now)
+        code = row['code']
+        cached = _V2_VERDICT.get((today, code))
+        possible_boost = cached[1] if cached else max(1.0, OVERSOLD.get('oversold_v2_boost_pct', 100) / 100)
+        if v2_unaffordable(root, today, code, source, row.get('ask'), buy_budget(source, half * possible_boost), cycle_id):
+            continue
+        rows = fresh_rows(read, code, now)
         if not rows:
             continue
         verdict, boost, facts = v2_research(root, row, rows, bars or {}, news, investor, modes or {})
@@ -1845,7 +1933,8 @@ def oversold_v2_entry(read, root, owned, cycle_id, bars=None, news=(), investor=
         if verdict == 'veto':
             _V2_LOGGED.add((today, 'veto', row['code']))
             continue
-        half = 0.5 if OVERSOLD.get('oversold_v2_add_on') else 1.0
+        if v2_unaffordable(root, today, code, source, row.get('ask'), buy_budget(source, half * boost), cycle_id):
+            continue
         return row['code'], rows, {**row, 'variant': 'v2', 'entry_price': row['price'], 'size_mult': half * boost,
                                    'research': verdict, 'past_similar_falls': facts.get('past_similar_falls')}, 'oversold_v2'
     return None
@@ -2811,7 +2900,39 @@ def etf7_protective_deadline(quote, symbol, now):
         return None
 
 
+def held_stock_context(read, root, symbol, quote, now):
+    """Current holding figures and optional stock research, with absent fields kept unknown."""
+    from watchlist import fresh_stock_news, investor_days, load_candidates, stock_news
+
+    quote = quote if quote and quote.get('iem_cd') == symbol else {}
+    details = load_candidates(now, Path(root) / 'watchlist.json', Path(root) / 'watchlist-manual.json').get(symbol) or {}
+    name = str(quote.get('iem_nm') or details.get('name') or '').lstrip('#*').strip() or None
+    try:
+        news = fresh_stock_news(symbol, name, now, fetch=lambda label, at: stock_news(label, at, timeout=3))
+    except Exception:  # optional research must not interrupt the holding review
+        news = None
+    if news is None:
+        news = details.get('news')
+    headlines = recent_stock_headlines(news, now, limit=3)
+    cached = _INVESTOR_CACHE.get(symbol)
+    if not cached or cached[0].date() != now.date() or not 0 <= (now - cached[0]).total_seconds() < INVESTOR_TTL:
+        try:
+            flows = investor_days(read, symbol, now.strftime('%Y%m%d'))
+        except Exception:
+            flows = None
+        cached = _INVESTOR_CACHE[symbol] = (now, flows)
+    figures = {}
+    for label, field in (('session_volume_shares', 'acml_vol'), ('session_turnover_million_krw', 'acml_tr_pbmn')):
+        value = quote.get(field)
+        figures[label] = value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
+    return {'symbol': symbol, 'name': name, **figures, 'quote_as_of_kst': quote.get('hoga_bsop_hour'),
+            'headlines': headlines, 'headlines_status': ('recent' if headlines else 'unavailable' if news is None else 'none_recent'),
+            'investor_daily_net_qty': cached[1] or None,
+            'investor_read_at': cached[0].isoformat(timespec='seconds') if cached[1] else None}
+
+
 def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, signal_context=None, modes=None, stop_hit=None, position_extra=None,
+                   position_quote=None,
                    bar_cache=None):
     if price_exit(avg, bid) if stop_hit is None else stop_hit:
         return True
@@ -2854,10 +2975,16 @@ def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, s
                 extra['market_bars'] = today_rows
             extra['opening_prior_bars'] = prior_rows
         investor = investor_flows(read, datetime.now(KST)) if etf7 and modes['jev'] else None
+        stock_context = (held_stock_context(read, root, symbol, position_quote, datetime.now(KST))
+                         if etf7 and symbol not in ETF7_SYMBOLS.values() else None)
         if etf7:
             extra['investor_flows'] = investor
+        if stock_context is not None:
+            extra['held_stock_context'] = stock_context
         if modes['decision']:
-            choice, confidence, usage = (holding_decision7 if etf7 else holding_decision)(bars, news, symbol, avg, bid)
+            judge = holding_decision7 if etf7 else holding_decision
+            context = {'stock_context': stock_context} if stock_context is not None else {}
+            choice, confidence, usage = judge(bars, news, symbol, avg, bid, **context)
             if etf7:
                 response_time = usage.get('response_time') if isinstance(usage, dict) else None
                 if not fresh_model_time(response_time, datetime.now(KST)):
@@ -2877,7 +3004,7 @@ def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, s
             extra = {'own_track_record': track_record(root), 'opening_review': opening_quote(read, symbol) if opening_used else None,
                      'market_regime_themes_global': market_view(root), 'past_falls_reference': oversold_cases.bars_context(bars),
                      'trading_journal': trading_journal_brief(), 'premarket_context': premarket_view(),
-                     'market_playbook': market_playbook.brief('holding')}  # user 2026-11-18: reference lens, not a rule
+                     'market_playbook': market_playbook.brief('holding'), 'held_stock_context': stock_context}
             comparison = jev_holding7(bars, news, symbol, avg, bid, investor=investor,
                                       extra_state={k: v for k, v in extra.items() if v} or None, position_extra=position_extra)
             candidate = comparison.get('holding') if isinstance(comparison, dict) else None
@@ -3364,7 +3491,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         signal_context = {}
         jev_sell = manual or flatten or (holding_action(read, root, symbol, avg, bid, cycle_id=cycle_id, etf7=etf7,
                                                         signal_context=signal_context, modes=modes, stop_hit=exit_now(symbol, avg, bid),
-                                                        bar_cache=bar_cache,
+                                                        bar_cache=bar_cache, position_quote=quote,
                                                         position_extra=position_context(symbol, avg, bid, quantity) if etf7 else None)
                                          and (not v2_hold or exit_now(symbol, avg, bid)))
         should_sell = jev_sell
@@ -3837,6 +3964,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             shadow('scale_signal_disabled')
             return 'wait'
     careful = careful_ok.get(symbols[candidate])  # a careful re-entry the review let through (user 2026-11-18)
+    decided_at = datetime.now(KST)
     journal_event(root, 'v2_entry_gate', choice=candidate, source=source, permitted=True, reason='entry_conditions_met', cycle_id=cycle_id)
     if order_count >= 998 or quantity_room(owned) == 0:
         journal_event(root, 'v2_execution_gate', permitted=False,
@@ -3856,18 +3984,23 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
     cash = balance.get('Output_0', {}).get('orr_pbl_amt1')
     if type(price) is not int or price <= 0 or type(cash) not in (int,float) or not math.isfinite(cash) or cash < 0:
         raise ValueError('paper buying power or ask unavailable')
+    timing = entry_timing_context(quote, price, bars.get(candidate, []), decided_at)
     if cash < price:
-        journal_event(root, 'v2_execution_gate', permitted=False, reason='insufficient_buying_power', cycle_id=cycle_id)
+        journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason='insufficient_buying_power',
+                      cycle_id=cycle_id, entry_timing=timing)
         return 'wait'
     if etf7 and stop_inside_spread(quote):
-        journal_event(root, 'v2_execution_gate', permitted=False, reason='stop_inside_spread', cycle_id=cycle_id)
+        journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason='stop_inside_spread',
+                      cycle_id=cycle_id, entry_timing=timing)
         return 'wait'
+    budget = None
+    if etf7:
+        size_mult = oversold_basis.get('size_mult', 1) if source in V2_SOURCES else 1
+        inverse_mult = ((INVERSE['late_size_pct'] if inverse_late(market_view(root), symbol_index(root, symbol))
+                         else INVERSE['size_pct']) / 100 if symbol in short_codes else 1)
+        budget = buy_budget(source, size_mult, inverse_mult)
     qty = min(max_qty, int(cash // price), quantity_room(owned),
-              int(min(SHARED_SINGLE_ORDER_KRW, SPLIT_TRANCHE_KRW * size_factor(source)
-                      * (oversold_basis.get('size_mult', 1) if source in V2_SOURCES else 1)
-                      * ((INVERSE['late_size_pct'] if inverse_late(market_view(root), symbol_index(root, symbols[candidate]))
-                          else INVERSE['size_pct']) / 100 if symbols[candidate] in short_codes else 1))) // price
-              if etf7 else max_qty)
+              budget // price if budget is not None else max_qty)
     if source == 'oversold_v2_reentry':
         qty = min(qty, int(oversold_basis['reentry_qty']))
     sizing = None
@@ -3899,8 +4032,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             shadow('projected_exit')
             return 'wait'
     if qty < 1:
-        journal_event(root, 'v2_execution_gate', permitted=False, reason='single_order_limit', symbol=symbol, source=source, price=price,
-                      sizing=sizing, cycle_id=cycle_id)  # which buy came out under one share, and why (audit 11-18)
+        note_single_order_limit(root, datetime.now(KST).date(), symbol, source, price, budget, cycle_id, sizing)
         if signal_add:  # the held position is at its per-symbol amount
             shadow('single_order_limit')
         return 'wait'
@@ -3952,7 +4084,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                       signal_check=buy_signal_current if etf7 else None, deadline_ms=deadline_ms,
                                       allowed=set(symbols.values()) if etf7 else None)
         except PaperOrderGuardRefused as exc:
-            journal_event(root, 'v2_execution_gate', permitted=False, reason='order_guard_refused', cycle_id=cycle_id, **guard_note(exc))
+            journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason='order_guard_refused',
+                          cycle_id=cycle_id, entry_timing=timing, **guard_note(exc))
             if 'reconciliation' in str(exc):
                 # The shared guard holds an unresolved order this journal does not; retrying every minute hides it.
                 raise ValueError('order guard requires reconciliation') from exc
@@ -3968,7 +4101,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         # observation (improvement report 11/17-3): the decision's confidence and why an add passed
         why = (passed or 'rule_off') if signal_add else 'first' if symbol not in owned else None
         journal_event(root, 'submitted', symbol=symbol, limit=price, qty=qty, source=source, cycle_id=cycle_id,
-                      **entry_context(quote, price), **({'sizing': sizing} if sizing else {}),
+                      entry_timing=timing, **entry_context(quote, price), **({'sizing': sizing} if sizing else {}),
                       **({'confidence': jev_conf} if type(jev_conf) in (int, float) else {}), **({'add_reason': why} if why else {}),
                       **({'careful_reentry': careful} if careful else {}))
         if source == 'jev' and type(jev_conf) in (int, float):  # the bar the next add must beat (add_reason)

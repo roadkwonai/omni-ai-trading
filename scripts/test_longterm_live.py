@@ -64,7 +64,7 @@ class Broker:
         self.reads += 1
         return self.quote
 
-    def execute(self, reader, guard, credentials, op, fields, replacement_of=None):
+    def execute(self, reader, guard, credentials, op, fields, replacement_of=None, quote_audit=None):
         self.replacements.append(replacement_of)
         if fields['iem_cd'] not in guard.symbols:  # as LiveOrderGuard.reserve: a guard orders only the symbols it was built with
             raise LiveOrderBlocked('account or symbol mismatch')
@@ -130,7 +130,12 @@ def test_turning_live_orders_on_after_a_dry_plan_plans_again_and_sends(tmp_path)
     run(tmp_path, at(9, 41), broker, execute_orders=False)
     again = run(tmp_path, at(9, 45), broker, execute_orders=True)
     assert (again['action'], again['execution']) == ('PLAN', 'PLANNED')
-    assert run(tmp_path, at(9, 46), broker, execute_orders=True)['execution'] == 'ACKNOWLEDGED_NOT_FILLED'
+    result = run(tmp_path, at(9, 46), broker, execute_orders=True)
+    assert result['execution'] == 'ACKNOWLEDGED_NOT_FILLED'
+    evidence = result['quote_gap_audit']
+    assert evidence['symbol'] == result['symbol'] and evidence['ask'] == result['price']
+    assert evidence['previous_close'] is None and evidence['gap_pct'] is None
+    assert evidence['reason'] == 'previous_close_unverified'
     assert len(broker.sent) == 1
 
 

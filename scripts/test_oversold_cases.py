@@ -7,6 +7,32 @@ from zoneinfo import ZoneInfo
 
 import oversold_cases as oc
 
+
+def test_versioned_refresh_archives_old_result_and_keeps_other_replays(tmp_path):
+    import json
+    import sqlite3
+    import oversold_replay
+
+    db = tmp_path / 'cases.sqlite3'
+    case = {'kind': 'stock', 'replay': {'v2_plan': {'ret': 7}, 'close_1d': {'ret': 3}}}
+    with sqlite3.connect(db) as conn:
+        conn.execute('CREATE TABLE cases (key TEXT PRIMARY KEY, code TEXT, day TEXT, kind TEXT, data TEXT)')
+        conn.execute('CREATE TABLE series (symbol TEXT, day TEXT, o REAL, h REAL, l REAL, c REAL, v REAL)')
+        conn.execute('INSERT INTO cases VALUES (?,?,?,?,?)', ('k', '005930', '2026-11-02', 'stock', json.dumps(case)))
+        for day in range(1, 7):
+            conn.execute('INSERT INTO series VALUES (?,?,?,?,?,?,?)',
+                         (oc.symbol_of('005930'), f'2026-11-{day:02d}', 100, 101, 99, 100, 100))
+    result = oc.refresh_v2_versioned(db, {'oversold_v2_stop_pct': 2})
+    with sqlite3.connect(db) as conn:
+        saved = json.loads(conn.execute('SELECT data FROM cases').fetchone()[0])
+        previous, updated = conn.execute('SELECT previous,updated FROM v2_replay_history').fetchone()
+    assert json.loads(previous) == {'ret': 7}
+    assert saved['replay']['close_1d'] == {'ret': 3}
+    assert json.loads(updated) == saved['replay']['v2_plan']
+    assert saved['replay']['v2_plan']['rule_version'] == oversold_replay.V2_RULE_VERSION
+    assert saved['replay']['v2_plan']['settings']['oversold_v2_stop_pct'] == 2
+    assert result['updated'] == 1
+
 KST = ZoneInfo('Asia/Seoul')
 START = date(2026, 9, 1)
 

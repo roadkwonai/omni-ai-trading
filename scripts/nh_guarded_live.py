@@ -82,14 +82,14 @@ def _token(opener,key,secret):
         raise LiveOrderBlocked('broker authentication failed; intent requires reconciliation') from None
 
 
-def execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None):
+def execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None):
     if op == 'krstockOrderCashBuy':
         with buy_lock(guard.root):
-            return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check)
-    return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check)
+            return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit)
+    return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit)
 
 
-def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None):
+def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None):
     if op not in PATHS: raise LiveOrderBlocked('unsupported operation')
     from accounts import DEFAULT_BUDGET, LIVE_PRICE_HARD_CAP, live_limits, live_loss_realized_only, live_record
     # one accounts.json read per order, so a dashboard edit mid-order cannot mix limits (accounts.live_* use the same fields)
@@ -123,6 +123,23 @@ def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pr
         if op != 'krstockOrderCancel':
             verify_order_market(op, symbol, fields.get('orr_pr'), datetime.now(KST),
                                 snapshots['quote'], snapshots['previous_quote'])
+        if op == 'krstockOrderCashBuy' and isinstance(quote_audit, dict):
+            try:
+                import math
+                current = snapshots['quote']['data']['Output_0']
+                previous = current.get('stck_prdy_clpr')
+                ask = current.get('askp')
+                quote_audit.update({'ask': ask, 'observed_at': datetime.now(KST).isoformat(),
+                                    'quote_time': current.get('hoga_bsop_hour'), 'source': 'NH 보호 경로 주문 전 호가',
+                                    'previous_close_date': None,
+                                    'note': 'NH 전일 종가 필드 미확인'})
+                previous = float(previous) if not isinstance(previous, bool) else 0
+                if math.isfinite(previous) and previous > 0 and type(ask) is int and ask > 0:
+                    quote_audit.update(previous_close=previous, gap_pct=round((ask / previous - 1) * 100, 4),
+                                       reason='previous_close_date_not_provided',
+                                       note='NH 전일 종가 필드 기준. 전 거래일 날짜는 응답에서 확인되지 않았습니다.')
+            except (KeyError, TypeError, ValueError, OverflowError):
+                pass
         return pre_reserve_check is None or pre_reserve_check() is True
     try:
         response=(_transport(credentials,op,fields,pre_send_check=pre_send_check)

@@ -410,6 +410,18 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
            min(order['qty'], int(abs(order['krw']) // (price * (1 + L.FEE))), ORDER_QTY_MAX, min(live_limits(record=record)['order_max_krw'], capital) // price))
     cap = min(record['budget'].get('order_price_max_krw') or DEFAULT_BUDGET['live']['order_price_max_krw'], LIVE_PRICE_HARD_CAP)
     result = {'action': order['side'], 'symbol': code, 'qty': qty, 'price': price, **info}
+    if not sell:
+        result['quote_gap_audit'] = {
+            'symbol': code,
+            'ask': price,
+            'observed_at': datetime.now(KST).isoformat(),
+            'source': 'NH get_stock_price',
+            'previous_close': None,
+            'previous_close_date': None,
+            'gap_pct': None,
+            'reason': 'previous_close_unverified',
+            'note': '주문 계획 직전 조회 호가. 보호 경로에서 주문 전 호가를 다시 확인합니다.',
+        }
     if not sell and price > cap:
         order.update(status='skipped', reason='share price above the account price cap')
     elif sell and held.get(code) and not owned:
@@ -421,7 +433,10 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
                   'orr_cnd_dit_cd': '00', 'ssl_nmn_pr_dit_cd': '00', 'rmt_mkt_cd': 'KRX', 'sor_mkt_sli_yn': 'N'}
         try:
             replaces = cancelled_sell(guard, code) if sell else None  # a sell cancelled after 60 s unfilled is re-sent as its replacement
-            result['intent'] = execute(reader, guard, credentials, CASH[order['side']], fields, replacement_of=replaces)
+            kwargs = {'replacement_of': replaces}
+            if not sell:
+                kwargs['quote_audit'] = result['quote_gap_audit']
+            result['intent'] = execute(reader, guard, credentials, CASH[order['side']], fields, **kwargs)
         except LiveOrderBlocked as exc:  # a refusal that clears on its own is retried until END; any other is final
             retry = str(exc) in TRANSIENT
             order.update(status='planned' if retry else 'blocked', reason=str(exc))

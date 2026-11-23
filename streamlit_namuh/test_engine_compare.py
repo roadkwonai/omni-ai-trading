@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from unittest.mock import patch
 from pathlib import Path
 
@@ -81,6 +82,22 @@ class LiveJournalTests(unittest.TestCase):
 
 
 class RealJournalTests(unittest.TestCase):
+    def test_confirmed_today_fills_replace_only_todays_mirror(self):
+        from unittest import mock
+
+        before, today = '2026-11-20', '2026-11-23'
+        past = {'time': before + 'T10:00:00+09:00', 'symbol': '005930', 'side': 'BUY',
+                'qty': 2, 'price': 212000, 'path': '관심종목', 'basis': ''}
+        fill = {'time': today + 'T10:00:00+09:00', 'symbol': '005930', 'side': 'BUY', 'qty': 1, 'price': 210000.0}
+        with mock.patch('live_fills.rows', return_value=[fill]), \
+                mock.patch('nh_live_shadow.account_shadow', return_value={'trades': [past]}) as shadow, \
+                mock.patch.object(ec, '_today_bars') as bars:
+            rows = ec.account_rows('.', 'live-1', {}, [past], '.', datetime.fromisoformat(today + 'T11:00:00+09:00'))
+        assert [r['source'] for r in rows] == ['가상(기본 손절 추정)', '실체결']
+        assert rows[-1]['price'] == 210000 and rows[-1]['qty'] == 1
+        assert [call.args[2] for call in shadow.call_args_list] == [before]
+        bars.assert_not_called()
+
     def test_broker_fills_take_the_engine_reason_and_count_only_known_cost(self):
         engine = [{'time': '2026-11-14T09:50:28+09:00', 'symbol': '005930', 'side': 'BUY', 'path': '관심종목 강도', 'basis': 'Jev 확률 0.49'}]
         fills = [{'time': '2026-11-14T09:30:00+09:00', 'symbol': '114800', 'side': 'SELL', 'qty': 1, 'price': 1250.0},

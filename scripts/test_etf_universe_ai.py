@@ -1,7 +1,7 @@
 import json
 import math
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from etf_universe import NAMES, SYMBOLS
@@ -25,7 +25,7 @@ class Response:
 class EtfUniverseAITest(unittest.TestCase):
     def setUp(self):
         self.bars = {name: [{'stck_prpr': str(100 + i)} for i in range(6)] for name in SYMBOLS}
-        self.news = [{'title': '시장 상황', 'published': '2026-11-11T01:00:00+00:00'}]
+        self.news = [{'title': '시장 상황', 'published': datetime.now(ai.old.KST).isoformat()}]
 
     def test_universe_contains_only_requested_products(self):
         self.assertEqual(SYMBOLS, {'K200': '069500', 'LEV': '122630', 'INV': '114800',
@@ -92,6 +92,34 @@ class EtfUniverseAITest(unittest.TestCase):
         for bad in ({**self.bars, 'SAMSUNG': self.bars['K200']}, {k: v for k, v in self.bars.items() if k != 'INV'}):
             with self.assertRaises(ValueError):
                 ai._etf7_inputs(bad, self.news)
+
+    def test_jev_rechecks_market_headlines_at_dispatch_and_records_the_actual_input(self):
+        at = datetime(2026, 11, 23, 12, 31, 24, 80000, tzinfo=ai.old.KST)
+        expired = {'title': '경계가 지난 기사', 'published': (at - timedelta(minutes=90, milliseconds=80)).isoformat()}
+        fresh = {'title': '최근 기사', 'published': (at - timedelta(minutes=10)).isoformat()}
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return at
+
+        sent = []
+        def respond(req, timeout):
+            sent.append(json.loads(req.data)['state'])
+            return Response({'model': 'jev-1.14.0', 'answers': {'candidate': {
+                'type': 'choice', 'choice': 'WAIT', 'confidence': 0.7}}})
+
+        with patch.object(ai, 'datetime', Clock), patch.object(ai.old, 'dotenv_values', return_value={'JEV_API_KEY': 'fake'}), \
+                patch.object(ai.urllib.request, 'urlopen', side_effect=respond) as network, \
+                patch('research_store.record_input', return_value='a' * 64) as log:
+            ai.jev7(self.bars, [expired, fresh])
+            with self.assertRaisesRegex(ValueError, 'expired before Jev request'):
+                ai.jev7(self.bars, [expired])
+        self.assertEqual(network.call_count, 1)
+        self.assertEqual(sent[0]['recent_news_headlines'], [{**fresh, 'news_role': 'priority'}])
+        self.assertEqual((sent[0]['news_priority_minutes'], sent[0]['news_max_age_minutes']), (30, 60))
+        self.assertEqual(sent[0]['news_checked_at'], at.isoformat())
+        self.assertEqual(log.call_args.args[2]['state'], sent[0])
 
     def test_jev_receives_investor_flows_when_available(self):
         sent = []

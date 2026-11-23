@@ -681,7 +681,8 @@ def market(root, plan, regime_state, decisions, settings):
     with st.container(border=True):  # 국면 확정 일수 (was 운용 설정): one regime for every book, so it lives here
         days, button = st.columns([3, 1], vertical_alignment='bottom')
         value = tuning_input(days, 'confirm_days', settings['tuning']['confirm_days'])
-        if button.button('확정 일수 저장', key='lt_save_confirm', disabled=value == settings['tuning']['confirm_days'], width='stretch'):
+        if button.button('확정 일수 저장', key='lt_save_confirm', type='primary',
+                         disabled=value == settings['tuning']['confirm_days'], width='stretch'):
             save(root, {**settings, 'tuning': {**settings['tuning'], 'confirm_days': value}}, f'국면 확정 일수를 {value}일로 저장했습니다. 다음 판단부터 적용됩니다.')
         st.caption('새 국면이 이 일수만큼 이어져야 바꿉니다(투매는 2거래일). 모든 장부가 같은 국면을 씁니다.' + off_default('confirm_days', value))
     st.caption('위험도 ■ 다섯 칸 = 계좌가 가장 크게 흔들리는 국면. 엔진은 "판정 순서" 열의 순서(투매 → 약세 → 조정 → 회복 → 과열 → 강세 안정)로 먼저 맞는 '

@@ -290,7 +290,7 @@ def _etf7_inputs(bars, news):
         raise ValueError('ETF news timestamp unavailable') from None
 
 
-def _etf7_decision(bars, news, *, symbol=None, avg=None, bid=None):
+def _etf7_decision(bars, news, *, symbol=None, avg=None, bid=None, stock_context=None):
     from etf_universe import SYMBOLS as universe, DETAILS
     _etf7_inputs(bars, news)
     holding = symbol is not None
@@ -303,6 +303,8 @@ def _etf7_decision(bars, news, *, symbol=None, avg=None, bid=None):
     state = {'bars_newest_first': bars, 'news': news}
     if holding:
         state.update(symbol=symbol, entry_average=avg, bid=bid)
+        if stock_context is not None:
+            state['held_stock_context'] = stock_context
         choices = [{'value': 'HOLD', 'description': '보유 유지 또는 근거 부족'},
                    {'value': 'SELL', 'description': '보유 ETF의 조기 매도를 뒷받침'}]
         question = 'position_action'
@@ -342,13 +344,14 @@ def decision7(bars, news):
     return _etf7_decision(bars, news)
 
 
-def holding_decision7(bars, news, symbol, avg, bid):
+def holding_decision7(bars, news, symbol, avg, bid, *, stock_context=None):
     if symbol is None:
         raise ValueError('invalid ETF holding')
-    return _etf7_decision(bars, news, symbol=symbol, avg=avg, bid=bid)
+    return _etf7_decision(bars, news, symbol=symbol, avg=avg, bid=bid, stock_context=stock_context)
 
 
 def _jev7_question(bars, news, question, criteria, position=None, investor=None, instructions=None, extra_state=None):
+    from etf_news import JEV_NEWS_MAX_MINUTES, JEV_NEWS_PRIORITY_MINUTES, jev_market_headlines, supplement_jev_topics
     from etf_universe import SYMBOLS as universe
     from nh_jev_compare import plt
     _etf7_inputs(bars, news)
@@ -375,8 +378,7 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
         plt.close(fig)
     digest = hashlib.sha256(image).hexdigest()
     ref = 'chart-' + digest[:20]
-    state = {'chart': ref, 'recent_news_headlines': [
-        {k: item[k] for k in ('title', 'published', 'source') if k in item} for item in news]}
+    state = {'chart': ref}
     if position is not None:
         state['position'] = position
     state.update(intraday)
@@ -402,10 +404,23 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
         'assets': {ref: {'type': 'image', 'format': 'png', 'data_base64': base64.b64encode(image).decode('ascii')}},
         'questions': {question: {'type': 'choice', 'instructions': instructions, 'criteria': criteria},
                       **jev_context.questions()}}  # why it answered so: choice questions only (text is refused)
-    req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', data=json.dumps(payload, ensure_ascii=False).encode(),
-        headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'TypeSafe-Danger-Zone-Images': 'true'})
     from jev_activity import regular_request
+    news, backfill = supplement_jev_topics(news, datetime.now(old.KST))
     with regular_request():
+        checked_at = datetime.now(old.KST)
+        fresh_news = jev_market_headlines(news, checked_at)
+        if not fresh_news:
+            raise ValueError('ETF news expired before Jev request')
+        if backfill:
+            covered = {item.get('topic') for item in fresh_news}
+            backfill['missing_after'] = [topic for topic in backfill['missing_before'] if topic not in covered]
+        state['news_checked_at'] = checked_at.isoformat()
+        state['news_priority_minutes'] = JEV_NEWS_PRIORITY_MINUTES
+        state['news_max_age_minutes'] = JEV_NEWS_MAX_MINUTES
+        state['recent_news_headlines'] = [
+            {k: item[k] for k in ('title', 'published', 'source', 'topic', 'news_role') if k in item} for item in fresh_news]
+        req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', data=json.dumps(payload, ensure_ascii=False).encode(),
+            headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'TypeSafe-Danger-Zone-Images': 'true'})
         with urllib.request.urlopen(req, timeout=25) as response:
             result = json.load(response)
     response_time = datetime.now(old.KST).isoformat()
@@ -430,7 +445,7 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
     from research_store import record_input
     # The full input (state, choices, instructions; not the image) is kept once, so a decision can be replayed later.
     input_digest = record_input('jev', question, {'state': state, 'criteria': criteria, 'instructions': instructions,
-                                                   'chart_sha256': digest}, candidate)
+                                                   'chart_sha256': digest, **({'news_backfill': backfill} if backfill else {})}, candidate)
     evidence = jev_context.parse(answers)
     if evidence and input_digest:
         from research_store import record_evidence

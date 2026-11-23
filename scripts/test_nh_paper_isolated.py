@@ -2548,6 +2548,44 @@ class SecondReviewUnitTests(unittest.TestCase):
             for cache in (p._V2_BOUGHT, p._V2_LOGGED, p._V2_VERDICT):
                 cache.clear()
 
+    def test_oversold_entry_uses_the_configured_number_of_completed_bars(self):
+        import oversold
+        from strategy_settings import DEFAULTS
+
+        now = NOW.replace(second=30)
+        code = '005930'
+        quote = {'stck_prpr': 94, 'stck_prdy_clpr': 100, 'stck_lwpr': 92}
+        rows = [{'bsop_date': now.strftime('%Y%m%d'), 'bsop_time': (now - timedelta(minutes=i)).strftime('%H%M00'),
+                 'stck_oprc': 93, 'stck_hgpr': 95, 'stck_lwpr': 93, 'stck_prpr': 94, 'vol': 10}
+                for i in range(30)]
+        reply = {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': {'iem_cd': code}, 'Output_1': rows}}
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return now
+
+        for calm in (20, 25):
+            p._OVERSOLD_ASKED.clear()
+            try:
+                def scan(read, at, settings, codes, held, bars_of):
+                    return [oversold.evaluate(code, quote, bars_of(code), None, settings, at)]
+
+                with self.subTest(calm=calm), patch.object(p, 'datetime', Clock), \
+                        patch.dict(p.OVERSOLD, {**DEFAULTS, 'oversold_calm_min': calm}), \
+                        patch.object(oversold, 'universe', return_value={code: '삼성전자'}), \
+                        patch.object(oversold, 'scan', side_effect=scan), patch.object(oversold, 'brief', return_value={}), \
+                        patch.object(oversold, 'market_ok', return_value=True), patch.object(p, 'minute_bars', return_value=reply), \
+                        patch.object(p, 'journal_event'), patch.object(p, 'market_view'), patch.object(p, 'premarket_view'), \
+                        patch('nh_etf_auto_v2.jev_oversold7',
+                              return_value={'oversold': {'choice': 'BUY', 'confidence': 0.9}}) as asked:
+                    result = p.oversold_entry(None, None, {}, {}, [], None, {'jev': True}, 'test')
+                self.assertIsNotNone(result)
+                self.assertEqual(len(asked.call_args.args[0][code]), calm)
+                self.assertEqual(asked.call_args.args[0][code][0]['bsop_time'], '115800')
+            finally:
+                p._OVERSOLD_ASKED.clear()
+
     def test_an_oversold_buy_answer_is_remembered_like_a_refusal(self):  # J6
         import oversold
         row = {'code': '005930', 'triggered': True, 'stabilized': True, 'target_pct': 1.5, 'drop_pct': -7.0, 'atr_multiple': 2.0,
@@ -2906,6 +2944,18 @@ class ReentryTests(unittest.TestCase):
                                                           'overheat_code': '0', 'alarm_code': '2'})
         self.assertEqual(p.entry_context({'vi_antc_mxpr': 0, 'short_over_code': 'X', 'vi_type_code': '1'}, 100), {'vi_halt': '1'})
 
+    def test_entry_timing_records_studio_dragon_prices_from_current_completed_bars(self):
+        at = NOW.replace(hour=11, minute=29, second=36)
+        rows = [{'bsop_time': '112700', 'stck_prpr': '33700', 'stck_lwpr': '33600'},
+                {'bsop_time': '112600', 'stck_lwpr': '33500'}, {'bsop_time': '112500', 'stck_lwpr': '33450'},
+                {'bsop_time': '112400', 'stck_lwpr': '33550'}, {'bsop_time': '112300', 'stck_lwpr': '33600'},
+                {'bsop_time': '112200', 'stck_lwpr': '33600'},
+                {'bsop_time': '155000', 'stck_lwpr': '21000', 'bsop_date': '20261105'}]
+        data = p.entry_timing_context({'hoga_bsop_hour': '11:29:39'}, 33900, rows, at)
+        self.assertEqual((data['decision_price'], data['order_ask'], data['recent_low']), (33700, 33900, 33450))
+        self.assertEqual((data['ask_vs_decision_pct'], data['ask_vs_recent_low_pct']), (0.593, 1.345))
+        self.assertNotIn('recent_low', p.entry_timing_context({}, 33900, rows[:3], at))
+
     def test_strength_skips_a_floored_stock_until_it_trades_above_its_last_exit(self):
         import json
         with tempfile.TemporaryDirectory() as d:
@@ -3231,6 +3281,50 @@ def test_opening_bars_count_as_fresh_only_inside_the_opening_window():
         assert p.fresh_etf7_bars(bars, datetime(2026, 11, 6, 9, 0, 20, tzinfo=ZoneInfo('Asia/Seoul')))
         assert p.fresh_etf7_bars(bars, datetime(2026, 11, 6, 9, 7, 59, tzinfo=ZoneInfo('Asia/Seoul')))
         assert not p.fresh_etf7_bars(bars, datetime(2026, 11, 6, 9, 8, tzinfo=ZoneInfo('Asia/Seoul')))
+
+
+def test_stock_holding_reviews_receive_symbol_news_flows_and_turnover(tmp_path, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+
+    code = '090710'
+    candle = {'bsop_time': '115800', 'stck_prpr': '5280'}
+    quote = {'iem_cd': code, 'iem_nm': '#휴림로봇', 'acml_vol': 566367, 'acml_tr_pbmn': 2666,
+             'hoga_bsop_hour': '11:59:58'}
+    flows = {'today_provisional': {'date': '20261106', 'foreign': 120, 'institution': 45, 'individual': -165}}
+    stock_news = [{'title': '휴림로봇 계약', 'published': (NOW - timedelta(minutes=12)).isoformat()},
+                  {'title': '오래된 기사', 'published': (NOW - timedelta(hours=2)).isoformat()}]
+    market_news = [{'title': '시장 약세', 'published': NOW.isoformat()}]
+    jev = {'model': 'jev-1.14.0', 'chart_sha256': 'a' * 64, 'response_time': NOW.isoformat(),
+           'holding': {'type': 'choice', 'choice': 'HOLD', 'confidence': 0.8}}
+    monkeypatch.setattr(p, '_INVESTOR_CACHE', {})
+    with patch.object(p, 'datetime', Clock), patch.object(p, 'minute_bars', return_value={'status': 'ok'}), \
+         patch.object(p, 'valid_bars', return_value=[candle]), patch('etf_news.headlines7', return_value=market_news), \
+         patch('watchlist.fresh_stock_news', return_value=stock_news) as news, \
+         patch('watchlist.investor_days', return_value=flows) as investor, \
+         patch.object(p, 'investor_flows', return_value=None), \
+         patch.object(p, 'holding_decision7', return_value=('HOLD', 0.9, {'response_time': NOW.isoformat()})) as decision, \
+         patch.object(p, 'jev_holding7', return_value=jev) as judge, patch.object(p, 'journal_event'):
+        for _ in range(2):
+            assert p.holding_action(None, tmp_path, code, 5260, 5280, etf7=True, position_quote=quote) is False
+        context = judge.call_args.kwargs['extra_state']['held_stock_context']
+        assert decision.call_args.kwargs['stock_context'] == context
+        assert news.call_args.args[:2] == (code, '휴림로봇')
+        assert context['headlines'] == [{'title': '휴림로봇 계약', 'age_min': 12}]
+        assert context['investor_daily_net_qty'] == flows
+        assert (context['session_volume_shares'], context['session_turnover_million_krw']) == (566367, 2666)
+        investor.assert_called_once_with(None, code, '20261106')
+
+
+def test_optional_holding_stock_data_marks_provider_failures_unknown(tmp_path, monkeypatch):
+    monkeypatch.setattr(p, '_INVESTOR_CACHE', {})
+    with patch('watchlist.fresh_stock_news', side_effect=TimeoutError), \
+         patch('watchlist.investor_days', side_effect=TimeoutError):
+        context = p.held_stock_context(None, tmp_path, '090710', {'iem_cd': 'different', 'acml_vol': 1}, NOW)
+    assert context['headlines_status'] == 'unavailable'
+    assert context['investor_daily_net_qty'] is None and context['session_volume_shares'] is None
 
 
 def test_carried_position_gets_a_jev_review_in_the_first_minute():

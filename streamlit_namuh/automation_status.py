@@ -35,7 +35,9 @@ def processes(max_age=PROCESS_CACHE_S):
     try:
         result = subprocess.run(['launchctl', 'list'], check=True, capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
-        return {name: '확인 불가' for name in LABELS}
+        states = {name: '확인 불가' for name in LABELS}
+        _PROCESSES = (time.monotonic(), states)
+        return dict(states)
     entries = {}
     for line in result.stdout.splitlines():
         fields = line.split()
@@ -44,6 +46,14 @@ def processes(max_age=PROCESS_CACHE_S):
     states = {name: ('미등록' if label not in entries else '종료' if entries[label] == '-' else '실행 중')
               for name, label in LABELS.items()}
     _PROCESSES = (time.monotonic(), states)
+    return dict(states)
+
+
+def peek_processes(max_age=PROCESS_CACHE_S):
+    """Return a current cache snapshot without running launchctl."""
+    stamp, states = _PROCESSES
+    if states is None or time.monotonic() - stamp >= max_age:
+        return None
     return dict(states)
 
 

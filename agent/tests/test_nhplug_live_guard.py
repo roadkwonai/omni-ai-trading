@@ -212,22 +212,30 @@ def test_sell_requires_proven_live_balance(tmp_path):
     with pytest.raises(LiveOrderBlocked):
         reserve(guard,'krstockOrderCashSell',{**BUY,'orr_pr':1399},balance={**BALANCE,'Output_1':[]},sellable=sellable)
 
-def test_sell_replacement_requires_terminal_cancel_evidence_and_is_single_use(tmp_path):
+@pytest.mark.parametrize('quantity', [1, 29])
+def test_sell_replacement_requires_terminal_cancel_evidence_and_is_single_use(tmp_path, quantity):
     guard=LiveOrderGuard(A,tmp_path)
-    balance={**BALANCE,'Output_1':[{'iem_cd':'114800','rsdl_qty':1}]}
-    sellable={'_account':A,'_symbol':'114800','rsp_cd':'00166','sll_pbl_qty':1}
-    guard.adopt_existing(now=NOW,balance=balance,sellable=sellable)
-    sell={**BUY,'orr_pr':1399}
+    balance={**BALANCE,'Output_1':[{'iem_cd':'114800','rsdl_qty':quantity}]}
+    sellable={'_account':A,'_symbol':'114800','rsp_cd':'00166','sll_pbl_qty':quantity}
+    guard.adopt_existing(now=NOW,balance=balance,sellable=sellable,quantity=quantity)
+    sell={**BUY,'orr_pr':1399,'orr_qty':quantity}
     original=reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable)
     with pytest.raises(LiveOrderBlocked):
         reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable,replacement_of=original)
     guard.acknowledge(original,{'rsp_cd':'00047','rsp_msg':'매도주문이 완료되었습니다','Output_0':{'mkt_orr_no':42}})
     with pytest.raises(LiveOrderBlocked):
         reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable,replacement_of=original)
-    guard.reconcile(original,complete(sby_dit_cd_nm='현금매도',tot_cns_qty=0,can_qty=1))
+    confirmed=complete(sby_dit_cd_nm='현금매도',orr_qty=quantity,tot_cns_qty=0,can_qty=quantity)
+    ack={'itg_orr_no':43,'iem_cd':'114800','sby_dit_cd_nm':'현금매도','orr_rjt_rsn_cd_nm':'확인',
+         'orr_qty':quantity,'tot_cns_qty':0,'ny_cns_qty':0,'can_qty':0}
+    with pytest.raises(LiveOrderBlocked):
+        guard.reconcile(original,{**HISTORY,'Output_0':[ack]})
+    confirmed['Output_0'].append(ack)
+    assert guard.reconcile(original,confirmed) == {'filled':0,'cancelled':quantity}
     with pytest.raises(LiveOrderBlocked,match='explicit replacement'):
         reserve(guard,'krstockOrderCashSell',{**sell,'orr_pr':1398},balance=balance,sellable=sellable)
-    replacement=reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable,replacement_of=original)
+    replacement=reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable,
+                        history=confirmed,replacement_of=original)
     assert replacement != original
     with pytest.raises(LiveOrderBlocked):
         reserve(LiveOrderGuard(A,tmp_path),'krstockOrderCashSell',sell,balance=balance,sellable=sellable,replacement_of=original)

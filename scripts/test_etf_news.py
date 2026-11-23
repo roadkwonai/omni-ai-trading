@@ -214,6 +214,51 @@ def test_only_recent_headlines_reach_the_engines():
         etf_news._fetch7(now, ('bing_news_rss', 'naver_finance_news', 'google_news_rss'))  # nothing recent: the runner waits
 
 
+def test_jev_market_headlines_only_backfills_topics_missing_a_recent_article():
+    from datetime import timedelta
+
+    now = datetime(2026, 11, 23, 12, 40, tzinfo=ZoneInfo('Asia/Seoul'))
+    rows = [{'title': title, 'topic': topic, 'published': (now - timedelta(minutes=age)).isoformat()}
+            for title, topic, age in [('시장 보충 불필요', 'market', 31),
+                                      ('시장 정확히 30분', 'market', 30),
+                                      ('코스닥 정확히 60분', 'kosdaq150', 60),
+                                      ('반도체 시간 초과', 'semiconductor', 60.01),
+                                      ('주제 미확인 보충 제외', None, 40),
+                                      ('미래 기사 제외', 'semiconductor', -1)]]
+    actual = etf_news.jev_market_headlines(rows, now)
+    assert [(n['title'], n['news_role']) for n in actual] == [
+        ('시장 정확히 30분', 'priority'), ('코스닥 정확히 60분', 'topic_fallback')]
+    assert all('news_role' not in row for row in rows)
+
+
+def test_jev_backfill_checks_missing_topics_from_alternate_sources_and_caches_results():
+    from datetime import timedelta
+
+    now = datetime(2026, 11, 23, 12, 46, tzinfo=ZoneInfo('Asia/Seoul'))
+    rows = [{'title': topic, 'topic': topic, 'source': src, 'published': (now - timedelta(minutes=age)).isoformat()}
+            for topic, src, age in [('market', 'naver_finance_news', 35), ('kosdaq150', 'google_news_rss', 65),
+                                    ('semiconductor', 'naver_finance_news', 76)]]
+    calls = []
+
+    def items(source, topic, query, shared, *, timeout):
+        assert 0 < timeout <= 1.2
+        calls.append((source, topic))
+        if (source, topic) == ('google_news_rss', 'semiconductor'):
+            return [('반도체 장중 시황', '매체', now - timedelta(minutes=31), '')]
+        return [('코스닥 이전 기사', '매체', now - timedelta(minutes=61), '')]
+
+    with patch.dict(etf_news._JEV_TOPIC_CACHE, {}, clear=True), patch.object(etf_news, '_items', side_effect=items):
+        improved, stats = etf_news.supplement_jev_topics(rows, now)
+        cached, warm = etf_news.supplement_jev_topics(rows, now + timedelta(seconds=15))
+        assert cached == improved
+        assert warm['probes'] == 0
+        assert stats['missing_before'] == ['kosdaq150', 'semiconductor']
+        assert calls == [('naver_finance_news', 'kosdaq150'), ('bing_news_rss', 'kosdaq150'),
+                         ('google_news_rss', 'semiconductor')]
+        result = etf_news.jev_market_headlines(improved, now)
+        assert [row['topic'] for row in result] == ['market', 'semiconductor']
+
+
 class NewsBackoffTests(unittest.TestCase):
     """4th review C2: a failure with no usable cache must still back off, or every caller re-reads every feed each minute."""
 
