@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import math
@@ -18,6 +17,7 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 from kr_swing_v5_daily_data import CODES, verify_snapshot
 from kr_swing_v5_forward import CAPITAL, KST, read_paginated, read_response
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.krx_daily_tool import KrxDailyTool
@@ -188,8 +188,8 @@ def main():
     if not dbpath.is_file():
         raise ValueError('strategy journal unavailable')
     lock = dbpath.parent/'runner.lock'
-    with lock.open('a') as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with lock.open('a', encoding='utf-8') as handle:
+        file_lock.lock(handle, blocking=False)
         accounts = read_response(readonly, 'list_accounts', {})
         if accounts.get('rsp_cd') != '00000' or not any(str(row.get('acct_no')) == account and str(row.get('acct_type')) == '03' for row in accounts.get('Output_0', []) if isinstance(row, dict)):
             raise ValueError('paper account identity unavailable')

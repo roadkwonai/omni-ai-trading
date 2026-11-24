@@ -11,8 +11,12 @@ os.environ.setdefault('VIBE_TRADING_SETTINGS_HISTORY', os.path.join(tempfile.mkd
 # agent/tests/conftest.py points HOME at a sandbox for the whole process when a run also collects agent/tests, so
 # strategy_map's ~/.claude/skills/archify was looked up there and every Archify test failed or skipped (r5). The
 # account's own home (pwd, not HOME) keeps the installed Archify; the diagrams are still written to temp folders.
-import pwd  # noqa: E402
-os.environ.setdefault('ARCHIFY_BIN', os.path.join(pwd.getpwuid(os.getuid()).pw_dir, '.claude/skills/archify/bin/archify.mjs'))
+try:
+    import pwd  # noqa: E402
+    _home = pwd.getpwuid(os.getuid()).pw_dir
+except ImportError:  # Windows
+    _home = os.path.expanduser('~')
+os.environ.setdefault('ARCHIFY_BIN', os.path.join(_home, '.claude/skills/archify/bin/archify.mjs'))
 
 import pytest
 from pathlib import Path

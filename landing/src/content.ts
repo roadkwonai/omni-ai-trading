@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.6' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.7' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 
@@ -58,6 +58,7 @@ export const NAV = [
   { href: '#ai-search', label: 'AI 검색' },
   { href: '#video', label: '소개 영상' },
   { href: '#ai', label: 'AI로 운영' },
+  { href: '#cli', label: 'CLI' },
   { href: '#art', label: '투자 기법' },
   { href: '#jev', label: 'Jev' },
   { href: '#longterm', label: '장기투자' },
@@ -115,8 +116,8 @@ export const WHY_CASES = [
 export const FIX_CASE = { kind: 'Omni v0.1.3 개선 사례', title: '개장 직후 판단이 늦었던 이유', body: '당일 1분봉이 쌓일 때까지 기다리느라 판단이 늦었습니다. 이제 08:55에 실행기를 준비합니다. 개장 직후 1분봉이 부족하면 전 거래일 마감 자료나 확인 가능한 당일 NXT 프리마켓 자료를 함께 씁니다.', href: `${REPO}/blob/v0.1.3/release/2026-11-20-v0.1.3-opening-and-inverse.md#개장-즉시-진입`, label: '릴리스에서 개선 과정 보기' }
 
 export const TRAPS = [
-  { trap: '이미 오른 종목을 뒤늦게 따라 삽니다', human: '차트와 뉴스, 수급을 따로 찾는 사이 가격이 바뀝니다.', fix: 'Jev가 자료를 함께 읽습니다. 주문 실행기는 신규 매수 조건과 가격이 너무 오른 뒤 따라 사는 것을 막는 기준을 확인합니다. 주문을 보류한 이유도 남깁니다.' },
-  { trap: '손절을 미루고 비중을 더 키웁니다', human: '매수 전에 손절과 추가 매수의 기준을 정하지 않으면 가격이 빠질 때 판단이 흔들립니다.', fix: '실행기는 회차마다 손절·익절과 주문 가능 여부를 확인합니다. 접수와 체결은 매매일지에서 따로 봅니다.' },
+  { trap: '이미 오른 종목을 뒤늦게 따라 삽니다', human: '차트와 뉴스, 수급을 따로 찾는 사이 가격이 바뀝니다.', fix: 'Jev가 자료를 함께 읽습니다. 실행기는 신규 매수 조건을 확인하고, 이미 많이 오른 가격을 따라 사지 않도록 막는 기준도 확인합니다. 주문을 보류한 이유도 남깁니다.' },
+  { trap: '손절을 미루고 비중을 더 키웁니다', human: '매수 전에 손절과 추가 매수의 기준을 정하지 않으면 가격이 빠질 때 판단이 흔들립니다.', fix: '실행기는 1분마다 손절·익절과 주문 가능 여부를 확인합니다. 접수와 체결은 매매일지에서 따로 봅니다.' },
   { trap: '매일 시세를 들여다볼 시간이 없습니다', human: '장기투자를 하더라도 급락장이나 과열장에서 적립을 이어 갈지 고민됩니다.', fix: '장기 엔진은 정해 둔 적립과 비중 조정 기준으로 계획을 세웁니다. 전략별 결과는 가상 장부에서 비교할 수 있습니다.' },
 ]
 
@@ -125,7 +126,7 @@ export const BUY_CRAFT = [
   { title: '시장 국면을 먼저 확인합니다', body: '코스피·코스닥을 상승장·횡보장·하락장으로 판정하고, 매수 방향에 불리한 시장일수록 주문 금액을 **0.75배, 0.5배**로 줄입니다.' },
   { title: '돈이 몰리는 곳을 찾습니다', body: '거래대금·거래량·상승률 순위, 테마 대장주, 투자자·프로그램 순매수로 ==오늘의 주도주 후보==를 추립니다.' },
   { title: 'AI가 1분마다 고릅니다', body: 'Jev는 차트, 최근 90분 뉴스, 시황과 수급을 보고 **매수 후보 한 종목이나 대기**를 고릅니다. 신뢰도도 함께 남깁니다.' },
-  { title: '규칙이 한 번 더 거릅니다', body: '지수 방향과 최근 분봉·거래량을 확인합니다. 지수와 반대 방향으로 움직이는 인버스 ETF는 지수가 계속 내릴 때 살펴봅니다. ETF 가격이 너무 오른 뒤 따라 사는지도 점검합니다.' },
+  { title: '규칙이 한 번 더 거릅니다', body: '지수 방향과 최근 분봉·거래량을 확인합니다. 지수와 반대 방향으로 움직이는 인버스 ETF는 지수가 계속 내릴 때 살펴보고, 이미 많이 오른 ETF를 뒤늦게 따라 사는 것은 아닌지도 점검합니다.' },
   { title: '나눠 삽니다', body: '한 번에 다 사지 않고, **직전보다 나은 조건일 때만** 더 삽니다. 장 마감 30분 전부터는 추가 매수를 하지 않습니다.' },
 ]
 export const SELL_ART = [
@@ -174,7 +175,7 @@ export const DATA_JSON = [
   { file: 'vibe-longterm/settings.json', body: '장기투자 거장 모듈, 비중, 적립식' },
 ]
 export const DATA_SQLITE = [
-  { file: 'trading-ledger', body: '판단·주문·체결 이벤트 원장' },
+  { file: 'trading-ledger', body: '판단·주문·체결 이벤트 기록' },
   { file: 'market-research', body: 'Jev 입력과 판단 근거, 신호 적중률, 실제로 매수하지 않은 비교용 후보' },
   { file: 'trading-journal', body: '일·월·분기·연 매매일지' },
   { file: 'oversold-cases', body: '10년 일봉으로 만든 낙폭 사례집' },
@@ -196,7 +197,7 @@ export const USE_STEPS = [
   { icon: 'CalendarCheck', title: '반복 업무는 예약 작업이 맡습니다', body: '사람이 자리를 비워도 **예약 작업 15개**가 장전 점검과 분석, 장중 감사를 하고, 장 마감 개선안과 매매일지, 장기투자 리포트를 작성합니다.' },
 ]
 export const SCHEDULE_CHIPS = ['08:25 장전 점검', '08:31 장전 상세 분석', '08:50 장기투자 전략 리포트', '매시 20분 장중 감사', '16:15 장 마감 개선안', '16:40 매매일지', '16:45 장기투자 복기']
-export const AI_SKILLS = ['장전 분석', '장중 감사', '매매일지 작성', '장기투자 전략 리포트', 'HTML 리포트 발행', '대시보드 화면 확인', '다른 Mac으로 옮기기', '시황 트레이딩 점검', '운영 규칙·시황 조회']
+export const AI_SKILLS = ['장전 분석', '장중 감사', '매매일지 작성', '장기투자 전략 리포트', 'HTML 리포트 발행', '대시보드 화면 확인', '다른 Mac으로 옮기기', '시황 트레이딩 점검', '운영 규칙·시황 조회', 'omni CLI 조회·설정']
 
 // 기반 기술 (#stack). What Omni takes from each, in plain words (docs/architecture.md 원본 Vibe-Trading과 이 확장의 경계).
 export const UPSTREAM = {
@@ -244,7 +245,7 @@ export const JEV_TRUST = [
   { title: '선택형으로 답합니다', body: '정해진 선택지에서 종목이나 대기를 고르고 신뢰도를 알려 줍니다. 실행기는 그 응답을 주문 규칙에 맞춰 확인합니다.' },
   { title: '근거를 함께 남깁니다', body: '결정 요인과 차트·뉴스·시황·수급의 방향 등을 묻는 질문 7개에 Jev가 답합니다. 답변은 판단 근거로 기록합니다.' },
   { title: '적중률을 매일 확인합니다', body: '신뢰도 구간별로 5·15·30분 뒤 결과를 모아, 신뢰도가 높을수록 판단이 더 자주 맞았는지 확인합니다.' },
-  { title: '주문은 규칙이 정합니다', body: '신뢰도는 수익 확률이 아닙니다. 진입 조건과 주문 가드를 통과해야 주문이 실행됩니다.' },
+  { title: '주문은 규칙이 정합니다', body: '신뢰도는 수익 확률이 아닙니다. 진입 조건과 주문 보호 조건을 통과해야 주문이 실행됩니다.' },
 ]
 
 // Risk order, highest first. `masters` are MASTERS ids recommended in that regime.
@@ -259,7 +260,7 @@ export const REGIMES = [
 
 export const MASTERS = [
   { id: 'base', name: '기준 비중', idea: '흔들리지 않는 바탕', does: '기준 비중은 코어(미국 지수 ETF) 60%, 위성(테마 ETF) 25%, 저수지(하락 때 살 자금) 15%입니다.', on: true },
-  { id: 'dalio', name: '레이 달리오', idea: '벗어나면 되돌린다', does: '매월 비중을 확인하고 목표에서 ±5%p를 벗어나면 전체 비중을 원래 목표에 맞춥니다.', on: true },
+  { id: 'dalio', name: '레이 달리오', idea: '벗어나면 되돌린다', does: '매월 비중을 확인하고 목표에서 ±5%p 넘게 벗어나면 전체 비중을 원래 목표에 맞춥니다.', on: true },
   { id: 'lynch', name: '피터 린치', idea: '스토리가 살아 있는가', does: 'AI가 테마별 투자 근거가 유효한지 살펴 ‘유지·주의·훼손’으로 표시하고 테마 ETF의 비중을 조정합니다.', on: true },
   { id: 'buffett', name: '워런 버핏·필립 피셔', idea: '팔 이유가 없으면 들고 간다', does: '손절 규칙을 적용하지 않습니다. 한 달 매도 금액을 순자산의 10%로 제한해 매매를 줄입니다.', on: true },
   { id: 'marks', name: '하워드 막스', idea: '시장의 시계추를 거슬러', does: '시장이 과열되면 코어 ETF 일부를 팔아 저수지로 옮깁니다. 투매 국면에서는 단계별 매수 시점을 앞당깁니다.', on: false },
@@ -328,13 +329,13 @@ export const DCA_AXES = [
   { axis: '매수 시각', master: '09:40부터 전일 종가 이하인 첫 시점에 삽니다. 그 시점이 없으면 14:20에 확인합니다.', me: '정한 시각' },
 ]
 
-export const DCA_PROFILES = ['존 보글·워런 버핏 · 시황 보지 않고 꾸준히', '레이 달리오 · 균형, 과열만 조금 덜', '하워드 막스 · 비쌀 때 덜, 쌀 때 더', '여운봉 · 하락할수록 조금 더', '피터 린치 · 테마의 투자 근거 반영', '래리 윌리엄스 · 급락일 우선(비권장)', '시황 자동 · 시장 국면에 맞는 거장 원칙(비교용 가상 장부)']
+export const DCA_PROFILES = ['존 보글·워런 버핏 · 시황을 보지 않고 꾸준히', '레이 달리오 · 균형 유지, 과열일 때만 조금 덜', '하워드 막스 · 비쌀 때 덜, 쌀 때 더', '여운봉 · 하락할수록 조금 더', '피터 린치 · 테마의 투자 근거 반영', '래리 윌리엄스 · 급락일 우선(비권장)', '시황 자동 · 시장 국면에 맞는 거장 원칙(비교용 가상 장부)']
 
 export const DAILY = [
   { phase: '장전', time: '08:20', title: '장전 사전 점검', body: '서비스·계좌·미확인 주문·설정을 점검하고, 문제가 있으면 바로 알립니다.' },
   { phase: '장전', time: '08:31', title: '장전 상세 분석', body: '해외 시장, 야간선물, NXT 프리마켓, 공시로 오늘 시장을 정리합니다.' },
   { phase: '장전', time: '08:50', title: '장기투자 전략 리포트', body: '시장 국면과 거장 7명의 원칙을 바탕으로 한 의견, 오늘의 주문 계획을 정리합니다.' },
-  { phase: '장중', time: '09:00', title: '개장 직후 주문 확인', body: '전 거래일부터 보유한 종목을 다시 살핍니다. 신규 매수는 매수 조건과 주문 보호 규칙을 통과해야 진행합니다.' },
+  { phase: '장중', time: '09:00', title: '개장 직후 주문 확인', body: '전 거래일부터 보유한 종목을 다시 살핍니다. 신규 매수는 매수 조건과 주문 보호 조건을 통과해야 진행합니다.' },
   { phase: '장중', time: '매시 20분', title: '장중 감사', body: '판단 근거와 주문 차단 사유, 체결 내역을 점검하고 반복된 문제를 바로 알립니다.' },
   { phase: '마감', time: '15:40', title: '마감 요약', body: '계좌별 손익과 잔고를 알림 채널로 보냅니다.' },
   { phase: '마감', time: '16:15', title: '장 마감 개선안', body: '그날 거래와 신호 적중률로 개선안을 제안합니다. 적용하려면 사용자가 승인해야 합니다.' },
@@ -370,27 +371,27 @@ export const INTEGRATIONS = [
 
 export const HIGHLIGHTS = [
   { icon: 'Scales', title: 'AI가 판단하고 규칙이 주문을 정합니다', body: 'Jev와 OpenAI가 매매 의견과 신뢰도를 제시합니다. 주문을 보내려면 승인된 매수·매도 규칙과 주문 보호 조건을 모두 충족해야 합니다.', proof: '신뢰도는 수익 확률이 아닙니다' },
-  { icon: 'Stack', title: '장중 매매와 장기투자를 따로 운용', body: '장중 매매는 국내 ETF와 주식을 1분마다 살핍니다. 장기투자는 국내 상장 미국 지수·테마 ETF를 꾸준히 모읍니다. 두 기능은 따로 켜고 끌 수 있습니다.', proof: '엔진별 기록과 실행 설정' },
-  { icon: 'ShieldCheck', title: '모의·가상으로 먼저 연습', body: '먼저 주문 계획을 보거나 가상 체결로 결과를 확인합니다. 실제 주문에는 계좌별 승인과 한도가 적용됩니다.', proof: '실주문 확인과 계좌별 주문 보호' },
+  { icon: 'Stack', title: '장중 매매와 장기투자를 따로 운용합니다', body: '장중 매매는 국내 ETF와 주식을 1분마다 살핍니다. 장기투자는 국내 상장 미국 지수·테마 ETF를 꾸준히 모읍니다. 두 기능은 따로 켜고 끌 수 있습니다.', proof: '엔진별 기록과 실행 설정' },
+  { icon: 'ShieldCheck', title: '모의·가상으로 먼저 연습합니다', body: '먼저 주문 계획을 보거나 가상 체결로 결과를 확인합니다. 실제 주문에는 계좌별 승인과 한도가 적용됩니다.', proof: '실주문 확인과 계좌별 주문 보호' },
   { icon: 'ArrowsClockwise', title: '기록하고 매일 돌아봅니다', body: '판단 근거, 주문, 체결을 기록합니다. 장 마감 뒤 매매일지와 개선안을 작성하고 신호 적중률을 확인합니다. 개선안은 사용자가 승인해야 반영됩니다.', proof: '모든 설정 변경을 기록' },
-  { icon: 'ChatsCircle', title: 'AI와 채팅으로 운영', body: 'Claude Code나 Codex에 채팅으로 분석, 운영 점검, 리포트 작성을 요청할 수 있습니다. 프로젝트 스킬과 예약 작업은 정해진 절차를 따릅니다.', proof: '스킬 9개 · 예약 작업 15개' },
-  { icon: 'LockKey', title: '내 컴퓨터에서, 내 키로', body: '프로그램은 내 Mac에서 실행합니다. 키와 계좌번호는 .env 파일에만 둡니다. 화면, 리포트, 알림은 계좌번호를 가립니다.', proof: '저장소에 키·원장 없음' },
+  { icon: 'ChatsCircle', title: 'AI와 채팅으로 운영합니다', body: 'Claude Code나 Codex에 채팅으로 분석, 운영 점검, 리포트 작성을 요청할 수 있습니다. 프로젝트 스킬과 예약 작업은 정해진 절차를 따릅니다. 셸을 쓰는 다른 AI 에이전트도 omni CLI로 연결할 수 있습니다.', proof: '스킬 10개 · 예약 작업 15개 · omni CLI' },
+  { icon: 'LockKey', title: '내 컴퓨터에서 내 키로 실행합니다', body: '프로그램은 내 Mac에서 실행합니다. 키와 계좌번호는 .env 파일에만 둡니다. 화면, 리포트, 알림은 계좌번호를 가립니다.', proof: '저장소에 키와 거래 기록 없음' },
 ]
 
 export const CHAT = [
   { who: 'me', text: '오늘 장전 상세 분석 써 줘. 야간선물, NXT 프리마켓, 미국 시장을 근거로.' },
   { who: 'ai', text: '장전 자료를 읽고 템플릿 검사까지 마쳤습니다. 리포트 링크를 알림 채널로 보냈어요.' },
   { who: 'me', text: '10시 이후 진입이 막힌 이유를 종목별로 정리해 줘.' },
-  { who: 'ai', text: '3종목이 인버스 관문, 2종목이 추격 금지에 막혔습니다. 같은 이유로 3분 넘게 막힌 종목은 없습니다.' },
+  { who: 'ai', text: '3종목은 인버스 매수 조건, 2종목은 추격 매수 금지 기준에 막혔습니다. 같은 이유로 3분 넘게 막힌 종목은 없습니다.' },
   { who: 'me', text: '신규 매수 마감을 14:00으로 바꾸면 뭐가 달라져?' },
-  { who: 'ai', text: '선별 v2 매수 창은 그대로이고 일반 진입만 30분 일찍 멈춥니다. 승인하시면 변경 이력을 남기고 저장할게요.' },
+  { who: 'ai', text: '폭락일 반등 매매 시간은 그대로이고, 일반 신규 매수만 30분 일찍 멈춥니다. 승인하시면 저장하고 변경 이력을 남길게요.' },
 ]
 
 export const AI_LOOP = [
   { title: '묻고 맡기기', body: '상태 조회, 분석, 리포트를 채팅으로 요청합니다.' },
   { title: '프로젝트 스킬로 처리', body: '프로젝트 스킬이 정한 절차에 따라 장전 분석, 장중 감사, 매매일지를 작성합니다.' },
   { title: '사용자가 승인', body: '설정을 바꾸거나 실주문을 켜려면 사용자 승인이 필요합니다.' },
-  { title: '실행기가 주문', body: '주문 보호 규칙을 충족하면 주문 실행기가 주문을 보냅니다.' },
+  { title: '실행기가 주문', body: '주문 보호 조건을 충족하면 실행기가 주문을 보냅니다.' },
 ]
 
 export const TAGLINE = ['AI는 의견을 내고,', '규칙이 주문을 정하고,', '안전장치가 계좌를 지킵니다.']
@@ -402,7 +403,8 @@ export const FEATURES = [
   { icon: 'Plant', title: '적립식과 여운봉 매매법', body: '새 적립금은 적립식 매수에 쓰고, 계좌에 있는 운용금은 별도의 계좌 전략으로 관리합니다.', href: doc('longterm-dca.md') },
   { icon: 'Notebook', title: '매매일지와 리포트', body: '체결 내역, 투자자별 매매 동향, 중요도 별점을 매긴 뉴스, 종목 차트를 모아 일·월·분기·연 단위 일지와 HTML 리포트를 만듭니다.', href: doc('journal.md') },
   { icon: 'BellRinging', title: 'Discord·Telegram·Slack 알림', body: '체결과 손익은 바로 알립니다. 리포트는 게시한 뒤 링크를 보내며, 같은 알림은 한 번만 보냅니다.', href: doc('integrations.md') },
-  { icon: 'ListChecks', title: '장전 점검과 장중 감사', body: '개장 전에 자동 실행 프로그램과 계좌를 점검하고, 장중에는 매시간 판단과 주문이 막힌 이유를 살펴 문제 기록을 남깁니다.', href: doc('automation.md') },
+  { icon: 'TerminalWindow', title: 'omni CLI', body: '셸을 쓰는 AI 에이전트라면 같은 명령으로 기록을 조회하고 설정 변경을 계획합니다. 실계좌에 영향을 주는 변경은 사용자의 승인 코드가 있어야 적용됩니다.', href: doc('omni-cli.md') },
+  { icon: 'ListChecks', title: '장전 점검과 장중 감사', body: '개장 전에 자동 실행 서비스와 계좌를 점검하고, 장중에는 매시간 판단과 주문이 막힌 이유를 살펴 문제 기록을 남깁니다.', href: doc('automation.md') },
 ]
 
 // A beginner's path through the AI search. Every question is one of the dashboard's own suggestions (streamlit_namuh/liner_topics.py).
@@ -447,9 +449,9 @@ export const ASK_WAYS = [
   { title: '화면별 추천 질문', body: '작은 창을 열면 지금 화면에 맞는 질문 3개가 보입니다.' },
 ]
 export const ASK_RULES = [
-  { title: '보내기를 눌러야 전송됩니다', body: '어느 방법으로 묻든 질문을 **채우기만** 합니다. 보내기를 누르기 전에는 전송도 요금도 없습니다.' },
+  { title: '보내기를 눌러야 전송됩니다', body: '어느 방법으로 묻든 질문을 **채우기만** 합니다. 보내기를 누르기 전에는 전송되지 않고 요금도 들지 않습니다.' },
   { title: '드래그한 금액은 가립니다', body: '드래그한 글의 **금액, 수량, 비율과 6자리 이상 숫자**는 ○로 바꿔 채웁니다. 직접 적은 내용은 그대로 전송되니 확인하고 보내세요.' },
-  { title: '작은 창과 넓은 창이 이어집니다', body: '**크게**를 누르면 넓은 AI 검색 창으로 옮깁니다. 대화, 검색 결과, 진행 중인 요청을 두 창이 함께 씁니다.' },
+  { title: '작은 창과 넓은 창이 이어집니다', body: '**크게**를 누르면 넓은 AI 검색 창으로 옮겨 갑니다. 대화, 검색 결과, 진행 중인 요청을 두 창이 함께 씁니다.' },
 ]
 // What each step of the AI search does, and who does it.
 export const SEARCH_STEPS = [
@@ -481,7 +483,7 @@ export const AI_SEARCH_EXAMPLES = [
     question: '실계좌 1의 현재 보유 종목과 잔고는?',
     title: '내 잔고와 조회 시각을 한 화면에',
     body: '내부 데이터에서 등록한 계좌를 물으면 NH 나무 PLUG의 읽기 전용 조회로 예수금, 총자산과 종목별 보유 수량을 확인할 수 있습니다.',
-    detail: '조회 완료 시각은 한국시간으로 표시됩니다. 결과는 대시보드 안에서 확인합니다.',
+    detail: '조회 완료 시각은 한국 시간으로 표시됩니다. 결과는 대시보드 안에서 확인합니다.',
     alt: '내부 데이터 모드에서 예시 계좌의 조회 완료 시각, 잔고와 보유 수량을 확인하는 화면',
   },
 ]
@@ -493,18 +495,18 @@ export const SAFETY_STAGES = [
 ]
 
 export const LIMITS = [
-  ['모의계좌', '1회 매수 금액, 하루 매수 금액, 보유 금액, 하루 새 종목 수, 하루 손실 한도를 대시보드에서 정한 범위 안으로 설정'],
-  ['실계좌', '계좌별 하루 손실 차단 기준 상한 2만 원, 1주 가격 상한, 하루 새 종목 최대 5개(장기투자 첫 투입일 최대 6개), 미체결·미확인 주문이 있으면 새 주문 차단'],
+  ['모의계좌', '1회 매수 금액, 하루 매수 금액, 보유 금액, 하루 새 종목 수, 하루 손실 한도를 대시보드에서 허용 범위 안의 값으로 정합니다.'],
+  ['실계좌', '계좌별 하루 손실 차단 기준 상한 2만 원, 1주 가격 상한, 하루 새 종목 최대 5개(장기투자 첫 투입일 최대 6개), 미체결·미확인 주문이 있으면 새 주문을 막는 규칙을 적용합니다.'],
   ['공통', '계좌와 거래소 장 시간, 주문 기록과 잔고를 확인합니다. 공유 모의 STOP은 미확인 주문을 대조한 뒤 실행기를 종료하고, 실계좌 HALT는 실주문 경로를 차단합니다.'],
 ]
 
 export const SCREENS = [
-  { id: 'overview', label: '종합 현황', caption: '모든 계좌의 오늘 손익, 잔고, 매매 프로그램 상태를 한 화면에서 봅니다.' },
-  { id: 'strategy-flow', label: '전략 구조', caption: '매수 판단부터 주문 한도 검사까지 오늘 설정이 반영된 흐름도입니다.' },
-  { id: 'trading', label: '트레이딩 현황', caption: '계좌를 골라 보유, 체결, 수동 매수와 매도 요청을 다룹니다.' },
+  { id: 'overview', label: '종합 현황', caption: '모든 계좌의 오늘 손익, 잔고, 실행기 상태를 한 화면에서 봅니다.' },
+  { id: 'strategy-flow', label: '전략 구조', caption: '매수 판단부터 주문 한도 검사까지의 과정에 오늘 설정을 반영한 흐름도입니다.' },
+  { id: 'trading', label: '트레이딩 현황', caption: '계좌를 골라 보유 종목과 체결 내역을 보고 수동 매수·매도를 요청합니다.' },
   { id: 'journal', label: '매매일지', caption: '계좌별 성과, 시장과 투자자별 매매 동향, 핵심 뉴스 별점을 카드로 모읍니다.' },
-  { id: 'compare', label: '성과 비교', caption: 'Jev 트레이딩과 장기투자의 손익, 수익률, 낙폭을 같은 기간을 기준으로 비교합니다.' },
-  { id: 'longterm', label: '장기투자', caption: '시장 국면과 오늘의 판단을 보고, 가상 계좌와 비교용 가상 계좌의 자산을 확인합니다.' },
+  { id: 'compare', label: '성과 비교', caption: 'Jev 트레이딩과 장기투자의 손익, 수익률, 낙폭을 같은 기간에 맞춰 비교합니다.' },
+  { id: 'longterm', label: '장기투자', caption: '시장 국면과 오늘의 판단을 보고, 가상 계좌와 비교용 가상 장부의 자산을 확인합니다.' },
   { id: 'longterm-chart', label: '장기 차트', caption: '이동평균선과 사고팔 가격대, 적립식·여운봉 매수 단계를 그립니다.' },
   { id: 'accounts', label: '계좌·자동매매', caption: '켤 엔진과 계좌별 운용 방식, 주문 한도를 정합니다.' },
   { id: 'live', label: '실계좌', caption: '실계좌별 실행기 상태와 보호 한도, 장기투자 계좌의 오늘 계획을 봅니다.' },
@@ -522,6 +524,71 @@ docs/getting-started.md와 docs/ai-agents.md를 읽고 그 순서대로 설치�
 - shared-etf-paper(모의 주문), 실계좌 서비스, 실주문 스위치, 장기 엔진 --execute는 켜지 마.
 - 끝나면 있는 것과 없는 것(키 이름, 서비스, 스킬, MCP, 실패한 점검)을 표로 보고해.`
 
+export const CLI_INSTALL = `.venv/bin/python -m pip install --no-deps -e agent-harness
+.venv/bin/omni status`
+
+export const CLI_PROMPT = `이 저장소의 docs/omni-cli.md를 읽고 omni CLI를 설치해서 쓸 수 있게 해 줘.
+- 답변은 한국어, 시각은 Asia/Seoul로 쓴다. 계좌번호와 키는 찾거나 출력하지 마.
+- .venv에 agent-harness를 설치하고(.venv/bin/python -m pip install --no-deps -e agent-harness) omni status --json이 답하는지 확인해.
+- 프로젝트 스킬 omni-cli를 쓸 수 있게 해. Codex면 .agents/skills에 링크해.
+- 권한은 docs/ai-agents.md의 예시대로 조회만 자동 허용하고, 값을 바꾸는 명령은 매번 묻게 해. 설정 파일은 보여 준 뒤 내가 승인하면 저장해.
+- 지금은 조회 명령만 실행해. plan approve, plan apply, live pause, 유료 질문(ai ask·search)은 하지 마.
+- 끝나면 설치 위치, 상태 조회 결과, 바로 쓸 명령 5개를 표로 보고해.`
+
+// omni CLI (#cli). Commands are real (test_docs parses them); the answers are made-up examples.
+export const CLI_SCENES = [
+  { id: 'blocks', kind: '묻기', ask: '오늘 왜 안 샀나요?', lines: ['$ omni jev blocks', 'blocked_cycles: 96', 'reasons:', '  - label Jev 대기 의견 · cycles 61', '  - label 최근 분봉 상승 아님 · cycles 35', '자료: events.jsonl 2분 전'],
+    reply: 'Jev가 대기를 고른 회차가 61번으로 가장 많았고, 최근 분봉이 오르지 않은 경우가 35번이었습니다.' },
+  { id: 'alerts', kind: '묻기', ask: '지금 확인할 일이 있나요?', lines: ['$ omni status alerts', 'alerts: -', '자료: events.jsonl 2분 전'],
+    reply: '주의 항목은 없습니다. 2분 전 기록을 기준으로 확인했습니다.' },
+  { id: 'local', kind: '묻기', ask: '오늘 모의 손익은 얼마인가요?', lines: ['$ omni ai local "오늘 모의 손익"', 'answer:', '  공유 모의계좌 · 2026-11-24', '  실현손익 +12,300원 · 매도 3건'],
+    reply: '오늘 모의계좌의 실현손익은 +12,300원입니다. 매도는 3건이었습니다.' },
+  { id: 'fills', kind: '묻기', ask: '실계좌에서 무엇이 체결됐나요?', lines: ['$ omni live fills live-1', 'fills:', '  - symbol 069500 · side BUY · qty 2 · price 41,250', '자료: live-fills.sqlite3 1분 전'],
+    reply: '실계좌 1에서 KODEX 200 2주를 41,250원에 샀습니다.' },
+  { id: 'lt', kind: '묻기', ask: '장기투자 엔진은 오늘 어떻게 판단했나요?', lines: ['$ omni lt today', 'mode: manual', 'regime:', '  regime: correction', '  since: 2026-11-16'],
+    reply: '시장 국면은 조정이며 11월 16일부터 이어지고 있습니다.' },
+  { id: 'change', kind: '바꾸기', ask: '진입 신뢰도를 0.6으로 바꿔 주세요', lines: ['$ omni settings plan strategy.entry_confidence=0.6 --reason "신중하게"', 'plan: 1a2b3c4d · status: open · level: H', '- setting strategy.entry_confidence · before 0.5 · after 0.6', 'affects: live-1'],
+    reply: '아직 바꾸지 않았습니다. 0.5에서 0.6으로 바꾸면 실계좌 1에도 영향이 있어 승인이 필요합니다.' },
+  { id: 'approve', kind: '승인하기', ask: '코드를 받았어요. 적용해 주세요', lines: ['$ omni plan approve 1a2b3c4d', 'sent: 1 · expires_minutes: 10', '$ omni plan apply 1a2b3c4d --code ********', 'status: applied · takes_effect: 다음 회차'],
+    reply: '적용했습니다. 다음 회차부터 반영되며, 변경 이력에서 되돌릴 수 있습니다.' },
+]
+export const CLI_FLOW = [
+  { icon: 'ClipboardText', title: '계획 만들기', body: '설정 변경이나 매매 요청을 계획으로 만듭니다. 이때는 아무것도 바뀌지 않습니다.' },
+  { icon: 'MagnifyingGlassPlus', title: '영향 확인하기', body: '이전 값과 새 값, 실계좌에 주는 영향, 반영 시점을 먼저 보여 줍니다.' },
+  { icon: 'LockKey', title: '사용자가 승인하기', body: '알림 채널로만 보내는 **일회용 승인 코드**를 사용자가 알려 줘야 합니다.', tag: '실계좌 영향 · 매매 요청' },
+  { icon: 'ArrowsClockwise', title: '적용하고 기록하기', body: '누가 왜 바꿨는지 이력에 남깁니다. 설정은 이력 번호로 되돌릴 수 있습니다.' },
+]
+// Which agents connect and what stays the same (docs/omni-cli.md 1~3, docs/ai-agents.md omni 명령).
+export const CLI_FROM = [
+  { icon: 'Robot', name: 'Claude Code · Codex', role: '설치와 권한 예시 제공' },
+  { icon: 'ChatsCircle', name: '셸을 쓰는 다른 AI 에이전트', role: '가이드를 읽고 같은 명령 사용' },
+  { icon: 'ArrowsClockwise', name: '내 스크립트·자동화', role: 'JSON 답을 받아 다음 작업에 활용' },
+]
+export const CLI_HUB = ['같은 명령', '같은 JSON 형식', '같은 승인 절차']
+export const CLI_TO = [
+  { icon: 'Notebook', name: '기록과 리포트', role: '잔고, 매매, 장기투자, 매매일지' },
+  { icon: 'ListChecks', name: '설정 변경 계획', role: '바꾸기 전에 영향 확인' },
+  { icon: 'ShieldCheck', name: '승인과 주문 보호', role: '사용자 승인 뒤 실행기가 처리' },
+]
+export const CLI_OPEN = [
+  { icon: 'PlugsConnected', title: '연동을 다시 만들지 않습니다', body: '셸 명령을 실행할 수 있는 에이전트라면 전용 플러그인 없이 연결됩니다. **AI 도구를 바꿔도 배운 명령을 그대로** 씁니다.' },
+  { icon: 'ClipboardText', title: 'AI가 읽기 쉬운 답을 줍니다', body: '모든 명령에 --json을 붙일 수 있습니다. 답과 함께 **자료의 시각과 주의 사항**을 정해진 형식으로 알려 줍니다.' },
+  { icon: 'MagnifyingGlassPlus', title: '명령을 스스로 찾습니다', body: '에이전트가 omni guide로 **필요한 명령을 검색**하고, 종료 코드로 성공과 거절, 승인 대기를 구분합니다.' },
+  { icon: 'ShieldCheck', title: '안전 규칙은 그대로입니다', body: '어느 에이전트가 omni로 요청하든 **같은 승인 절차와 주문 보호 조건**을 거칩니다. 변경 이력에는 에이전트 이름을 남길 수 있습니다.' },
+]
+export const CLI_START = [
+  { id: 'ai', label: 'AI에게 맡기기', copy: '프롬프트', code: CLI_PROMPT, steps: [
+    { title: '프롬프트 복사하기', body: '프롬프트 복사 버튼을 누릅니다.' },
+    { title: 'AI 에이전트에 붙여 넣기', body: '저장소를 연 Claude Code나 Codex에 붙여 넣습니다.' },
+    { title: '결과 확인하기', body: '설치 위치와 상태 조회 결과, 바로 쓸 명령 5개를 표로 받습니다.' },
+  ] },
+  { id: 'self', label: '직접 설치하기', copy: '명령어', code: CLI_INSTALL, steps: [
+    { title: '.venv 준비하기', body: '아래 시작 안내에 따라 Python 가상환경을 만듭니다.' },
+    { title: '명령어 실행하기', body: '저장소 폴더에서 명령어를 차례로 실행합니다.' },
+    { title: '상태 확인하기', body: '엔진과 서비스 상태가 나오면 준비가 끝났습니다.' },
+  ] },
+]
+
 export const STEPS = [
   { title: '저장소 받기', body: 'Python 3.11, Node.js 22 이상, NH 나무 PLUG 앱 키(모의투자 계좌 포함), 유료 요금제의 Claude Code 또는 Codex를 준비합니다.', code: 'git clone https://github.com/roadkwonai/omni-ai-trading.git' },
   { title: '키와 계좌번호 입력', body: '.env.example을 .env로 복사하고 권한을 600으로 둡니다. 키와 계좌번호는 이 파일에만 둡니다.', code: 'cp .env.example .env && chmod 600 .env' },
@@ -529,17 +596,19 @@ export const STEPS = [
 ]
 
 export const FAQ = [
-  { q: 'AI가 판단하면 손실이 안 나나요?', a: 'AI 판단에도 오류가 있고 원금 손실이 생길 수 있습니다. 실행기는 계좌와 전략에 따른 보호 조건을 적용합니다. 시세 급변이나 미체결로 실제 손실은 계좌의 손실 차단 기준을 넘을 수 있습니다.' },
+  { q: 'AI가 판단하면 손실이 안 나나요?', a: 'AI 판단에도 오류가 있고 원금 손실이 생길 수 있습니다. 실행기는 계좌와 전략에 따른 주문 보호 조건을 적용합니다. 시세 급변이나 미체결 때문에 실제 손실이 계좌의 손실 차단 기준을 넘을 수 있습니다.' },
   { q: '트레이딩과 장기투자 중 무엇부터 해야 하나요?', a: '처음에는 모의계좌와 가상 계좌에서 둘 다 켜 두고, 성과 비교 탭과 매매일지로 몇 주간 비교한 뒤 정하는 것을 권합니다. ‘운영 엔진’에서 ‘둘 다 운영’, ‘Jev만’, ‘장기투자만’ 중 언제든 다시 고를 수 있습니다.' },
   { q: '수익이 나나요?', a: '보장하지 않습니다. AI 판단, 모의 성과, 가상 체결, 과거 재현 결과는 미래 수익을 보장하지 않고, 금융투자상품은 원금 손실(0~100%)이 생길 수 있습니다. ' + DISCLAIMER_SHORT },
   { q: 'AI 도구 비용이 드나요?', a: AI_PAID + ' 요금과 이용 조건은 각 서비스의 최신 안내를 확인하세요.' },
-  { q: '설치하면 실계좌로 바로 주문하나요?', a: '기본은 모의계좌입니다. 실계좌 주문에는 실행기에 실주문 옵션을 지정하고 계좌별 자동매매·실주문 스위치를 켜야 합니다. 실행기는 긴급 중단 해제 여부와 주문별 보호 조건을 확인합니다. 실주문 스위치를 켤 때는 확인 문구를 입력합니다.' },
+  { q: '설치하면 실계좌로 바로 주문하나요?', a: '기본은 모의계좌입니다. 실계좌로 주문하려면 실행기에 실주문 옵션을 지정하고 계좌별 자동매매·실주문 스위치를 켜야 합니다. 실행기는 긴급 중단 해제 여부와 주문별 보호 조건을 확인합니다. 실주문 스위치를 켤 때는 확인 문구를 입력합니다.' },
   { q: '어떤 증권사를 쓰나요?', a: 'NH투자증권 나무 PLUG OpenAPI와 공식 MCP를 씁니다. 키움과 토스 Open API는 종목 순위와 시장 정보를 보조로 받아 오는 데만 씁니다. NH투자증권과 제휴 관계가 없는 비공식 프로젝트입니다.' },
+  { q: 'CLI로 주문할 수 있나요?', a: 'omni에는 증권사에 직접 주문하는 명령이 없습니다. 보유 종목의 매도나 추가 매수를 요청하면, 알림으로 받은 일회용 승인 코드로 사용자가 승인한 뒤 실행기와 주문 가드가 처리합니다. 새 종목을 사는 명령도 없습니다.' },
+  { q: 'Claude Code나 Codex가 아닌 AI 에이전트도 쓸 수 있나요?', a: '셸 명령을 실행할 수 있는 에이전트라면 omni CLI 가이드를 읽게 한 뒤 같은 명령을 쓸 수 있습니다. 설치와 권한 예시는 Claude Code와 Codex를 기준으로 안내합니다. 실제 시험은 Claude 에이전트로 했으므로, 다른 에이전트는 조회 명령부터 확인해 보세요. 프로젝트 스킬과 예약 작업은 Claude Code와 Codex를 기준으로 합니다.' },
   { q: '키와 계좌번호는 어디에 저장되나요?', a: '내 컴퓨터의 .env 파일에만 둡니다. 화면, 기록, 리포트, Discord 알림은 계좌번호를 가리고, 저장소에는 키가 들어가지 않습니다.' },
   { q: 'AI 검색에 내 계좌 정보가 전송되나요?', a: '지원하는 계좌·체결·성과 질문은 대시보드가 기록과 NH 조회로 직접 답하고 Liner로 보내지 않습니다. 그 밖의 계좌 질문은 채팅에서 내부 데이터를 고르고 물어보세요. 화면에서 드래그한 글은 금액과 비율을 ○로 가려 채우고, 보내기를 눌러야 전송됩니다. 직접 입력한 내용은 그대로 전송되니 이름, 연락처, 계좌번호는 넣지 마세요.' },
-  { q: 'Jev는 무엇인가요?', a: '차트 이미지를 읽고 정해진 선택지에서 답을 고르는 TypeSafe 모델입니다. 1분 차트 이미지와 최근 90분 뉴스, 시황·수급·해외 선물·장전 요약, 최근 판단 결과와 매매일지를 참고합니다. 매수 후보 한 종목이나 대기를 고르고, 신뢰도도 함께 알려 줍니다. 판단마다 근거 질문 7개의 답을 기록하고 신뢰도 구간별 적중률을 매일 확인합니다. 신뢰도는 수익 확률이 아니며, 주문은 승인된 규칙과 보호 조건을 통과해야 실행됩니다.' },
+  { q: 'Jev는 무엇인가요?', a: '차트 이미지를 읽고 정해진 선택지에서 답을 고르는 TypeSafe 모델입니다. 1분 차트 이미지와 최근 90분 뉴스, 시황·수급·해외 선물·장전 요약, 최근 판단 결과와 매매일지를 참고합니다. 매수 후보 한 종목이나 대기를 고르고, 신뢰도도 함께 알려 줍니다. 판단마다 근거 질문 7개의 답을 기록하고 신뢰도 구간별 적중률을 매일 확인합니다. 신뢰도는 수익 확률이 아니며, 주문은 승인된 규칙과 주문 보호 조건을 통과해야 실행됩니다.' },
   { q: '장기투자는 무엇을 사나요?', a: '기준 구성은 국내 상장 ETF 6종입니다. 미국 지수(나스닥100, S&P500)와 테마(반도체, 양자, 우주) ETF를 사고, 매수에 쓸 대기 자금은 저수지 ETF(예를 들어 KOFR)에 둡니다. 여운봉 매매법은 나스닥100과 채권 혼합 ETF를 씁니다.' },
-  { q: 'macOS가 아니어도 되나요?', a: '자동 실행 등록은 macOS launchd 기준입니다. 매매 프로그램과 대시보드는 Python이라 다른 환경에서도 돌릴 수 있지만 일정 등록은 직접 바꿔야 합니다.' },
+  { q: 'macOS가 아니어도 되나요?', a: '자동 실행 등록은 macOS launchd 기준입니다. 실행기와 대시보드는 Python이라 다른 환경에서도 돌릴 수 있지만 일정 등록은 직접 바꿔야 합니다. omni CLI로 Windows·Linux용 서비스 정의 파일을 만들 수 있지만 등록은 직접 해야 하고, 실제 Windows 실행은 아직 확인하지 않았습니다.' },
   { q: '원본 Vibe-Trading과 어떤 관계인가요?', a: 'HKUDS의 Vibe-Trading(MIT) 위에 국내 시장 자동매매와 장기투자를 더한 확장입니다. 원본의 라이선스와 NOTICE를 그대로 지킵니다.' },
 ]
 
@@ -548,6 +617,7 @@ export const ARCH_LAYERS = [
   { label: '사람', items: [
     { name: '나', role: '채팅으로 묻고, 바꿀 것만 승인' },
     { name: 'Claude Code · Codex', role: '설치·감사·리포트 작성', href: doc('ai-agents.md') },
+    { name: 'omni CLI', role: '여러 AI 에이전트를 잇는 공통 명령', href: doc('omni-cli.md') },
   ] },
   { label: '판단', items: [
     { name: 'TypeSafe Jev', role: '1분 차트·뉴스 판단', href: `${doc('integrations.md')}#typesafe-jev` },

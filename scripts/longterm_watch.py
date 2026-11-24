@@ -19,6 +19,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import os_services
+
 KST = ZoneInfo('Asia/Seoul')
 NHPLUG = Path.home() / '.vibe-trading' / 'nhplug'
 TOPICS = {'fed': '연준', 'us_macro': '미국 거시', 'semi': '반도체', 'semi_policy': '반도체 정책', 'quantum': '양자', 'space': '우주'}  # longterm_news
@@ -68,12 +70,14 @@ def collect(root=NHPLUG, now=None, run=subprocess.run, halted=None):
     live = [r for r in day_rows(root / 'longterm-live.jsonl', day)[0] or [] if r.get('account') == 'live-2']
     if halted is None:
         from src.live.halt import halt_flag_set
-        halted = lambda: halt_flag_set('nh')  # noqa: E731
+        halted = lambda: halt_flag_set('nhplug')  # noqa: E731
     stop = [str(p.relative_to(root)) for p in (engine / 'STOP', root / 'STOP') if p.exists()] + (['NH HALT'] if halted() else [])
     services = {}
     for name in SERVICES:
-        out = run(['launchctl', 'list', f'com.vibetrading.{name}'], capture_output=True, text=True)
-        services[name] = out.returncode == 0 and bool(re.search(r'"PID" = \d+;', out.stdout))
+        try:
+            services[name] = os_services.state(name, run=run)['running']
+        except os_services.Unknown:
+            services[name] = False
     accounts = _json(_text(root / 'accounts.json')).get('accounts') or {}
     record = accounts.get('live-2') if isinstance(accounts, dict) else next((a for a in accounts if a.get('key') == 'live-2'), None)
     hour_ago = (now - timedelta(hours=1)).isoformat()

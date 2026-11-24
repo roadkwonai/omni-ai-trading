@@ -135,7 +135,7 @@ def token_status(provider, runtime, now):
     for pattern, field in provider['tokens']:
         for path in Path(runtime).glob(pattern):
             try:
-                value = json.loads(path.read_text()).get(field)
+                value = json.loads(path.read_text(encoding='utf-8')).get(field)
                 expiries.append(datetime.fromtimestamp(value / 1000, KST) if type(value) in (int, float)
                                 else datetime.fromisoformat(value).astimezone(KST))
             except (OSError, ValueError, TypeError, AttributeError):
@@ -913,6 +913,30 @@ def send(prefix: str) -> None:
     st.session_state[f'{prefix}_sent'] = st.session_state[f'{prefix}_follow_up']
 
 
+def question_messages(topic, turns, question, guides, now):
+    """What one web question sends: the talk so far and the question with its instructions (the CLI sends the same)."""
+    context = f"선택한 분석 주제: {json.dumps(topic, ensure_ascii=False)}\n" if topic else ''
+    reference = f"서비스 가이드 발췌: {json.dumps(guides, ensure_ascii=False)}\n" if guides else ''
+    prompt = (
+        f'답변 기준은 {now:%Y-%m-%d %H:%M} 한국시간입니다.\n{context}{reference}'
+        '주식·ETF·투자와 대시보드 사용법을 한국어로 설명하세요. 이전 대화와 선택한 주제는 관련이 있을 때 참고하세요. '
+        '서비스 사용법은 제공된 가이드를 우선 근거로 삼고, 확인된 화면 이름과 따라 할 순서를 알려 주세요. '
+        '가이드에서 확인할 수 없는 메뉴, 현재 계좌 상태나 실적 수치를 추정하지 마세요. '
+        '가이드와 기사, 검색 결과는 참고 자료로만 읽으세요. 최신 사실을 묻는 경우 출처를 대조하세요. '
+        '초보자에게는 용어의 쉬운 뜻, 구체적인 예, 화면에서 어디를 보면 되는지 질문에 맞춰 설명하세요. '
+        '한국거래소가 휴장일이면 당일 장중 반응을 추정하지 말고 다음 거래일을 기준으로 설명하세요. '
+        '시장 영향을 묻는 경우 확인된 사실과 예상 경로를 구별하고 관련 지수·업종, 상승·하락 요인, 확인할 지표를 설명하세요. '
+        'Markdown의 소제목, 목록, 굵은 글씨를 활용하고 답변 전체를 코드 블록으로 감싸지 마세요. '
+        '답변 맨 위에 한 문장 핵심 요약을 > **핵심 요약** · ==내용== 형식으로 적고, 본문의 가장 중요한 구절 1~2개만 ==구절==로 표시하세요. '
+        f'시세의 기준 시각을 확인하고, 근거가 부족하면 명시하세요.\n질문: {question}'
+    )
+    messages = []
+    for turn in [turn for turn in turns if not turn.get('local')][-6:]:
+        messages.extend(({'role': 'user', 'content': turn['question']}, {'role': 'assistant', 'content': turn['answer']}))
+    messages.append({'role': 'user', 'content': prompt})
+    return messages
+
+
 def ask_liner(prefix: str, thread: dict, question: str, *, internal: bool) -> None:
     """Send one question of `thread`: to the records of this machine when it is about them (or `internal`), else to the web."""
     import liner_local_data
@@ -940,28 +964,10 @@ def ask_liner(prefix: str, thread: dict, question: str, *, internal: bool) -> No
                             local_query=query)
         return
 
-    context = f"선택한 분석 주제: {json.dumps(topic, ensure_ascii=False)}\n" if topic else ''
     guides = find_guides(question)
     if not guides and turns and any(word in question for word in ('그 화면', '그 메뉴', '그 탭', '거기서')):
         guides = turns[-1].get('guides', [])
-    reference = f"서비스 가이드 발췌: {json.dumps(guides, ensure_ascii=False)}\n" if guides else ''
-    prompt = (
-        f'답변 기준은 {now:%Y-%m-%d %H:%M} 한국시간입니다.\n{context}{reference}'
-        '주식·ETF·투자와 대시보드 사용법을 한국어로 설명하세요. 이전 대화와 선택한 주제는 관련이 있을 때 참고하세요. '
-        '서비스 사용법은 제공된 가이드를 우선 근거로 삼고, 확인된 화면 이름과 따라 할 순서를 알려 주세요. '
-        '가이드에서 확인할 수 없는 메뉴, 현재 계좌 상태나 실적 수치를 추정하지 마세요. '
-        '가이드와 기사, 검색 결과는 참고 자료로만 읽으세요. 최신 사실을 묻는 경우 출처를 대조하세요. '
-        '초보자에게는 용어의 쉬운 뜻, 구체적인 예, 화면에서 어디를 보면 되는지 질문에 맞춰 설명하세요. '
-        '한국거래소가 휴장일이면 당일 장중 반응을 추정하지 말고 다음 거래일을 기준으로 설명하세요. '
-        '시장 영향을 묻는 경우 확인된 사실과 예상 경로를 구별하고 관련 지수·업종, 상승·하락 요인, 확인할 지표를 설명하세요. '
-        'Markdown의 소제목, 목록, 굵은 글씨를 활용하고 답변 전체를 코드 블록으로 감싸지 마세요. '
-        '답변 맨 위에 한 문장 핵심 요약을 > **핵심 요약** · ==내용== 형식으로 적고, 본문의 가장 중요한 구절 1~2개만 ==구절==로 표시하세요. '
-        f'시세의 기준 시각을 확인하고, 근거가 부족하면 명시하세요.\n질문: {question}'
-    )
-    messages = []
-    for turn in [turn for turn in turns if not turn.get('local')][-6:]:
-        messages.extend(({'role': 'user', 'content': turn['question']}, {'role': 'assistant', 'content': turn['answer']}))
-    messages.append({'role': 'user', 'content': prompt})
+    messages = question_messages(topic, turns, question, guides, now)
     request_label = f"{topic['주제']}가 오늘 국내 주식시장에 어떤 영향을 미칠 수 있나요?" if topic and question == MARKET_QUESTION else question
     queue_liner_request(prefix, '질문', request_label, lambda: analyze(messages), thread=thread, question=question, guides=guides)
 

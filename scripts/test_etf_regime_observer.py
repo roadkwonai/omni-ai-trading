@@ -1,5 +1,4 @@
 import json
-import fcntl
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -10,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from etf_regime_observer import claim_attempt, observe, publish, run
 from etf_universe import SYMBOLS
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 
@@ -412,7 +412,7 @@ class ObserverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             with (root / 'regime-observer.lock').open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                file_lock.lock(lock, blocking=False)
                 self.assertEqual(run(root, Reader(now, days), watch=True, clock=lambda: now), 'already_running')
             self.assertFalse((root / 'regime-observation.json').exists())
 

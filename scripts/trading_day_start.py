@@ -10,20 +10,19 @@ trading-day-start.jsonl. Never orders, never deletes STOP or records.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import os_services
 from sqlite_ro import ro_connect
 from src.config.paths import get_runtime_root  # VIBE_TRADING_HOME, else ~/.vibe-trading (one rule for every tool)
 
 KST = ZoneInfo('Asia/Seoul')
 ROOT = get_runtime_root() / 'nhplug' / 'shared-etf-paper'
-SERVICES = ('com.vibetrading.shared-etf-paper', 'com.vibetrading.shared-etf-learning', 'com.vibetrading.shared-etf-regime')
+SERVICES = ('shared-etf-paper', 'shared-etf-learning', 'shared-etf-regime')
 
 
 def trading_day(now):
@@ -47,11 +46,32 @@ def unfinished_intents(root=ROOT):
         return None
 
 
-def running(label):
-    result = subprocess.run(['launchctl', 'list', label], capture_output=True, text=True)
-    if result.returncode != 0:
-        return None  # not registered
-    return '"PID" =' in result.stdout
+def running(name):
+    """True, False, or None when it is not registered; Unknown when the service manager cannot be asked."""
+    found = os_services.state(name)
+    return found['running'] if found['registered'] else None
+
+
+UNKNOWN = 'unknown'
+ASK_TRIES, ASK_WAIT = 3, 5
+
+
+def asked(name, wait=time.sleep):
+    """running(), asked again a few times before giving up: one slow launchctl must not cost the day."""
+    for left in range(ASK_TRIES, 0, -1):
+        try:
+            return running(name)
+        except os_services.Unknown:
+            if left > 1:
+                wait(ASK_WAIT)
+    return UNKNOWN
+
+
+def alive(name):
+    try:
+        return running(name) is True
+    except os_services.Unknown:
+        return False
 
 
 def decide(day_ok, stop_exists, runner_running):
@@ -88,19 +108,22 @@ def start_services(states, *, kick, alive, wait=time.sleep):
 def main():
     now = datetime.now(KST)
     day_ok, note = trading_day(now)
-    states = {label: running(label) for label in SERVICES}
-    decision = decide(day_ok, (ROOT / 'STOP').exists(), states[SERVICES[0]])
+    states = {name: asked(name) for name in SERVICES}
+    runner = states[SERVICES[0]]
+    if runner is UNKNOWN:  # whether the runner runs is not known: start nothing
+        decision = 'services_unknown'
+    else:  # a helper nobody can answer for is left alone, as an unregistered one is
+        decision = decide(day_ok, (ROOT / 'STOP').exists(), runner)
     started = {}
     if decision == 'start':
-        started = start_services(states, alive=running, kick=lambda label: subprocess.run(
-            ['launchctl', 'kickstart', f'gui/{os.getuid()}/{label}'], capture_output=True, text=True, timeout=15))
-    alive = {label: running(label) for label in started}
+        started = start_services(states, alive=alive, kick=os_services.start)
+    running_after = {name: alive(name) for name in started}
     try:
-        context = json.loads((ROOT / 'market-context.json').read_text()).get('time')
+        context = json.loads((ROOT / 'market-context.json').read_text(encoding='utf-8')).get('time')
     except (OSError, ValueError):
         context = None
     record = {'time': now.isoformat(timespec='seconds'), 'decision': decision, 'note': note, 'started': list(started),
-              'starts': started, 'running_after': alive,
+              'starts': started, 'running_after': running_after,
               'unfinished_intents': unfinished_intents(), 'market_context_time': context}
     with (ROOT / 'trading-day-start.jsonl').open('a', encoding='utf-8') as log:
         log.write(json.dumps(record, ensure_ascii=False) + '\n')

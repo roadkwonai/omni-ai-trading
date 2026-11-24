@@ -4,6 +4,8 @@ see what each book has paid in and how much of it the 적립식 still holds. The
 its engine module bundle, which this tab offers to save. Saved through vibe_longterm.save_settings (history kind vibe-longterm)."""
 from __future__ import annotations
 
+from datetime import date, datetime
+
 import streamlit as st
 
 import longterm_dca as D
@@ -24,7 +26,7 @@ def auto_manual_rows(cfg, yeo=False, value=None):
     book's master size reads its value)."""
     p = D.rule(cfg)
     what = (('수동 · 내가', f"고른 {len(cfg['picks'])}종목") if cfg['pick_on'] else ('자동 · 계좌 전략', '전략이 사는 종목(여운봉 계좌는 70:30 짝, 거장 모듈 계좌는 KOFR 뺀 목표)'))
-    at = (('자동 · 거장', f'장중 전일 종가 이하일 때 · 늦어도 {D.TIMES[1]}') if cfg['time_mode'] == 'auto' else ('수동 · 내가', cfg['time']))
+    at = (('자동 · 거장', f'장중 전일 종가 이하일 때 · 마지막 확인 {D.TIMES[1]}') if cfg['time_mode'] == 'auto' else ('수동 · 내가', cfg['time']))
     size = D.size_text(cfg, p, None, value=value, yeo=yeo) if cfg['size_by'] == 'master' or cfg['frequency'] == 'deposit' else (f"종목별 {cfg['shares_n']}주" if cfg['size'] == 'shares' else f"1회 {cfg['amount_krw']:,}원")
     return [{'항목': name, '방식': way, '내용': text} for name, (way, text) in
             (('언제 사나', (D.BY[cfg['when_by']], D.when_text(cfg, p))), ('얼마나', (D.BY[cfg['size_by']], size)), ('무엇을', what), ('몇 시에', at))]
@@ -210,13 +212,15 @@ def book_state(root, key):
 def carry_text(state, listed=None):
     """'1주 미만 이월 6,316원(SOL 미국양자컴퓨팅TOP10 6,316원) · 다음 적립 때 합쳐 삼' or '' (4-B②)."""
     carry = {k: v for k, v in (state.get('carry') or {}).items() if v >= 1}
-    name = lambda k: L.ASSETS[k][1] if k in L.ASSETS else (listed or {}).get(k, k)
+    name = lambda k: (listed or {}).get(k) or L.asset_name(k)
     return (f"1주 미만 이월 {sum(carry.values()):,.0f}원(" + ', '.join(f'{name(k)} {v:,.0f}원' for k, v in carry.items())
             + ') · 다음 적립 때 합쳐 삼') if carry else ''
 
 
 def render(root, settings):
-    regime = (L.read_state(root, ('plan',)).get('plan') or {}).get('regime')  # for the 추천 등급 badges (vibe_longterm.GRADES)
+    engine_state = L.read_state(root)
+    plan = engine_state.get('plan') or {}
+    regime = plan.get('regime')  # for the 추천 등급 badges (vibe_longterm.GRADES)
     st.markdown('**적립식** · 켠 계좌만 들어오는 적립금을 소액으로 꾸준히 모읍니다. **거장 투자**는 고른 거장이 시황(국면)에 따라 사는 날과 '
                 '속도를 0.5~1.5배로 조금 바꾸고, **수동 투자**는 내가 정한 날·금액대로 삽니다. 언제·얼마나·무엇을·몇 시를 항목마다 거장에게 맡기거나 '
                 '내가 정할 수 있습니다. **무엇을**의 기본은 계좌 전략이 사는 종목입니다(여운봉 계좌는 70:30 짝, 거장 모듈 계좌는 KOFR 뺀 목표).')
@@ -233,6 +237,8 @@ def render(root, settings):
     listed, ideas = watchlist_editor(root), master_picks(root)
     from accounts import load as load_accounts
     records = load_accounts()
+    import longterm_report
+    today = longterm_report.dca_today(root, plan, engine_state, datetime.combine(date.fromisoformat(plan['day']), datetime.min.time(), L.KST)) if plan.get('day') else {}
     for key, label in books(records):
         cfg = settings['dca'].get(key) or D.clean({})
         state = book_state(root, key)
@@ -255,9 +261,13 @@ def render(root, settings):
                        + (f" · 미체결 재매수 대기 {sum(state['retry'].values()):,.0f}원(다음 확인 때 먼저 삼)" if sum((state.get('retry') or {}).values()) >= 1 else '')
                        + (' · 실계좌는 계좌의 여유 현금과 운용금 안에서만 사며, 실주문 스위치가 꺼져 있으면 계획만 기록합니다' if key != 'actual' else
                           ' · 가상 계좌는 적립일에 가상 입금 뒤 삽니다(가상 체결 스위치가 꺼져 있으면 계획만)'))
+            if key in today and cfg['on']:  # the rule as the morning knew it, with the saved settings (2026-11-24 복기 (C)1)
+                st.caption(f":material/today: **{plan['day'][5:]} 아침 기준** · {today[key]['today']}")
             if key == 'actual':
                 engine = L.active_modules(settings, L.recommended_set(regime))
                 now_label, where = ', '.join(f'{L.MODULES[m][0]} {L.MODULES[m][1]}' for m in engine), '장기투자 → 전략'
+                if L.yeo_settings(settings, 'actual') is not None:  # the virtual book runs the method, not the modules
+                    now_label = L.book_strategy_label(settings, 'actual')
             else:
                 now_label, where = L.book_strategy_label(settings, key), '계좌·자동매매 → 이 계좌 위쪽 전략 칸'
             st.info(f"적립식은 **들어오는 적립금만** 다룹니다. 계좌 운용금의 매매(저수지 매매법 등 거장 모듈)는 **{where}**에서 따로 정합니다 "

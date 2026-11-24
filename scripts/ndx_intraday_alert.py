@@ -1,7 +1,6 @@
 """Read-only ^NDX regular-session monitoring against the saved daily-close peak."""
 from __future__ import annotations
 
-import fcntl
 import json
 import math
 import os
@@ -10,7 +9,10 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+import config_store
 import vibe_longterm as L
+
+from src import file_lock
 
 ROOT = L.ROOT / 'ndx-intraday'
 NY = ZoneInfo('America/New_York')
@@ -61,7 +63,7 @@ def latest_record(root=ROOT):
     """Read the most recent US-session record, with no provider calls."""
     for path in sorted(Path(root).glob('????-??-??.json'), reverse=True):
         try:
-            row = json.loads(path.read_text())
+            row = json.loads(path.read_text(encoding='utf-8'))
             if isinstance(row, dict) and row.get('session') == date.fromisoformat(path.stem).isoformat():
                 return row
         except (OSError, ValueError):
@@ -123,8 +125,8 @@ def run(now=None, root=ROOT, provider=fetch, daily_provider=fetch_daily):
     now = now or datetime.now(timezone.utc)
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (root / 'observer.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with (root / 'observer.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock)
         try:
             plan = (L.read_state(L.ROOT, ('plan',)).get('plan') or {})
             ath = ((plan.get('indicators') or {}).get('ath') or {}).get('ndx') or {}
@@ -157,7 +159,7 @@ def run(now=None, root=ROOT, provider=fetch, daily_provider=fetch_daily):
         if session:
             path = root / f'{session}.json'
             try:
-                old = json.loads(path.read_text())
+                old = json.loads(path.read_text(encoding='utf-8'))
             except (OSError, ValueError):
                 old = {}
             # Preserve the crossing evidence after a temporary data failure.
@@ -181,8 +183,8 @@ def run(now=None, root=ROOT, provider=fetch, daily_provider=fetch_daily):
                         close = {'status': 'unavailable', 'reason': type(exc).__name__}
             result['close'] = close
             temp = root / f'.{session}.{os.getpid()}.tmp'
-            temp.write_text(json.dumps(result, ensure_ascii=False))
-            os.replace(temp, path)
+            temp.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+            config_store.replace(temp, path)
         return result
 
 

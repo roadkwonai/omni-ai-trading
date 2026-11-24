@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import os_services
 from sqlite_ro import ro_connect
 from src.config.paths import get_runtime_root  # VIBE_TRADING_HOME, else ~/.vibe-trading (one rule for every tool)
 
@@ -37,14 +37,18 @@ def _age_min(stamp, now):
 
 
 def services(now):
-    missing = [n for n in NEEDED if subprocess.run(['launchctl', 'list', f'com.vibetrading.{n}'], capture_output=True).returncode]
+    try:
+        found = os_services.states()
+    except os_services.Unknown:
+        return False, '서비스 상태 확인 불가'
+    missing = [n for n in NEEDED if n not in found]
     return not missing, f'미등록: {", ".join(missing)}' if missing else f'{len(NEEDED)}개 등록됨'
 
 
 def stop_files(now):
     found = [str(p.relative_to(NH)) for p in (PAPER / 'STOP', LONGTERM / 'STOP', NH / 'STOP') if p.exists()]
     from src.live.halt import halt_flag_set
-    if halt_flag_set('nh'):
+    if halt_flag_set('nhplug'):
         found.append('NH HALT')
     return not found, f'켜짐: {", ".join(found)}' if found else '없음'
 
@@ -72,7 +76,7 @@ def settings(now):
 
 
 def premarket(now):
-    brief = json.loads((PAPER / 'premarket-brief.json').read_text())
+    brief = json.loads((PAPER / 'premarket-brief.json').read_text(encoding='utf-8'))
     age = _age_min(brief['time'], now)
     # the night futures and NXT pre-market quotes exist only before the open; from 09:00 they are gone by design
     preopen = {'night_futures', 'nxt_quotes'} if now.strftime('%H:%M') >= '09:00' else set()
@@ -83,18 +87,20 @@ def premarket(now):
 
 
 def market_context(now):
-    stamp = json.loads((PAPER / 'market-context.json').read_text()).get('time')
+    stamp = json.loads((PAPER / 'market-context.json').read_text(encoding='utf-8')).get('time')
     age = _age_min(stamp, now)
     return age <= 24 * 60, f'{age:.0f}분 전'
 
 
 def _running(name):
-    result = subprocess.run(['launchctl', 'list', f'com.vibetrading.{name}'], capture_output=True, text=True)
-    return result.returncode == 0 and '"PID" =' in result.stdout
+    try:
+        return os_services.state(name)['running']
+    except os_services.Unknown:
+        return False
 
 
 def _movers_time():
-    return json.loads((PAPER / 'movers.json').read_text()).get('time')
+    return json.loads((PAPER / 'movers.json').read_text(encoding='utf-8')).get('time')
 
 
 def movers(now):
@@ -112,7 +118,7 @@ def movers(now):
 def longterm_decided(now):
     with ro_connect(LONGTERM / 'longterm.sqlite3') as db:
         kinds = {k for (k,) in db.execute('SELECT kind FROM decisions WHERE day=?', (now.date().isoformat(),))}
-    settings_on = json.loads((LONGTERM / 'settings.json').read_text()).get('enabled', True)
+    settings_on = json.loads((LONGTERM / 'settings.json').read_text(encoding='utf-8')).get('enabled', True)
     if not settings_on:
         return True, '장기투자 꺼짐(운영 엔진)'
     return 'regime' in kinds, f'오늘 기록: {", ".join(sorted(kinds)) or "없음"}'

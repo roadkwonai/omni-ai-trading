@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import fcntl
 from datetime import date, datetime
 from hashlib import sha256
 import json
@@ -15,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+
+from src import file_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 CODES = ('005930.KS', '000660.KS', '035420.KS', '005380.KS', '105560.KS')
@@ -134,18 +135,18 @@ def main():
     args.state.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = args.state.parent / (args.state.name + '.lock')
     lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    with os.fdopen(lock_fd, 'r+') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with os.fdopen(lock_fd, 'r+', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         if args.init:
             if args.state.exists():
                 raise ValueError('existing state will not be overwritten')
             state = register(frames, args.as_of, today)
         else:
-            state = advance(json.loads(args.state.read_text()), frames, args.as_of, today)
+            state = advance(json.loads(args.state.read_text(encoding='utf-8')), frames, args.as_of, today)
         fd, name = tempfile.mkstemp(prefix='.benchmark-', dir=args.state.parent)
         try:
             os.fchmod(fd, 0o600)
-            with os.fdopen(fd, 'w') as f:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(state, f, ensure_ascii=False, indent=2, allow_nan=False)
                 f.flush(); os.fsync(f.fileno())
             if args.init:

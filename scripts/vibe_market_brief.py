@@ -7,11 +7,11 @@ Never orders; never prints account numbers or credentials.
 from __future__ import annotations
 
 import json
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import os_services
 from etf_universe import SYMBOLS, NAMES
 from sqlite_ro import ro_connect
 
@@ -79,11 +79,16 @@ def market(read, now, recorded=None):
     return result
 
 
+def service_state():
+    try:
+        return 'running' if os_services.state('shared-etf-paper')['running'] else 'not running'
+    except os_services.Unknown:
+        return 'unknown'
+
+
 def runner(now):
     state = {}
-    listing = subprocess.run(['launchctl', 'list'], capture_output=True, text=True).stdout
-    line = next((l for l in listing.splitlines() if l.endswith('com.vibetrading.shared-etf-paper')), '')
-    state['service'] = 'running' if line and not line.startswith('-') else 'not running'
+    state['service'] = service_state()
     state['stop_requested'] = (ROOT / 'STOP').exists()
     day = now.strftime('%Y-%m-%d')
     with ro_connect(ROOT / "orders.sqlite3") as db:

@@ -36,6 +36,8 @@ PUBLIC_DOCS = frozenset({
     "ai-agents.md", "ai-search.md",
     # external services and webhooks (2026-11-19)
     "integrations.md",
+    # omni CLI for AI agents (2026-11-24)
+    "omni-cli.md", "omni-cli-reference.md",
 })
 PUBLIC_DOC_IMAGES = frozenset({".jpg", ".png", ".svg"})
 

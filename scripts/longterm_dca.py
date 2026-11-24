@@ -250,6 +250,58 @@ def master_day(cfg, p, state, now, ind, want, prices):
     return down_day(ind, want, prices) or multiplier(p, None, ind)[1] or (now.date() - since).days >= p['wait']
 
 
+def index_day(ind):
+    ret = (ind or {}).get('day_ret')
+    return f'전날 나스닥100 {ret:+.1%}' if type(ret) in (int, float) else '전날 나스닥100 자료 없음'
+
+
+def waited_text(p, state, now):
+    since = date.fromisoformat(state.get('since') or now.date().isoformat())
+    return f"{since:%m-%d}부터 기다림, {since + timedelta(days=p['wait']):%m-%d}부터는 하락일이 아니어도 삼"
+
+
+def waiting_why(cfg, p, state, now, ind, want, prices):
+    """Why master_day() is False: this period's buy is done, or a dip master still waits."""
+    last = state.get('last_buy')
+    if last and buy_period(cfg, date.fromisoformat(last)) == buy_period(cfg, now):
+        return f"{BUY_EVERY[cfg['buy_every']]} 한 번까지라 이번에는 끝남"
+    above = [k for k in want if k != RESERVOIR and (prices or {}).get(k) and ((ind or {}).get('krx_close') or {}).get(k)]
+    return ' · '.join(['하락일 아님(' + index_day(ind) + (', 사려는 ETF가 어제 종가 위' if above else '') + ')', waited_text(p, state, now)])
+
+
+def today_text(cfg, state, now, ind, regime, want, yeo=False):
+    """What the 적립식 does today, as far as it is known before the session (the morning report): the rules of plan() and
+    ready(), without a price. now: any time of that day."""
+    cfg, state, at = clean(cfg), state or {}, now.replace(hour=23, minute=59)
+    if not cfg['on']:
+        return '꺼짐' + ('(살 날 알림만 · 주문 없음)' if cfg['alert'] else '')
+    p = rule(cfg, regime)
+    look = f'{TIMES[0]}~{TIMES[1]} 사이 사려는 ETF가 어제 종가 이하로 내려오면 그때, 아니면 {TIMES[1]}' if cfg['time_mode'] == 'auto' else cfg['time']
+    last = state.get('last_buy')
+    done = last and buy_period(cfg, date.fromisoformat(last)) == buy_period(cfg, now)
+    dip = p['when'] == 'dip' if cfg['when_by'] == 'master' else cfg['me_when'] == 'dip'
+    wait = p['wait'] if cfg['when_by'] == 'master' else MAX_WAIT_DAYS
+    came = due(cfg, state, at)
+    money = f" · 적립 {cfg['amount_krw']:,}원 들어옴" if came and cfg['size'] != 'shares' else ''
+    if cfg['when_by'] == 'master' and done:
+        return f"이번 {BUY_EVERY[cfg['buy_every']]} 주기는 이미 삼({last})" + money
+    waits = state.get('waiting_krw', 0) >= 1_000 and (cfg['me_when'] == 'dip' and state.get('since') or cfg['frequency'] == 'deposit')
+    if cfg['when_by'] == 'me' and not came and not waits:
+        return f'적립일이 아님(다음 {next_day(cfg, now.date()):%m-%d})' if cfg['frequency'] != 'deposit' else '입금 몫이 없어 사지 않음'
+    # a 여운봉 book's master buys from the book's cash, every other way only from the 적립식's own money
+    if not came and cfg['size'] != 'shares' and state.get('waiting_krw', 0) < 1_000 and not (yeo and cfg['size_by'] == 'master' and cfg['when_by'] == 'master'):
+        return '적립식 몫이 없어 사지 않음'
+    if not dip:
+        return f'오늘 삼({look})' + money
+    since = date.fromisoformat(state.get('since') or now.date().isoformat())
+    reason = (index_day(ind) if down_day(ind, {}, None) else '급락일' if cfg['when_by'] == 'master' and multiplier(p, None, ind)[1]
+              else f'{since:%m-%d}부터 {wait}일을 기다림' if (now.date() - since).days >= wait else None)
+    if reason:
+        return f'오늘 삼({reason} · {look})' + money
+    until = f'{TIMES[1]}은 마지막 확인 시각이며 그때도 위면 사지 않음' if cfg['time_mode'] == 'auto' else f"{cfg['time']}에 한 번 확인하며 위면 사지 않음"
+    return f"{index_day(ind)} · 사려는 ETF가 어제 종가 이하일 때만 삼 · {until} · {waited_text({'wait': wait}, state, now)}" + money
+
+
 def quantity_on_signal(cfg):
     """My N shares come in on the master's buy days (not a calendar)."""
     return cfg['size'] == 'shares' and cfg['size_by'] == 'me' and cfg['when_by'] == 'master'
@@ -370,7 +422,8 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
         buy = state['waiting_krw'] >= 1_000 and bool(state.get('since')) and dip_now()
     if not buy:
         if by_master['when'] and want and (state['waiting_krw'] >= 1_000 or yeo):
-            notes.append(f"{seen} · 오늘은 사지 않음" + (f"(마지막 매수 {state['last_buy']})" if state.get('last_buy') else ''))
+            notes.append(f"{seen} · 오늘은 사지 않음: {waiting_why(cfg, p, state, now, ind, want, prices)}"
+                         + (f"(마지막 매수 {state['last_buy']})" if state.get('last_buy') else ''))
     # 얼마나
     spend, shares_buy = 0.0, False
     if buy and quantity:
@@ -491,7 +544,7 @@ def effective(cfg, regime, ind, want, prices, cash=None, state=None, values=None
         {'key': 'basis', 'label': f"무엇을 · {'수동 · 내가' if cfg['pick_on'] else '자동 · 계좌 전략'}", 'default': '', 'tuned': False,
          'value': (f"고른 종목 {len(picked)}개" if cfg['pick_on'] else f"계좌 전략이 사는 종목 — 지금 {top}") if picked else '살 종목 없음: 적립하지 않음'},
         {'key': 'time', 'label': f"몇 시 · {'자동 · 거장' if cfg['time_mode'] == 'auto' else '수동 · 내가'}", 'default': '', 'tuned': False,
-         'value': f'장중 전일 종가 이하일 때 · 늦어도 {TIMES[1]}' if cfg['time_mode'] == 'auto' else cfg['time']},
+         'value': f'장중 전일 종가 이하일 때 · 마지막 확인 {TIMES[1]}' if cfg['time_mode'] == 'auto' else cfg['time']},
         {'key': 'floor', 'label': '현금 하한(여운봉 계좌)', 'value': (f"{p['floor']:.0%}" if cfg['size_by'] == 'master' else '쓰지 않음(내 금액)') if yeo
          else '쓰지 않음(현금 비중은 엔진 저수지가 지킴)',
          'default': f"{PROFILES[p['key']]['floor']:.0%}", 'tuned': 'floor' in p['tuned']},

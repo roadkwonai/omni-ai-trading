@@ -47,14 +47,14 @@ def validate_snapshot(account, accounts, balance, orders):
 def initialize(accounts, balance, orders, account, target, now):
     protocol_hash, metadata_hash = digest(PROTOCOL), digest(METADATA)
     if target.exists():
-        old = json.loads(target.read_text())
+        old = json.loads(target.read_text(encoding='utf-8'))
         if (old.get('protocol_sha256') != protocol_hash or old.get('metadata_sha256') != metadata_hash
                 or old.get('account_sha256') != hashlib.sha256(account.encode()).hexdigest()):
             raise ValueError('existing observation has different inputs; refusing overwrite')
         return old
     validate_snapshot(account, accounts, balance, orders)
     try:
-        summary = json.loads(SUMMARY.read_text())
+        summary = json.loads(SUMMARY.read_text(encoding='utf-8'))
     except (OSError, ValueError) as exc:
         raise ValueError('validation summary is unavailable or invalid') from exc
     if (not isinstance(summary, dict) or summary.get('protocol_sha256') != protocol_hash
@@ -72,7 +72,7 @@ def initialize(accounts, balance, orders, account, target, now):
              'broker_snapshot_limitation': 'NH MCP does not expose pagination headers'}
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, 'w') as stream:
+    with os.fdopen(fd, 'w', encoding='utf-8') as stream:
         json.dump(state, stream, ensure_ascii=False, indent=2)
     return state
 

@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import os
+import sys
 import re
 import sqlite3
 import subprocess
@@ -63,7 +64,7 @@ class AccountStateUnavailable(ValueError):
 
 def account_state(root, now):
     try:
-        state = json.loads((Path(root) / 'account-state.json').read_text())
+        state = json.loads((Path(root) / 'account-state.json').read_text(encoding='utf-8'))
         at = datetime.fromisoformat(state['time'])
         holdings = state['holdings']
         if (now.tzinfo is None or at.tzinfo is None or at.astimezone(KST).date() != now.astimezone(KST).date()
@@ -118,7 +119,7 @@ def context(read, now, recorded=None):
     from market_context import load as load_market, summary as market_summary
     watch = {}
     try:
-        data = json.loads((SHARED / 'watchlist.json').read_text())
+        data = json.loads((SHARED / 'watchlist.json').read_text(encoding='utf-8'))
         if str(data.get('time', ''))[:10] == now.strftime('%Y-%m-%d'):  # an earlier day's selection is not today's watchlist
             watch = {c: {**data['stocks'][c], 'selected_at': data['time'][11:16]}
                      for c in data.get('selected', []) if c in data.get('stocks', {})}
@@ -555,14 +556,14 @@ def run_grounding(run_id):
         return out
     run = ADVISOR_HOME / 'runs' / run_id
     try:
-        evidence = json.loads((run / 'artifacts' / 'grounding_evidence.json').read_text()).get('evidence') or []
+        evidence = json.loads((run / 'artifacts' / 'grounding_evidence.json').read_text(encoding='utf-8')).get('evidence') or []
         tools = collections.Counter(e.get('tool') for e in evidence if isinstance(e, dict) and e.get('tool'))
         # reading a skill's document is method, not market data
         out.update(tool_observations=sum(n for t, n in tools.items() if t != 'load_skill'), tools=dict(tools))
     except (OSError, ValueError, AttributeError):
         pass
     try:
-        out['model_calls'] = json.loads((run / 'llm_usage.json').read_text())['totals']['calls']
+        out['model_calls'] = json.loads((run / 'llm_usage.json').read_text(encoding='utf-8'))['totals']['calls']
     except (OSError, ValueError, KeyError, TypeError):
         pass
     return out
@@ -591,12 +592,12 @@ def ask(text, timeout=600):
         prompt_file = handle.name
     try:
         # vibe_agent_safe.py: same CLI, but no shell/code/file/order/broker tools (the stock CLI forces shell tools on).
-        env['PYTHONPATH'] = f"{REPO / 'agent'}:{REPO / 'scripts'}"
+        env['PYTHONPATH'] = os.pathsep.join(str(REPO / d) for d in ('agent', 'scripts'))
         from vibe_event_advisor import model_lock
         with model_lock(blocking=True):
-            result = subprocess.run([str(REPO / '.venv/bin/python'), str(REPO / 'scripts/vibe_agent_safe.py'),
+            result = subprocess.run([sys.executable, str(REPO / 'scripts/vibe_agent_safe.py'),
                                      '-f', prompt_file, '--no-rich', '--max-iter', '12'],
-                                    capture_output=True, text=True, timeout=timeout, env=env, cwd=str(ADVISOR_HOME))
+                                    capture_output=True, text=True, timeout=timeout, env=env, cwd=str(ADVISOR_HOME), encoding='utf-8')
     finally:
         os.unlink(prompt_file)
     run = re.search(r'Run ID:\s*(\S+)', result.stdout)
@@ -700,7 +701,7 @@ def advise(read, now):
 def write(record):
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = ROOT / 'vibe-advice.tmp'
-    tmp.write_text(json.dumps(record, ensure_ascii=False))
+    tmp.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
     os.chmod(tmp, 0o600)
     tmp.replace(ROOT / 'vibe-advice.json')
     from research_store import record as store

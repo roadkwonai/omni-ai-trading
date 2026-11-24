@@ -23,7 +23,6 @@ account's automation and dashboard live-order switches.
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import threading
@@ -37,6 +36,8 @@ from zoneinfo import ZoneInfo
 from etf_universe import is_code
 from tunables import setting
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 CHECK_INTERVAL_SECONDS = 60
@@ -312,7 +313,7 @@ def pinned(size, record, root=None, source=None, max_adds=None):
     pins, ledger = {}, str(source.parent.name) if source is not None else None
     if root is not None and source is not None:
         try:
-            data = json.loads(pins_path(root, record).read_text())
+            data = json.loads(pins_path(root, record).read_text(encoding='utf-8'))
             if data.get('ledger') == ledger:
                 pins = {k: Decimal(v) for k, v in data['units'].items()}
         except (OSError, ValueError, KeyError, TypeError, ArithmeticError):
@@ -321,7 +322,7 @@ def pinned(size, record, root=None, source=None, max_adds=None):
     picks = {}
     if source is not None:  # 주도 테마 동반주 picks of the ranking service (market_movers.THEME_PICKS)
         try:
-            picks = json.loads((Path(source).parent / 'theme-picks.json').read_text())
+            picks = json.loads((Path(source).parent / 'theme-picks.json').read_text(encoding='utf-8'))
         except (OSError, ValueError):
             picks = {}
     themed = {}  # symbol -> its open paper position started on a theme pick
@@ -514,7 +515,7 @@ def first_alert_today(root, key, code, now):
     live-follow/remainder-alerts-<key>.json, so a restart does not alert again (review 3 M9)."""
     path, day = Path(root) / 'live-follow' / f'remainder-alerts-{key}.json', now.strftime('%Y-%m-%d')
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
         sent = set(data['sent']) if data.get('day') == day else set()
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         sent = set()
@@ -1059,7 +1060,7 @@ def exit_requests(root, key):
 
 def _exit_requests(path):
     try:
-        codes = json.loads(Path(path).read_text())
+        codes = json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     if isinstance(codes, list):  # a non-string item makes the whole file malformed (never a TypeError)
@@ -1090,7 +1091,7 @@ def manual_buy_requests(root, key):
 
 def _buy_requests(path):
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     return {c: q for c, q in data.items() if is_code(c) and type(q) is int and q > 0} \
@@ -1134,7 +1135,7 @@ def manual_state(root, record):
     {code: the position each offset belongs to}, 'since': {code: when it was last changed}, 'left': {code: hand-bought
     shares not yet ordered}, 'claims': {kind: the request claim last applied (claim_requests)}}."""
     try:
-        data = json.loads(manual_path(root, record).read_text())
+        data = json.loads(manual_path(root, record).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         data = {}
     part = lambda name: data[name] if isinstance(data, dict) and isinstance(data.get(name), dict) else {}
@@ -1254,7 +1255,7 @@ def mirror_lag(root, key, event, now, notify=mac_notify):
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     path, alert = folder / f'lag-{key}.json', folder / f'lag-alert-{key}.json'
     try:
-        state = json.loads(path.read_text())
+        state = json.loads(path.read_text(encoding='utf-8'))
         if str(state.get('since', ''))[:10] != now.date().isoformat():
             state = {}  # yesterday's episode does not carry over
     except (OSError, ValueError, AttributeError):
@@ -1331,8 +1332,8 @@ def main():
     # account (and every dry-run) has its own lock, so accounts run side by side
     primary = configured[0] if configured else None
     name = ('live-auto.lock' if account == primary else f'live-follow-exec-{args.account}.lock') if args.execute else f'live-follow-dry-{args.account}.lock'
-    with (root / name).open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (root / name).open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         logged = None  # fold(): the last written plan of this account
         while True:
             try:  # settings are re-read every cycle; a disabled or invalid record stops ordering at once
@@ -1362,7 +1363,7 @@ def main():
                 event['lag_alert'] = lag
             write, logged = fold(logged, event, datetime.now(KST))
             if write:
-                with (root / LOG).open('a') as stream:
+                with (root / LOG).open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
                 print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
             if args.once or result.get('action') == 'STOP':

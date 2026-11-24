@@ -1,4 +1,3 @@
-import fcntl
 import json
 import tempfile
 import unittest
@@ -10,6 +9,7 @@ from zoneinfo import ZoneInfo
 import nh_paper_isolated as runner
 from etf_universe import SYMBOLS
 from paper_ai_modes import apply_pending_modes, read_modes, read_pending_modes, write_modes
+from src import file_lock
 
 NOW = datetime(2026, 11, 6, 12, tzinfo=ZoneInfo('Asia/Seoul'))
 ACCOUNT = '50001000002'
@@ -52,7 +52,7 @@ class PaperModesTests(unittest.TestCase):
             root = Path(temp)
             (root/'ai-modes.json').write_text(json.dumps({'version':1,'jev':True,'decision':True}))
             with (root / 'runner.lock').open('a') as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                file_lock.lock(lock, blocking=False)
                 requested = write_modes(root, jev=True, decision=False)
                 self.assertEqual(read_modes(root), {'version': 1, 'jev': True, 'decision': True})
                 self.assertEqual(read_pending_modes(root), requested)
@@ -91,7 +91,7 @@ class PaperModesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             requested = write_modes(root, jev=True, decision=False)
-            with patch('paper_ai_modes._sync_directory', side_effect=OSError('simulated sync failure')):
+            with patch('config_store.sync_folder', side_effect=OSError('simulated sync failure')):
                 with self.assertRaises(OSError):
                     apply_pending_modes(root)
             self.assertEqual(read_pending_modes(root), requested)

@@ -10,7 +10,6 @@ isolated runner (shared account lock).
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import math
 import queue
@@ -29,6 +28,8 @@ from nh_paper_isolated import (KST, ETF7_SYMBOLS, PaperOrderGuardRefused, PaperO
                                owned_positions, paper_pages, reconcile, settle_before_stop, submit, verify_positions,
                                market_view, stop_symbol_index, buy_settings_cycle, cycle_delay,
                                premarket_input_audit, entry_context)
+
+from src import file_lock
 
 ADVICE_MAX_AGE = timedelta(minutes=20)
 TECHNICAL_START_AGE_MIN, TECHNICAL_MAX_AGE_MIN = 5, 7  # new-buy technical bar: age at the decision start / at the order
@@ -140,7 +141,7 @@ def limits():
 def load_advice(root, now):
     """Fresh same-day advice record or None."""
     try:
-        advice = json.loads((Path(root) / 'vibe-advice.json').read_text())
+        advice = json.loads((Path(root) / 'vibe-advice.json').read_text(encoding='utf-8'))
         at = datetime.fromisoformat(advice['time'])
         if (at.tzinfo is None or at.astimezone(KST).date() != now.astimezone(KST).date()
                 or not timedelta(0) <= now - at <= ADVICE_MAX_AGE or not isinstance(advice.get('decisions'), list)):
@@ -230,7 +231,7 @@ def buy_cooldown_reason(db, root, day, now):
 def buy_loss_check(db, root, day):
     """Recheck the latest verified balance snapshot without a nested broker request."""
     try:
-        state = json.loads((Path(root) / 'account-state.json').read_text())
+        state = json.loads((Path(root) / 'account-state.json').read_text(encoding='utf-8'))
         at = datetime.fromisoformat(state['time'])
         now = datetime.now(KST)
         holdings = state['holdings']
@@ -422,7 +423,7 @@ def carry_position(db, root, symbol, quantity):
 
 def carry_state(root):
     try:
-        data = json.loads((Path(root) / VIBE_CARRY_FILE).read_text())
+        data = json.loads((Path(root) / VIBE_CARRY_FILE).read_text(encoding='utf-8'))
         if not isinstance(data, dict) or any(not isinstance(key, str) or not isinstance(value, dict)
                                              for key, value in data.items()):
             raise ValueError('carry_state_invalid')
@@ -1053,7 +1054,7 @@ def jev_event_exit(root, symbol, quantity, now):
 
 def oversold_plans(root):
     try:
-        data = json.loads((Path(root) / OVERSOLD_PLANS).read_text())
+        data = json.loads((Path(root) / OVERSOLD_PLANS).read_text(encoding='utf-8'))
         return {c: v for c, v in data.items() if isinstance(v, dict) and type(v.get('target_price')) in (int, float)
                 and type(v.get('stop_price')) in (int, float)} if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -1443,7 +1444,7 @@ def run(configs, runtime, once=False):
     runtime = Path(runtime)
     isolated, root = runtime / 'nhplug/isolated-paper', runtime / 'nhplug/vibe-paper'
     root.mkdir(parents=True, mode=0o700, exist_ok=True)
-    digest = json.loads((isolated / 'account.json').read_text())['account_sha256']
+    digest = json.loads((isolated / 'account.json').read_text(encoding='utf-8'))['account_sha256']
     if digest in reserved_hashes(runtime):
         raise ValueError('selected account now belongs to a swing strategy')
     config = selected_config(configs, digest)
@@ -1455,9 +1456,9 @@ def run(configs, runtime, once=False):
     broker = MCPServerAdapter('nhplug_paper_isolated', config.model_copy(update={'args': [*config.args, '--guarded-paper']}))
     start_quote_snapshots()
     # Same lock file as the legacy isolated runner: the two can never trade this account at once.
-    with (isolated / 'runner.lock').open('a') as lock, (root / 'runner.lock').open('a') as own:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        fcntl.flock(own, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (isolated / 'runner.lock').open('a', encoding='utf-8') as lock, (root / 'runner.lock').open('a', encoding='utf-8') as own:
+        file_lock.lock(lock, blocking=False)
+        file_lock.lock(own, blocking=False)
         loop(connect_journal(root / 'orders.sqlite3', digest), read, broker, account, root, once)
 
 
@@ -1475,8 +1476,8 @@ def run_virtual(configs, runtime, once=False):
     read = MCPServerAdapter('nhplug_readonly', configs['nhplug_readonly'])
     broker = VirtualBroker(root / 'virtual-account.sqlite3', read, limits=shared_guard_limits)
     start_quote_snapshots()
-    with (root / 'runner.lock').open('a') as own:
-        fcntl.flock(own, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (root / 'runner.lock').open('a', encoding='utf-8') as own:
+        file_lock.lock(own, blocking=False)
         loop(connect_journal(root / 'orders.sqlite3', account_hash(VIRTUAL_ACCOUNT)), read, broker, VIRTUAL_ACCOUNT, root, once,
              idle=lambda db: _main_and_flat(root, db))
 

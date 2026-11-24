@@ -12,19 +12,44 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo('Asia/Seoul')
+WINDOWS = os.name == 'nt'
+REPLACE_TRIES, REPLACE_WAIT = 20, 0.05  # about a second: the runners open these files for milliseconds
 
 
-def write_json(path, data, indent=1):
+def replace(tmp, path, sleep=time.sleep):
+    """os.replace; Windows refuses while another program has the file open, so it is asked again for about a second."""
+    for left in range(REPLACE_TRIES if WINDOWS else 1, 0, -1):
+        try:
+            return os.replace(tmp, path)
+        except PermissionError:
+            if left == 1:
+                raise
+            sleep(REPLACE_WAIT)
+
+
+def sync_folder(path):
+    """Make a rename in this folder durable. Windows cannot open a folder and needs no such step."""
+    if WINDOWS:
+        return
+    folder = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(folder)
+    finally:
+        os.close(folder)
+
+
+def write_json(path, data, indent=1, sleep=time.sleep):
     """Every dashboard-managed settings file is written this way (write_text)."""
-    write_text(path, json.dumps(data, ensure_ascii=False, indent=indent))
+    write_text(path, json.dumps(data, ensure_ascii=False, indent=indent), sleep)
 
 
-def write_text(path, text):
+def write_text(path, text, sleep=time.sleep):
     """Atomic, durable write (temp file in the same folder, fsync, rename, folder fsync), private to the user (0600,
     folder 0700): a reader in another process sees the old file or the new one, never a half-written one."""
     path = Path(path)
@@ -36,12 +61,8 @@ def write_text(path, text):
             stream.flush()
             os.fsync(stream.fileno())  # a crash right after must not leave an empty settings file
         os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-        folder = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(folder)
-        finally:
-            os.close(folder)
+        replace(tmp, path, sleep)
+        sync_folder(path.parent)
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)

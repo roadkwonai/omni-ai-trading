@@ -7,7 +7,6 @@ Expiry is judged on the real clock (a replay's `now` must never mark a live toke
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 from datetime import datetime, timedelta
@@ -16,13 +15,15 @@ from zoneinfo import ZoneInfo
 
 from config_store import write_json
 
+from src import file_lock
+
 KST = ZoneInfo('Asia/Seoul')
 REFRESH = timedelta(minutes=10)
 
 
 def _valid(path):
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
         return data['token'] if datetime.fromisoformat(data['expires_at']) - datetime.now(KST) > REFRESH else None
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -37,7 +38,7 @@ def token(path, issue, stale=None):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path.with_suffix('.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        file_lock.lock(fd)
         found = _valid(path)
         if found and found != stale:
             return found

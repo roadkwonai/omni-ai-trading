@@ -43,6 +43,10 @@ def render(nhplug, records):
             st.warning(f"{', '.join(armed)}의 실주문 스위치가 켜져 있어 Jev가 새로 사면 실계좌도 실제로 따라 삽니다.", icon=':material/warning:')
             ok = st.checkbox('실계좌 실주문이 따라 나가는 것을 확인했습니다', key='engine_live_ack')
         if st.button(f'{engine_ops.LABELS[picked]}(으)로 적용', type='primary', key='engine_apply', disabled=not ok):
-            engine_ops.set_mode(nhplug, picked)
-            st.toast(f'운영 엔진: {engine_ops.LABELS[picked]}', icon=':material/check_circle:')
-            st.rerun()
+            try:
+                engine_ops.set_mode(nhplug, picked)
+            except (OSError, ValueError) as exc:
+                st.error(f'저장하지 못했습니다: {exc}')
+            else:
+                st.toast(f'운영 엔진: {engine_ops.LABELS[picked]}', icon=':material/check_circle:')
+                st.rerun()

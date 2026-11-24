@@ -235,6 +235,34 @@ def _fills(root, rows, span, live_log, now):
     return {'virtual': virtual, 'live': live, 'recovered': recovered, 'owed': owed}, findings
 
 
+def _dca_waits(root):
+    """What waiting for a down day cost the virtual book's 적립식 (2026-11-24 복기 (B)1): for every buy after days it waited,
+    the ask on the first waiting day against the price paid. Kept asks only (from 2026-11-25); a record, not a rule."""
+    path = Path(root) / 'longterm.sqlite3'
+    out, start = [], None
+    if path.exists():
+        from sqlite_ro import ro_connect
+        with ro_connect(path) as db:
+            found = db.execute("SELECT day, orders, indicators FROM decisions WHERE kind='dca' ORDER BY rowid").fetchall()
+        for day, orders, seen in found:
+            seen = _json(seen) or {}
+            if not seen.get('asks'):
+                continue
+            if not seen.get('bought'):
+                if start is None and (seen.get('waiting_after') or 0) >= 1_000:
+                    start = (day, seen['asks'])
+                continue
+            for o in _json(orders) or [] if start else []:
+                then = start[1].get(o.get('key'))
+                if then and o.get('filled'):
+                    out.append({'from': start[0], 'bought': day, 'key': o['key'], 'ask_then': then, 'paid': o['price'],
+                                'diff_pct': round((o['price'] / then - 1) * 100, 2), 'krw': o['price'] * o['filled']})
+            start = None
+    krw = sum(r['krw'] for r in out)
+    return {'rows': out[-20:], 'n': len(out), 'mean_diff_pct': round(sum(r['diff_pct'] * r['krw'] for r in out) / krw, 2) if krw else None,
+            'waiting_since': start[0] if start else None}
+
+
 def _evidence(root, span):
     """Why each order of the window was placed (longterm_evidence): counts and the one-sentence summaries."""
     import longterm_evidence as E
@@ -329,7 +357,7 @@ def collect(root=L.ROOT, end=None, days=WEEK_DAYS, journal_dir=None, live_log=No
                      'modules': [m for m, on in settings['modules'].items() if on],
                      'dca_on': {k: v['on'] for k, v in settings['dca'].items()}},
         'reports': [k for k in reports if k <= span[-1]][-12:] if span else reports[-12:], 'previous_audits': audits[-6:],
-        'masters': _masters(root, span), 'fills': fills,
+        'masters': _masters(root, span), 'fills': fills, 'dca_waits': _dca_waits(root),
     }
 
 

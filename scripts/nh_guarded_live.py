@@ -19,6 +19,7 @@ from src.tools.mcp import MCPServerAdapter
 from src.tools.nhplug_live_guard import LiveOrderBlocked, LiveOrderGuard, verify_order_market
 from nh_live_broker import collect_snapshots
 from nh_live_buy_control import buy_lock
+import config_store
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
 
 BASE = 'https://api.nhplug.com:8443'
@@ -59,7 +60,7 @@ def _token(opener,key,secret):
     scope=hashlib.sha256((BASE+'\0'+key).encode()).hexdigest()
     path=Path.home()/'.vibe-trading/nhplug/tokens'/(scope+'.json')
     try:
-        cached=json.loads(path.read_text())
+        cached=json.loads(path.read_text(encoding='utf-8'))
         if isinstance(cached.get('token'),str) and cached['token'] and float(cached['expiresAt']) > time.time()*1000+30000:
             return cached['token']
     except (OSError, ValueError, KeyError, TypeError):
@@ -73,8 +74,8 @@ def _token(opener,key,secret):
         path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
         fd,tmp=tempfile.mkstemp(prefix='.nh-token-',dir=path.parent)
         try:
-            with os.fdopen(fd,'w') as f: json.dump({'token':token,'expiresAt':time.time()*1000+lifetime*1000},f)
-            os.replace(tmp,path)
+            with os.fdopen(fd,'w', encoding='utf-8') as f: json.dump({'token':token,'expiresAt':time.time()*1000+lifetime*1000},f)
+            config_store.replace(tmp,path)
         finally:
             if os.path.exists(tmp): os.unlink(tmp)
         return token

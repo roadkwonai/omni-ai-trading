@@ -13,13 +13,14 @@ retries stay as they were). NH also answers one account query (operation and acc
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
 import sys
 import time
 from pathlib import Path
+
+from src import file_lock
 
 RATE = 4      # calls a second across all processes; NH refuses an app key past five
 RESERVE = 2   # of those, kept for the trading processes
@@ -52,8 +53,8 @@ def _default_path() -> Path:
 def _locked(path: Path, update):
     """update(stamps) -> stamps to keep, under an exclusive lock on the budget file itself."""
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    with os.fdopen(fd, 'r+') as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX)
+    with os.fdopen(fd, 'r+', encoding='utf-8') as stream:
+        file_lock.lock(stream)
         text = stream.read()
         stamps = json.loads(text) if text.strip() else []
         if not isinstance(stamps, list):
@@ -72,8 +73,8 @@ def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
         account = str((arguments.get('input') or {}).get('act_no'))
         key = hashlib.sha256(f'{operation}:{account}'.encode()).hexdigest()[:16]
         fd = os.open(path.with_name(SAME_FILE), os.O_RDWR | os.O_CREAT, 0o600)
-        with os.fdopen(fd, 'r+') as stream:
-            fcntl.flock(stream, fcntl.LOCK_EX)
+        with os.fdopen(fd, 'r+', encoding='utf-8') as stream:
+            file_lock.lock(stream)
             now = clock()
             text = stream.read()
             starts = {k: float(v) for k, v in (json.loads(text) if text.strip() else {}).items() if abs(now - float(v)) < 10}

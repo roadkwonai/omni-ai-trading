@@ -357,3 +357,13 @@ def test_the_reservoir_and_the_yeo_etf_are_valued_as_what_the_book_really_holds(
     assert not any(x['active'] for x in facts['levels'] if x['kind'] == 'rule')  # the master modules do not run this book
     text = R.report_md(facts)
     assert 'TIGER CD금리투자KIS(합성)' in text and 'KODEX 미국나스닥100미국채혼합50' in text and '규칙(이 장부 미적용)' in text
+
+
+def test_the_report_says_when_each_book_s_savings_buy_today(decided):
+    L.save_settings(decided, {'dca': {'actual': {'on': True, 'amount_krw': 100_000, 'frequency': 'daily', 'profile': 'yeo', 'when_by': 'master',
+                                                   'size_by': 'master', 'buy_every': 'day', 'time_mode': 'auto'},
+                                      'live-2': {'on': False, 'alert': True}}})
+    facts = R.data(DAY.isoformat(), root=decided, reports=decided / 'reports', fetch=fake_fetch, context=False)
+    assert facts['dca']['actual']['label'] == L.BOOK_LABELS['actual'] and facts['dca']['actual']['today'] and '알림만' in facts['dca']['live-2']['today']
+    blank = R.report_md(facts)
+    assert f"적립식 · {L.BOOK_LABELS['actual']}: " + facts['dca']['actual']['today'] in blank and '적립식 · 실계좌 2: ' in blank

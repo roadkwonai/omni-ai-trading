@@ -203,7 +203,7 @@ def _position_plan(root, row, context, strategy):
     if root.name == 'shared-etf-paper':
         plan_path = root / 'exit-plans.json'
         try:
-            raw = json.loads(plan_path.read_text())
+            raw = json.loads(plan_path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             raw = {}
         if not isinstance(raw, dict):
@@ -292,7 +292,7 @@ def _invoke(payload, directory):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     env = {**os.environ, 'PYTHONPATH': f"{REPO / 'agent'}:{REPO / 'scripts'}"}
     child = subprocess.run([sys.executable, '-c', _CHILD, str(directory)], cwd=str(REPO), env=env,
-                           input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True, timeout=35)
+                           input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True, timeout=35, encoding='utf-8')
     if child.returncode == 73 and child.stdout.strip() == _NOT_SENT_MARKER:
         raise JevEventNotSent('jev_request_not_sent_lock')
     if child.returncode:

@@ -980,3 +980,40 @@ def test_close_prices_a_shadow_holding_a_yeo_etf_by_its_code(tmp_path, monkeypat
     db = L.connect(tmp_path)
     L.put_state(db, **{'shadow:dca_auto': {'book': {'cash': 1_000_000.0, 'qty': {'NDXMIX': 10}, 'cost': {'NDXMIX': 100_000.0}}}})
     assert L.close(tmp_path, KrxOnlyRead(), now.replace(hour=15, minute=40)) == 'closed'
+
+
+# ---- 2026-11-24 복기 제안 (A)1·(B)1 ----
+
+def test_a_setting_changed_after_the_trade_reaches_the_shadows_the_next_day(tmp_path, monkeypatch):
+    now = decided(tmp_path, monkeypatch).replace(hour=9, minute=40)
+    L.save_settings(tmp_path, {'execute': True, 'dca': {'actual': {'on': True, 'amount_krw': 100_000, 'frequency': 'daily', 'time': '10:00'}},
+                               'books': {'actual': {'strategy': 'yeo_method'}, 'live-2': {'strategy': 'yeo_method'}}})
+    live = {'live-2': {'budget': {'capital_krw': 5_000_000}}}
+    L.trade(tmp_path, Read(), now)
+    L.dca(tmp_path, Read(), now.replace(hour=10, minute=0))
+    parked = {'strategy': 'yeo_method', 'yeo': {'park': True}}
+    L.save_settings(tmp_path, {'books': {'actual': parked, 'live-2': parked}})  # 11:51 that day
+    assert L.close(tmp_path, Read(), now.replace(hour=15, minute=40), accounts=live) == 'closed'
+    st = L.read_state(tmp_path)
+    assert st['shadow:dca_auto']['book']['qty'].get('RES', 0) == 0 and st['account:live-2']['book']['qty'].get('RES', 0) == 0
+    L.put_state(L.connect(tmp_path), plan={**st['plan'], 'day': '2026-11-19'}, closed_day=None)
+    tomorrow = now.replace(day=19)
+    L.trade(tmp_path, Read(), tomorrow)
+    assert L.close(tmp_path, Read(), tomorrow.replace(hour=15, minute=40), accounts=live) == 'closed'
+    st = L.read_state(tmp_path)
+    assert st['shadow:dca_auto']['book']['qty'].get('RES', 0) > 0 and st['account:live-2']['book']['qty'].get('RES', 0) > 0
+
+
+def test_a_day_without_a_trade_run_uses_the_settings_as_they_are(tmp_path, monkeypatch):
+    now = decided(tmp_path, monkeypatch)
+    L.put_state(L.connect(tmp_path), book_settings={'day': '2026-11-01', 'books': {'actual': {'strategy': 'yeo_method'}}})
+    L.save_settings(tmp_path, {'execute': True, 'dca': {'actual': {'on': True, 'time': '10:00'}}})
+    assert L.close(tmp_path, Read(), now.replace(hour=15, minute=40), accounts={}) == 'closed'  # an old day's settings are not today's
+
+
+def test_the_days_asks_are_recorded_with_the_savings_decision(tmp_path, monkeypatch):
+    now = decided(tmp_path, monkeypatch).replace(hour=10)
+    dca_on(tmp_path)
+    L.dca(tmp_path, Read(), now)
+    seen = json.loads(L.connect(tmp_path).execute("SELECT indicators FROM decisions WHERE kind='dca'").fetchone()[0])
+    assert seen['asks'] and set(seen['asks'].values()) == {10_000} and seen['bought'] is True

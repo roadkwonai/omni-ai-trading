@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import date, datetime
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,7 @@ import sys
 import tempfile
 from zoneinfo import ZoneInfo
 
+from src import file_lock
 from src.config.paths import get_runtime_root
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ TIMEOUT = 120
 def session_days(runtime: Path, registered: date, end: date) -> list[str]:
     """Read the common calendar published by the validated-data pipeline."""
     path = runtime / 'data/current/005930.KS.csv'
-    with path.open(newline='') as stream:
+    with path.open(newline='', encoding='utf-8') as stream:
         rows = [date.fromisoformat(row['date']) for row in csv.DictReader(stream)]
     if rows != sorted(set(rows)) or not rows or rows[-1] != end:
         raise ValueError('validated snapshot calendar is incomplete')
@@ -34,7 +34,7 @@ def _step(label: str, args: list[str]) -> dict:
     try:
         result = subprocess.run([sys.executable, str(ROOT / 'scripts' / args[0]), *args[1:]],
                                 cwd=ROOT, shell=False, capture_output=True, text=True,
-                                timeout=TIMEOUT, check=False)
+                                timeout=TIMEOUT, check=False, encoding='utf-8')
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise RuntimeError(f'{label} stage unavailable') from exc
     if result.returncode:
@@ -61,9 +61,9 @@ def run_cycle(as_of: date, today: date, runtime: Path, *, execute: bool = False)
         raise ValueError('as-of precedes baseline')
     runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_fd = os.open(runtime / 'cycle.lock', os.O_CREAT | os.O_RDWR, 0o600)
-    with os.fdopen(lock_fd, 'r+') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        benchmark = json.loads((runtime / 'benchmark.json').read_text())
+    with os.fdopen(lock_fd, 'r+', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
+        benchmark = json.loads((runtime / 'benchmark.json').read_text(encoding='utf-8'))
         registered = date.fromisoformat(benchmark['registered_date_kst'])
         if date.fromisoformat(benchmark['last_session']) > as_of:
             raise ValueError('benchmark is ahead of requested date')
@@ -85,7 +85,7 @@ def run_cycle(as_of: date, today: date, runtime: Path, *, execute: bool = False)
         fd, name = tempfile.mkstemp(prefix='.sessions-', suffix='.json', dir=runtime)
         try:
             os.fchmod(fd, 0o600)
-            with os.fdopen(fd, 'w') as stream:
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                 json.dump(sessions, stream)
             comparison = _step('comparison', ['kr_swing_v5_compare.py', '--sessions', name])
         finally:

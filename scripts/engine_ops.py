@@ -35,8 +35,11 @@ def set_mode(nhplug, key, who='dashboard'):
     if key not in MODES:
         raise ValueError(f'unknown mode: {key}')
     nhplug, (jev, vibe) = Path(nhplug), MODES[key]
-    if accounts.load(nhplug / 'accounts.json')['paper-shared']['auto'] is not jev:
-        accounts.save_one('paper-shared', {'auto': jev}, nhplug / 'accounts.json')
+    paper = accounts.load(nhplug / 'accounts.json')['paper-shared']
+    if paper.get('invalid'):
+        raise ValueError('공유 모의계좌 설정이 올바르지 않아 운영 엔진을 바꾸지 않습니다.')
+    if paper['auto'] is not jev:
+        accounts.save_one('paper-shared', {'auto': jev}, nhplug / 'accounts.json', who=who)
     if vibe_longterm.load_settings(nhplug / 'vibe-longterm')['enabled'] is not vibe:
         vibe_longterm.save_settings(nhplug / 'vibe-longterm', {'enabled': vibe}, who=who)
     return status(nhplug)

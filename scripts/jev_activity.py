@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-import fcntl
 from pathlib import Path
+
+from src import file_lock
 
 LOCK = Path.home() / '.vibe-trading/nhplug/jev-regular-request.lock'
 
@@ -19,8 +20,8 @@ def regular_request(path=None):
     try:
         path = Path(path or LOCK)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        handle = path.open('a')
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle = path.open('a', encoding='utf-8')
+        file_lock.lock(handle, blocking=False)
     except OSError as exc:
         if handle is not None:
             handle.close()
@@ -29,7 +30,7 @@ def regular_request(path=None):
         yield
     finally:
         try:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            file_lock.unlock(handle)
         finally:
             handle.close()
 
@@ -39,9 +40,9 @@ def regular_request_busy(path=None):
     try:
         path = Path(path or LOCK)
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with path.open('a') as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            fcntl.flock(handle, fcntl.LOCK_UN)
+        with path.open('a', encoding='utf-8') as handle:
+            file_lock.lock(handle, blocking=False)
+            file_lock.unlock(handle)
         return False
     except OSError:
         return True

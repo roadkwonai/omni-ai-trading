@@ -26,7 +26,7 @@ SELL_TAX_PCT = 0.20     # estimate: 2026 securities transaction tax on stock sel
 def day_costs(folder, day, *, etfs, commission=COMMISSION_PCT, sell_tax=SELL_TAX_PCT):
     folder = Path(folder)
     try:
-        rows = [json.loads(l) for l in (folder / 'account-snapshots.jsonl').read_text().splitlines() if l.strip()]
+        rows = [json.loads(l) for l in (folder / 'account-snapshots.jsonl').read_text(encoding='utf-8').splitlines() if l.strip()]
     except OSError:
         rows = []
     rows = [r for r in rows if str(r.get('time', '')).startswith(day)]

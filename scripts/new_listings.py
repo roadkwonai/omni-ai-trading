@@ -68,7 +68,7 @@ def _daily(path, now, answer):
 
     The cache only saves a refetch, so an unwritable folder never hides the answer (the dashboard crashed on it once)."""
     try:
-        cache = json.loads(Path(path).read_text())
+        cache = json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         cache = {}
     day, checked = now.strftime('%Y%m%d'), cache.get('checked')

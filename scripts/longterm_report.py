@@ -19,6 +19,7 @@ from pathlib import Path
 
 from config_store import write_json, write_text  # the publisher may read the folder mid-write
 import longterm_cases as C
+import longterm_dca
 import longterm_template as T
 import longterm_watchlist
 import vibe_longterm as L
@@ -153,11 +154,30 @@ def yeo_accounts(root, plan, state):
         else:
             action = (f'다음 {nxt[0]}단계 {yeo_method.pct(nxt[1])}까지 {(dd - nxt[1]) * 100:.1f}%p 남음: '
                       + ('그 전에는 사지 않음' if not used else '보유분은 70:30 리밸런싱만, 새로 사지 않음'))
-        # never the account record's label (it may hold a masked account number): live-N → 실계좌 N
-        label = L.BOOK_LABELS.get(key) or (f"실계좌 {key.removeprefix('live-')}" if key.startswith('live-') else key)
-        out[key] = {'label': label, 'index': symbol, 'dd': dd, 'used': used,
+        out[key] = {'label': book_label(key), 'index': symbol, 'dd': dd, 'used': used,
                     'next_step': nxt[1] if nxt else None, 'next_action': action}
     return out
+
+
+def dca_today(root, plan, state, now):
+    """{book key: {label, today}}: when each book's 적립식 buys today, as far as it is known before the session
+    (longterm_dca.today_text), for the books whose 적립식 or 적립 알림 is on. Read only."""
+    import longterm_live
+    settings, out = L.load_settings(root), {}
+    for key, cfg in settings['dca'].items():
+        if not cfg['on'] and not cfg.get('alert'):
+            continue
+        saved = state.get('dca:actual') if key == 'actual' else longterm_live.load_state(Path(root).parent, key).get('dca')
+        want = L.dca_targets(L.today_want(plan), L.yeo_settings(settings, key))
+        out[key] = {'label': book_label(key), 'waiting_krw': round((saved or {}).get('waiting_krw', 0)), 'last_buy': (saved or {}).get('last_buy'),
+                    'today': longterm_dca.today_text(longterm_watchlist.for_dca(cfg, root), saved, now, plan.get('indicators') or {}, plan.get('regime'), want,
+                                                         L.yeo_settings(settings, key) is not None)}
+    return out
+
+
+def book_label(key):
+    """Never the account record's label (it may hold a masked account number): live-N → 실계좌 N."""
+    return L.BOOK_LABELS.get(key) or (f"실계좌 {key.removeprefix('live-')}" if key.startswith('live-') else key)
 
 
 def news_rows(root, day):
@@ -236,6 +256,7 @@ def data(day, root=L.ROOT, reports=REPORTS, fetch=None, context=True):
                                                         for m in v['modules']]} for k, v in MASTER_VIEWS.items()}
     facts['yeo_accounts'] = yeo_accounts(root, plan, state)
     facts['news'] = news_rows(root, plan.get('day'))
+    facts['dca'] = dca_today(root, plan, state, datetime.combine(date.fromisoformat(plan['day']), datetime.min.time(), L.KST)) if plan.get('day') else {}
     try:
         facts['ideas'] = ideas_facts(root)
     except Exception as exc:  # reference only: the report goes on without it
@@ -326,6 +347,7 @@ def report_md(facts, doc=None):
         *([f"- 관심목록 슬리브 평가 {sleeve:,.0f}원: 순자산에 포함 · 엔진이 리밸런싱·매도하지 않음(적립식만 삼)"] if held else []),
         f"- 순자산 {acc['nav'].get('actual', L.CAPITAL):,.0f}원 · 대기 목표 {', '.join(name(k) for k in acc['pending']) or '없음'} · "
         f"이번 달 저수지 뺀 매도 {(acc['sold_this_month'] or {}).get('krw', 0):,.0f}원",
+        *[f"- 적립식 · {d['label']}: {d['today']}" for d in (facts.get('dca') or {}).values()],
         f"- {planned} 주문: {len(last.get('orders') or [])}건 ({'가상 체결' if last.get('execute') else 'dry-run'})",
         '- 슬리브 예산: ' + ' · '.join(f"{label} {share * 100:.0f}%({share * acc['nav'].get('actual', L.CAPITAL):,.0f}원)"
                                    for label, share in sleeves(facts['weights'])), '', text('계좌 계획'), '']

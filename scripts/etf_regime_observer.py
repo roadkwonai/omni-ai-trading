@@ -5,7 +5,6 @@ import argparse
 import json
 import os
 import tempfile
-import fcntl
 import time as clocktime
 from collections import deque
 from datetime import datetime, time, timedelta
@@ -16,6 +15,8 @@ from etf_regime import classify_regime
 from etf_universe import SYMBOLS
 from session_times import until_open
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 SOURCE = 'NH KRX completed recorded bars or read-only minute quote + daily quote'
@@ -176,6 +177,7 @@ def observe(reader, event_path, clock=lambda: datetime.now(KST), sleeper=lambda 
 
 
 def publish(path, result):
+    from config_store import replace
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temporary = tempfile.mkstemp(prefix='.regime-', dir=path.parent)
@@ -184,7 +186,7 @@ def publish(path, result):
             json.dump(result, stream, ensure_ascii=False, allow_nan=False)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -195,7 +197,7 @@ def claim_attempt(path, now):
     path = Path(path)
     now = _timestamp(now)
     if path.exists():
-        last = _timestamp(json.loads(path.read_text())['time'])
+        last = _timestamp(json.loads(path.read_text(encoding='utf-8'))['time'])
         if now < last or now - last < timedelta(seconds=120):
             return False
     publish(path, {'time': now.isoformat()})
@@ -210,9 +212,9 @@ def _unavailable(now, reason):
 def run(root, reader, *, watch=False, clock=lambda: datetime.now(KST), sleeper=clocktime.sleep):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (root / 'regime-observer.lock').open('a') as lock:
+    with (root / 'regime-observer.lock').open('a', encoding='utf-8') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            file_lock.lock(lock, blocking=False)
         except BlockingIOError:
             return 'already_running'
         waiting_day, daily_cache = None, {}

@@ -174,13 +174,12 @@ def live_price_cap(number, path=FILE):
 
 
 def load(path=FILE):
-    """All accounts with validated settings; an invalid record falls back to its kind's safe defaults (auto OFF)."""
-    try:
-        data = json.loads(Path(path).read_text())
-        stored = data.get('accounts') if isinstance(data, dict) else None
-    except (OSError, ValueError):
-        stored = None
+    """All accounts with validated settings; an invalid record falls back to its kind's safe defaults (auto OFF), and so
+    does the paper account of a file that is there but cannot be read (2026-11-24: it used to read as a new install, ON)."""
+    stored, readable = _file(path)
     accounts = deepcopy(DEFAULTS['accounts'])
+    if not readable:
+        accounts['paper-shared'].update(auto=False, invalid=True)
     for key, record in (stored if isinstance(stored, dict) else {}).items():
         if not isinstance(record, dict):
             continue
@@ -192,6 +191,18 @@ def load(path=FILE):
     return accounts
 
 
+def _file(path):
+    """(the records as written or None, whether the file is missing or well formed)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return None, True
+    except (OSError, ValueError):
+        return None, False
+    found = data.get('accounts') if isinstance(data, dict) else None
+    return (found, True) if isinstance(found, dict) else (None, False)
+
+
 def longterm_accounts(records):
     """{key: record} of the valid live accounts run by the long-term engine (scripts/longterm_live.py)."""
     return {k: r for k, r in records.items() if r.get('kind') == 'live' and r.get('engine') == 'longterm' and not r.get('invalid')}
@@ -199,15 +210,10 @@ def longterm_accounts(records):
 
 def stored(path=FILE):
     """The accounts exactly as written on disk (no defaults, no invalid fallback); {} when unreadable."""
-    try:
-        data = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return {}
-    accounts = data.get('accounts') if isinstance(data, dict) else None
-    return {k: v for k, v in accounts.items() if isinstance(v, dict)} if isinstance(accounts, dict) else {}
+    return {k: v for k, v in (_file(path)[0] or {}).items() if isinstance(v, dict)}
 
 
-def save_one(key, changes, path=FILE, required=False):
+def save_one(key, changes, path=FILE, required=False, who='dashboard'):
     """Change one account only: read the file as it is now, apply `changes` to that record, validate that record and
     write. Other accounts stay byte-for-byte what is on disk (an invalid one is not replaced by defaults), and keys the
     caller did not pass (live_orders, hash, ...) keep their current value, so a stale screen cannot undo a newer change."""
@@ -224,9 +230,9 @@ def save_one(key, changes, path=FILE, required=False):
     if issues:
         raise ValueError(f'{record.get("label", key)}: ' + ' '.join(issues))
     accounts[key] = record
-    _write(accounts, path, required)
+    _write(accounts, path, required, who)
     if key != 'paper-shared' and ((accounts.get('paper-shared') or {}).get('match_live') or {}).get('account') == key:
-        resync_match(path)  # the paper follows this live account's capital and limits
+        resync_match(path, who)  # the paper follows this live account's capital and limits
     return record
 
 
@@ -256,7 +262,7 @@ def match_values(paper, live, positions):
     return {'budget': {**(paper.get('budget') or {}), 'first_buy_krw': first, 'per_symbol_krw': per_symbol}, 'limits': limits}
 
 
-def set_match(account, positions=2, on=True, path=FILE):
+def set_match(account, positions=2, on=True, path=FILE, who='dashboard'):
     """Switch the paper account's match to a live account on (values written now, the previous ones kept) or off
     (the previous budget and limits restored). Returns the paper record written."""
     accounts = stored(path)
@@ -267,7 +273,7 @@ def set_match(account, positions=2, on=True, path=FILE):
             return paper
         before = current.get('before') or {}
         return save_one('paper-shared', {'budget': before.get('budget') or paper['budget'], 'limits': before.get('limits') or paper.get('limits'),
-                                         'match_live': None}, path)
+                                         'match_live': None}, path, who=who)
     live = accounts.get(account)
     if not live or live.get('kind') != 'live' or problems(live):
         raise ValueError('맞출 실계좌를 찾지 못했습니다.')
@@ -275,10 +281,10 @@ def set_match(account, positions=2, on=True, path=FILE):
         raise ValueError(f'동시 보유 종목 수는 {MATCH_POSITIONS[0]}~{MATCH_POSITIONS[1]}개입니다.')
     before = current['before'] if current else {'budget': paper.get('budget'), 'limits': paper.get('limits')}
     return save_one('paper-shared', {**match_values(paper, live, positions),
-                                     'match_live': {'account': account, 'positions': positions, 'before': before}}, path)
+                                     'match_live': {'account': account, 'positions': positions, 'before': before}}, path, who=who)
 
 
-def resync_match(path=FILE):
+def resync_match(path=FILE, who='dashboard'):
     """Rewrite the matched paper values after the live account's capital or limits changed; None when off or unchanged."""
     accounts = stored(path)
     paper = accounts.get('paper-shared') or {}
@@ -293,20 +299,22 @@ def resync_match(path=FILE):
     values['budget']['per_symbol_krw'] = max(values['budget']['first_buy_krw'], min(values['budget']['per_symbol_krw'], values['limits']['held_max_krw']))
     if values['budget'] == paper.get('budget') and values['limits'] == paper.get('limits'):
         return None
-    return save_one('paper-shared', values, path)
+    return save_one('paper-shared', values, path, who=who)
 
 
-def _write(accounts, path, required=False):
+def _write(accounts, path, required=False, who='dashboard'):
     """Write accounts.json (config_store) and record what changed in the settings history; `required`: the history
     must be written (the live-order switch audit), else a history failure does not block the save."""
     import config_store
+    if not _file(path)[1]:  # writing now would drop every account the file holds
+        raise ValueError('계좌 설정 파일을 읽을 수 없어 저장하지 않습니다. 파일을 확인하거나 백업에서 되돌리세요.')
     before = stored(path)
     clean = {key: {k: v for k, v in record.items() if k not in ('invalid', 'mode')} for key, record in accounts.items()}
     if required:  # the audit comes first: a switch that could not be recorded must not take effect
-        config_store.record('accounts', before, clean, required=True, saved=path)
+        config_store.record('accounts', before, clean, who, required=True, saved=path)
     config_store.write_json(path, {'version': 1, 'updated': datetime.now(ZoneInfo('Asia/Seoul')).isoformat(), 'accounts': clean})
     if not required:
-        config_store.record('accounts', before, clean, saved=path)
+        config_store.record('accounts', before, clean, who, saved=path)
 
 
 def save(accounts, path=FILE):
@@ -348,7 +356,7 @@ def paper_limits(record=None):
 LIVE_ORDER_LOG = 'live-order-switch.jsonl'
 
 
-def set_live_orders(key, on, path=FILE, log_root=None):
+def set_live_orders(key, on, path=FILE, log_root=None, who='dashboard'):
     """Turn one live account's live-order switch on or off. The change (time, account key, off -> on; never the
     number) is recorded in the settings history (config_store) and must be, or the call fails. The old
     live-order-switch.jsonl audit is moved into that history the first time."""
@@ -358,4 +366,4 @@ def set_live_orders(key, on, path=FILE, log_root=None):
         raise ValueError('live account unavailable or invalid')
     config_store.import_jsonl(Path(log_root or Path(path).parent) / LIVE_ORDER_LOG, 'accounts',
                               lambda e: (e['time'], f"{e['account']}.live_orders", None, bool(e['live_orders'])), saved=path)
-    return save_one(key, {'live_orders': bool(on)}, path, required=True)
+    return save_one(key, {'live_orders': bool(on)}, path, required=True, who=who)

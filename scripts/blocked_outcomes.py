@@ -45,7 +45,7 @@ def candidates(root, day, events, settings):
     bought = {e.get('symbol') for e in events if e.get('event') == 'new_listing'}
     if reasons:
         try:
-            listings = json.loads((Path(root) / 'new-listings.json').read_text()).get('rows') or []
+            listings = json.loads((Path(root) / 'new-listings.json').read_text(encoding='utf-8')).get('rows') or []
         except (OSError, ValueError, AttributeError):
             listings = []
         from nh_paper_isolated import sessions_held

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import math
@@ -17,6 +16,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from backtest.loaders.yahoo_loader import DataLoader
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.mcp import MCPServerAdapter
@@ -375,7 +375,7 @@ def check_recorded_signal(db, frames):
 
 
 def collect(now, broker, readonly, account, loader):
-    codes = json.loads(PROTOCOL.read_text())['universe']
+    codes = json.loads(PROTOCOL.read_text(encoding='utf-8'))['universe']
     accounts = read_response(readonly, 'list_accounts', {})
     if accounts.get('rsp_cd') != '00000' or not any(str(r.get('acct_no')) == account and str(r.get('acct_type')) == '03' for r in accounts.get('Output_0', []) if isinstance(r, dict)):
         raise ValueError('paper account identity unavailable')
@@ -419,8 +419,8 @@ def main():
     directory = get_runtime_root() / 'nhplug/strategies/kr_swing_v5'
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(directory, 0o700)
-    with (directory / 'runner.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (directory / 'runner.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         db = connect_state(directory / 'forward.sqlite3', account)
         try:
             loader = SnapshotLoader(args.data) if args.data else DataLoader()
@@ -492,7 +492,7 @@ def main():
             if not args.execute or not candidates:
                 print(json.dumps({'status':'ready' if candidates else 'wait','day':day,'candidates':candidates}))
                 return
-            policy = json.loads((get_runtime_root() / 'nhplug/swing-policy.json').read_text())
+            policy = json.loads((get_runtime_root() / 'nhplug/swing-policy.json').read_text(encoding='utf-8'))
             if any(policy.get(key) is not True for key in ('enabled','krx_session_check','auto_loss_stop')):
                 raise ValueError('required NH paper safety policy is not enabled')
             symbol, side = candidates[0]

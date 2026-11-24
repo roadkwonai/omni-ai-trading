@@ -9,6 +9,7 @@ from collections import deque
 from nh_live_buy_control import buy_allowed, pause as pause_live_buys
 from tunables import setting
 
+import os_services
 from launchd_services import SERVICES
 
 # The screen name of every launchd service (launchd_services.SERVICES is the one list; a test keeps both in step).
@@ -28,29 +29,24 @@ PROCESS_CACHE_S = setting('process_cache_s')  # 운영 조정값
 
 
 def processes(max_age=PROCESS_CACHE_S):
-    """Service states from `launchctl list`, reused for `max_age` seconds (one rerun used to call it about seven times)."""
+    """Service states from the OS's service manager, reused for `max_age` seconds (one rerun used to ask about seven times)."""
     global _PROCESSES
     if _PROCESSES[1] is not None and time.monotonic() - _PROCESSES[0] < max_age:
         return dict(_PROCESSES[1])
     try:
-        result = subprocess.run(['launchctl', 'list'], check=True, capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
+        found = os_services.states(run=subprocess.run, timeout=5)
+    except os_services.Unknown:
         states = {name: '확인 불가' for name in LABELS}
         _PROCESSES = (time.monotonic(), states)
         return dict(states)
-    entries = {}
-    for line in result.stdout.splitlines():
-        fields = line.split()
-        if len(fields) == 3:
-            entries[fields[2]] = fields[0]
-    states = {name: ('미등록' if label not in entries else '종료' if entries[label] == '-' else '실행 중')
-              for name, label in LABELS.items()}
+    rows = {name: found.get(label.removeprefix(os_services.LABEL), os_services.MISSING) for name, label in LABELS.items()}
+    states = {name: '실행 중' if row['running'] else '종료' if row['registered'] else '미등록' for name, row in rows.items()}
     _PROCESSES = (time.monotonic(), states)
     return dict(states)
 
 
 def peek_processes(max_age=PROCESS_CACHE_S):
-    """Return a current cache snapshot without running launchctl."""
+    """Return a current cache snapshot without asking the service manager."""
     stamp, states = _PROCESSES
     if states is None or time.monotonic() - stamp >= max_age:
         return None

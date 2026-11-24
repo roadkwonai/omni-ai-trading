@@ -24,7 +24,7 @@ flowchart LR
 ```
 
 > [!NOTE]
-> 다른 기기·계정에서 이미 돌던 설치를 옮기는 중이라면 이 문서 대신 [이식](portability.md)과 `.claude/skills/ops-bootstrap/SKILL.md`를 먼저 따릅니다. 원장·계좌 등록·설정이 백업에서 함께 옵니다.
+> 다른 기기·계정에서 이미 운영하던 설치를 옮기는 중이라면 이 문서 대신 [이식](portability.md)과 `.claude/skills/ops-bootstrap/SKILL.md`를 먼저 따릅니다. 원장·계좌 등록·설정이 백업에서 함께 옵니다.
 
 ## 1. 준비물
 
@@ -207,7 +207,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
 | 08:55 | 거래일 확인, 실행기와 관찰기 준비 |
 | 개장부터(기본 09:00) | 이월 보유와 신규 진입 판단. 자료와 보호 조건을 충족하면 주문 |
 
-1. **장전 사전 점검**을 손으로 돌려 봅니다. 읽기 전용이고, `--no-send`면 Discord로 보내지 않습니다.
+1. **장전 사전 점검**을 직접 실행해 봅니다. 읽기 전용이고, `--no-send`면 Discord로 보내지 않습니다.
 
    ```bash
    PYTHONPATH=agent:scripts .venv/bin/python scripts/preflight.py --no-send
@@ -233,7 +233,7 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/vibe_longterm.py --run
 결과는 대시보드 **장기투자** 맨 위 상태 줄과 '오늘의 판단', **장기투자 → 계좌·실행 → 기록**에 보입니다. 가상 체결을 켜려면 같은 화면에서 확인 문구 `장기투자 가상 체결`을 입력합니다. 1억 원 가상 브로커에 주문하며 증권사 주문이 아닙니다.
 
 > [!CAUTION]
-> 이미 `vibe-longterm` 서비스가 도는 설치에서는 손으로 돌리지 마세요. 손으로 돌린 판단도 운영 기록(`longterm.sqlite3`)에 남습니다. `--execute`는 dry-run 확인 뒤 사용자 승인으로만 씁니다.
+> 이미 `vibe-longterm` 서비스를 쓰는 설치에서는 직접 실행하지 마세요. 직접 실행한 판단도 운영 기록(`longterm.sqlite3`)에 남습니다. `--execute`는 dry-run 확인 뒤 사용자 승인으로만 씁니다.
 
 장기 엔진의 규칙은 [장기투자](longterm.md)에 있습니다.
 
@@ -247,7 +247,7 @@ PYTHONPATH=agent:scripts:streamlit_namuh .venv/bin/python -m pytest -q scripts s
 
 ## 10. AI에게 설치를 맡길 때
 
-Claude Code나 Codex에게 이 저장소를 열어 두고 설치를 맡길 수 있습니다. 키 입력과 실주문 관련 단계는 사람이 합니다. 설치 프롬프트, 지침 파일 템플릿, 스킬·MCP·권한·예약 작업 등록, 매일 쓰는 프롬프트 예시는 [AI와 함께 쓰기](ai-agents.md)에 모았습니다.
+Claude Code나 Codex에게 이 저장소를 열어 두고 설치를 맡길 수 있습니다. 키 입력과 실주문 관련 단계는 사용자가 직접 합니다. 설치 프롬프트, 지침 파일 템플릿, 스킬·MCP·권한·예약 작업 등록, 매일 쓰는 프롬프트 예시는 [AI와 함께 쓰기](ai-agents.md)에 모았습니다.
 
 ```text
 이 저장소는 Omni AI Trading(NH 나무 PLUG 모의·실계좌 자동매매)이다.

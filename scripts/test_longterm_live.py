@@ -1,4 +1,3 @@
-import fcntl
 import json
 import sys
 from datetime import datetime
@@ -10,6 +9,7 @@ import pytest
 import longterm_dca as D
 import longterm_live as LL
 import vibe_longterm as L
+from src import file_lock
 from src.tools.nhplug_live_guard import LiveOrderBlocked, LiveOrderGuard
 from test_vibe_longterm import ind
 
@@ -418,7 +418,7 @@ def start_main(tmp_path, monkeypatch, *argv, live_orders=False):
 def test_a_dry_and_an_armed_loop_for_one_account_never_run_together(tmp_path, monkeypatch):
     (tmp_path / 'nhplug').mkdir()
     with (tmp_path / 'nhplug' / 'live-follow-exec-live-2.lock').open('a') as lock:  # an armed loop for live-2 runs
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        file_lock.lock(lock, blocking=False)
         with pytest.raises(BlockingIOError):
             start_main(tmp_path, monkeypatch)  # a dry loop shares state-live-2.json: it must not start
     assert start_main(tmp_path, monkeypatch)[0]['execute_orders'] is False

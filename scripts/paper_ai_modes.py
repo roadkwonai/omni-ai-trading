@@ -1,11 +1,12 @@
 """Paper ETF model settings applied only at an order-free cycle boundary."""
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import tempfile
 from pathlib import Path
+
+from src import file_lock
 
 DEFAULT = {'version': 1, 'jev': True, 'decision': True}
 
@@ -37,6 +38,7 @@ def read_pending_modes(root):
 
 
 def _write(path, data):
+    import config_store
     # kept separate from config_store.write_json: apply_pending_modes' crash recovery depends on this exact order
     fd, name = tempfile.mkstemp(prefix='.ai-modes-', dir=path.parent)
     try:
@@ -44,45 +46,38 @@ def _write(path, data):
             json.dump(data, out, ensure_ascii=False)
             out.flush()
             os.fsync(out.fileno())
-        os.replace(name, path)
-        _sync_directory(path.parent)
+        config_store.replace(name, path)
+        config_store.sync_folder(path.parent)
     finally:
         if os.path.exists(name):
             os.unlink(name)
 
 
-def _sync_directory(path):
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-
-
-def write_modes(root, *, jev, decision):
+def write_modes(root, *, jev, decision, who='dashboard'):
     import config_store
     data = _validate({'version': 1, 'jev': jev, 'decision': decision})
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (root / 'ai-modes.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with (root / 'ai-modes.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock)
         try:
             before = _read(root / 'ai-modes.pending.json', None) or _read(root / 'ai-modes.json', None)
         except ValueError:  # an unreadable earlier file: the history shows the new value only
             before = None
         _write(root / 'ai-modes.pending.json', data)
-    config_store.record('ai_modes', before, data, saved=root / 'ai-modes.json')  # requested; the runner applies it at a safe cycle
+    config_store.record('ai_modes', before, data, who, saved=root / 'ai-modes.json')  # requested; the runner applies it at a safe cycle
     return data
 
 
 def apply_pending_modes(root):
     """Runner-only: call with runner.lock held and no unresolved order."""
+    import config_store
     root = Path(root)
-    with (root / 'ai-modes.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with (root / 'ai-modes.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock)
         pending = read_pending_modes(root)
         if pending is not None:
             _write(root / 'ai-modes.json', pending)
             (root / 'ai-modes.pending.json').unlink()
-            _sync_directory(root)
+            config_store.sync_folder(root)
         return read_modes(root)

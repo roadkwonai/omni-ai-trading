@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-import fcntl
 import hashlib
 import json
 import math
@@ -19,6 +18,8 @@ import sqlite3
 import subprocess
 import time
 from zoneinfo import ZoneInfo
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 MODEL_LOCK = Path.home() / '.vibe-trading-advisor' / 'advisor-run.lock'
@@ -34,12 +35,12 @@ def model_lock(path=MODEL_LOCK, *, blocking=False):
     """Lock a model run; the Jev event worker uses a separate lock from regular GPT."""
     path = Path(path)
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    with path.open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+    with path.open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=blocking)
         try:
             yield
         finally:
-            fcntl.flock(lock, fcntl.LOCK_UN)
+            file_lock.unlock(lock)
 
 
 def _time(value):
@@ -345,8 +346,8 @@ def main():
     from src.config.paths import get_runtime_root
     nhplug = get_runtime_root() / 'nhplug'
     EVENT_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (EVENT_ROOT / 'worker.lock').open('a') as worker:
-        fcntl.flock(worker, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (EVENT_ROOT / 'worker.lock').open('a', encoding='utf-8') as worker:
+        file_lock.lock(worker, blocking=False)
         signature, rows, seen, day, errors = None, [], set(), None, {}
         while True:
             now = datetime.now(KST)

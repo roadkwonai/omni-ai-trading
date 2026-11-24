@@ -55,7 +55,7 @@ HTML로 만들지 않는 것:
 
 | 대상 | 처리 | 이유 |
 | --- | --- | --- |
-| 체결·주문 계획·장기 NAV·15:40 마감 요약 | `discord_notify`가 텍스트로 바로 발송 | 짧은 매매 알림이라 본문이 빠름 |
+| 체결·주문 계획·장기 NAV·15:40 마감 요약 | `discord_notify`가 텍스트로 바로 발송 | 짧은 매매 알림은 본문으로 바로 보내는 편이 빠름 |
 | 장중 매매·차단 감사 기록 | 파일만(`reviews/operations-audit-*.md`) | 매시 갱신되는 내부 점검 기록 |
 | 장중 진행 보고 · 장 마감 후 보고 | 예약 작업 대화 보고 | 파일로 남지 않음 |
 
@@ -164,9 +164,9 @@ flowchart LR
 1. Pages 저장소를 공개로 바꿉니다(무료 계정에서 Pages를 쓰려면 필요).
 2. `.env`를 고칩니다.
    - `REPORT_PAGES_REPO=roadkwonai/omni-ai-trading`
-   - `REPORT_PAGES_URL`은 비워 두면 `https://roadkwonai.github.io/omni-ai-trading/`를 씁니다(사용자 도메인이면 적음).
+   - `REPORT_PAGES_URL`은 비워 두면 `https://roadkwonai.github.io/omni-ai-trading/`를 씁니다(직접 가진 도메인을 쓰면 적음).
    - `REPORT_PAGES_BRANCH`는 기본 `gh-pages`
-3. 푸시 토큰을 확인합니다. `.env`의 `GH_TOKEN`(없으면 저장소 상위 폴더 `.envrc`의 `GH_TOKEN` 또는 `GITHUB_TOKEN`)에 그 저장소 Contents 쓰기 권한이 있어야 하고, Pages를 코드로 켜려면 Pages 권한도 필요합니다. 권한이 없으면 게시 실패 사유에 HTTP 코드가 남습니다.
+3. 푸시 토큰을 확인합니다. `.env`의 `GH_TOKEN`(없으면 저장소 상위 폴더 `.envrc`의 `GH_TOKEN` 또는 `GITHUB_TOKEN`)에 그 저장소 Contents 쓰기 권한이 있어야 합니다. Pages를 코드로 켜려면 Pages 권한도 필요합니다. 권한이 없으면 게시 실패 사유에 HTTP 코드가 남습니다.
 4. `.env`의 `REPORT_PAGES_PUSH=off`를 `on`으로 바꿉니다.
 5. 알림 서비스를 다시 시작합니다.
 

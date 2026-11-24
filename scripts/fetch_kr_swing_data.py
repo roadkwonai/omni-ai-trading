@@ -67,12 +67,12 @@ def main():
     metadata['missing_dates'] = {s: [str(d.date()) for d in union.difference(f.index)] for s, f in frames.items()}
     metadata['invalid_dates'] = {s: [str(d.date()) for d in f.index] for s, f in invalid.items()}
     quarantined = {s: [{'date': str(date.date()), 'reason': 'invalid OHLCV: nonfinite, nonpositive, negative volume, or high/low inconsistency', 'row': {k: (None if not np.isfinite(float(v)) else float(v)) for k, v in row.items()}} for date, row in f.iterrows()] for s, f in invalid.items()}
-    (out / 'invalid_rows.json').write_text(json.dumps(quarantined, indent=2, allow_nan=False) + '\n')
+    (out / 'invalid_rows.json').write_text(json.dumps(quarantined, indent=2, allow_nan=False) + '\n', encoding='utf-8')
     for symbol, frame in clean.items():
         path = out / (symbol + '.csv')
         frame.to_csv(path, index_label='date')
         metadata['symbols'][symbol]['clean_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
-    (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+    (out / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
     print('Common rows:', len(common), 'excluded dates:', metadata['excluded_count'], flush=True)
 
 

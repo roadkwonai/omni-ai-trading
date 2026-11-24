@@ -57,7 +57,7 @@ def token_stamp():
     try:
         path = max(TOKENS.glob('*.json'), key=lambda p: p.stat().st_mtime_ns)
         stamp = (path.name, path.stat().st_mtime_ns)
-        return stamp if json.loads(path.read_text())['expiresAt'] / 1000 - time.time() > EXPIRY_S else None
+        return stamp if json.loads(path.read_text(encoding='utf-8'))['expiresAt'] / 1000 - time.time() > EXPIRY_S else None
     except (OSError, ValueError, KeyError, TypeError):
         return None
 

@@ -25,7 +25,7 @@ Telegram은 봇 토큰 `TELEGRAM_BOT_TOKEN`도 있어야 켜집니다. 발송처
 
 ## 무엇을 보내나
 
-서비스는 launchd `discord-notify`(`scripts/discord_notify.py --watch`, 로그인 시 시작)이고 30초마다 한 번 돌아갑니다.
+서비스는 launchd `discord-notify`(`scripts/discord_notify.py --watch`, 로그인 시 시작)이고 30초마다 한 번 실행됩니다.
 
 ```mermaid
 flowchart LR
@@ -144,7 +144,7 @@ flowchart LR
 | 알림 | 어디로 | 보내는 곳 |
 | --- | --- | --- |
 | 장전 사전 점검 실패 (08:20·08:53) | 실시간 채널 | `scripts/preflight.py`. 실패 항목만 보냅니다. |
-| 실계좌 미러 지연 | Mac 알림 | `scripts/nh_live_follow.py`. 실행 모드의 실계좌가 모의보다 많이 든 채 5분 넘게 매도를 못 따라갈 때 |
+| 실계좌 미러 지연 | Mac 알림 | `scripts/nh_live_follow.py`. 실행 모드의 실계좌가 모의보다 많이 보유한 채 5분 넘게 매도를 못 따라갈 때 |
 | 실계좌 남은 보유 Jev 판단 실패 | Mac 알림 | `scripts/nh_live_follow.py`. 종목별 하루 한 번. 손절·하루 손실 보호는 그대로 작동 |
 | 장중 감사 발견·재발 | 대화 | 예약 작업 `intraday-audit-hourly` ([자동 작업](automation.md#장중-감사)) |
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import math
-import plistlib
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -51,7 +50,7 @@ def event_text(event):
                                          f"{len(event['orders'])}건" if event.get('orders') else '') if part)
 PROTECTION = ('종목 손절 없음(엔진 규칙대로 리밸런싱·저수지 매수) · 하루 손실 래치는 오늘 실현 손실+수수료 기준(평가손 제외) · '
               '운용금·1주 가격 상한·회당 한도·하루 새 종목 5(첫 투입일 6)·미체결 차단·전역 중단은 그대로')
-LAUNCH_AGENTS = Path.home() / 'Library' / 'LaunchAgents'
+LAUNCH_AGENTS = None  # where the definitions are registered; None = this OS's own place (os_services)
 FIRST_DAY_NEW_SYMBOLS = len(L.ASSETS)  # user 2026-11-18: the guard lets a long-term account buy all its ETFs on its first day
 # 보호 한도(장기 전용): (label, who checks it, what it means on a long-term account); the inputs and the 제한 규칙 table share it
 GUARD = {
@@ -71,11 +70,12 @@ GUARD = {
 
 
 def registered_args(service, folder=None):
-    """ProgramArguments of the registered launchd job com.vibetrading.<service>, or None when it is not registered."""
+    """The command the service com.vibetrading.<service> was registered with, or None when it is not registered."""
+    import os_services
     try:
-        return plistlib.loads((Path(folder or LAUNCH_AGENTS) / f'com.vibetrading.{service}.plist').read_bytes()).get('ProgramArguments')
-    except (OSError, ValueError, plistlib.InvalidFileException):
-        return None
+        return os_services.registered_args(service, folder or LAUNCH_AGENTS)
+    except os_services.Unknown:
+        return None  # shown as not armed, as an unreadable definition always was
 
 
 def checklist(args, record):

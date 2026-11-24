@@ -109,7 +109,7 @@ def runner_health(events, root, day):
     stops = [e['time'][11:19] for e in events if e.get('event') == 'stopped']
     crashes = []
     try:
-        lines = (Path(root) / 'com.vibetrading.shared-etf-paper.log').read_text(errors='replace').splitlines()
+        lines = (Path(root) / 'com.vibetrading.shared-etf-paper.log').read_text(errors='replace', encoding='utf-8').splitlines()
     except OSError:
         lines = []
     last, held = '', []  # the last status time; crash lines since it

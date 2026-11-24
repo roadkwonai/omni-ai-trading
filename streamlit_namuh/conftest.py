@@ -6,8 +6,12 @@ os.environ.setdefault('VIBE_TRADING_TUNABLES', os.devnull)
 os.environ.setdefault('VIBE_TRADING_OVERSOLD_CASES', os.path.join(tempfile.mkdtemp(prefix='oversold-cases-'), 'none.sqlite3'))
 os.environ.setdefault('VIBE_TRADING_SETTINGS_HISTORY', os.path.join(tempfile.mkdtemp(prefix='settings-history-'), 'h.sqlite3'))
 # As scripts/conftest.py: agent/tests/conftest.py's sandbox HOME must not hide the installed Archify (r5).
-import pwd  # noqa: E402
-os.environ.setdefault('ARCHIFY_BIN', os.path.join(pwd.getpwuid(os.getuid()).pw_dir, '.claude/skills/archify/bin/archify.mjs'))
+try:
+    import pwd  # noqa: E402
+    _home = pwd.getpwuid(os.getuid()).pw_dir
+except ImportError:  # Windows
+    _home = os.path.expanduser('~')
+os.environ.setdefault('ARCHIFY_BIN', os.path.join(_home, '.claude/skills/archify/bin/archify.mjs'))
 
 import sys
 

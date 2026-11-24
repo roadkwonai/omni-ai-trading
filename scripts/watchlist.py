@@ -199,23 +199,24 @@ def due(now, path=ROOT / 'watchlist.json'):
     if now.astimezone(KST).strftime('%H:%M') < '09:08':
         return False
     try:
-        at = datetime.fromisoformat(json.loads(Path(path).read_text())['time'])
+        at = datetime.fromisoformat(json.loads(Path(path).read_text(encoding='utf-8'))['time'])
     except (OSError, ValueError, KeyError, TypeError):
         return True
     return at.astimezone(KST).date() != now.astimezone(KST).date() or now - at >= REFRESH
 
 
 def write(record, path=ROOT / 'watchlist.json'):
+    from config_store import replace
     tmp = Path(path).with_suffix('.tmp')
-    tmp.write_text(json.dumps(record, ensure_ascii=False))
+    tmp.write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
     os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    replace(tmp, path)
 
 
 def manual(path=ROOT / 'watchlist-manual.json'):
     """User edits that persist across days: {'add': {code: name}, 'remove': [code]}."""
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
         add = {c: str(n)[:40] for c, n in (data.get('add') or {}).items() if re.fullmatch(CODE_PATTERN, str(c))}
         remove = [c for c in data.get('remove') or [] if re.fullmatch(CODE_PATTERN, str(c))]
         return {'add': add, 'remove': remove}
@@ -223,7 +224,7 @@ def manual(path=ROOT / 'watchlist-manual.json'):
         return {'add': {}, 'remove': []}
 
 
-def edit_manual(add=None, name=None, remove=None, path=ROOT / 'watchlist-manual.json'):
+def edit_manual(add=None, name=None, remove=None, path=ROOT / 'watchlist-manual.json', who='dashboard'):
     """Add one code (with its display name) or remove one code; adding undoes an earlier removal and vice versa."""
     import config_store
     state = manual(path)
@@ -238,7 +239,7 @@ def edit_manual(add=None, name=None, remove=None, path=ROOT / 'watchlist-manual.
         state['add'].pop(remove, None)
         state['remove'] = sorted(set(state['remove']) | {remove})
     config_store.write_json(path, state, indent=None)
-    config_store.record(f'watchlist:{Path(path).stem}', before, state, saved=path)
+    config_store.record(f'watchlist:{Path(path).stem}', before, state, who, saved=path)
     return state
 
 
@@ -253,7 +254,7 @@ def account_watchlist(account, root=ROOT):
     """[(code, name, source)]: the latest Jev selection minus this account's removals, plus its additions."""
     edits = manual(manual_path(account, root))
     try:
-        data = json.loads((Path(root) / 'watchlist.json').read_text())
+        data = json.loads((Path(root) / 'watchlist.json').read_text(encoding='utf-8'))
         stocks = data.get('stocks') or {}
         selected = [c for c in data.get('selected') or [] if isinstance(c, str) and re.fullmatch(CODE_PATTERN, c)]
     except (OSError, ValueError, AttributeError):
@@ -268,7 +269,7 @@ def load_candidates(now, path=ROOT / 'watchlist.json', manual_path=ROOT / 'watch
     edits = manual(manual_path)
     result = {}
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding='utf-8'))
         at = datetime.fromisoformat(data['time'])
         if at.tzinfo is not None and at.astimezone(KST).date() == now.astimezone(KST).date() and timedelta(0) <= now - at <= MAX_AGE:
             result = {code: data['stocks'][code] for code in data['selected']

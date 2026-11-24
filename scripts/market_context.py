@@ -459,7 +459,7 @@ def research_copy(payload):
 
 def load(path=FILE):
     try:
-        return json.loads(Path(path).read_text())
+        return json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
 

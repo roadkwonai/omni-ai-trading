@@ -36,7 +36,7 @@ def render(runtime):
     now = datetime.now(KST)
     service = [s for s in cat.SKILLS if s['kind'] == '서비스 스킬']
     st.caption('스킬은 Claude·Codex가 따르는 작업 절차 문서입니다. 예약 작업(Claude)과 자동화(Codex)가 정해진 시각에 스킬을 불러 보고서·일지를 만들고, '
-               '같은 스킬을 대화에서 직접 부를 수도 있습니다. 모든 스킬은 읽기 전용이라 주문·설정·서비스를 바꾸지 않습니다. '
+               '같은 스킬을 대화에서 직접 부를 수도 있습니다. omni 명령 스킬을 뺀 모든 스킬은 읽기 전용이고, omni는 설정과 요청을 계획한 뒤 사람의 승인으로만 적용합니다. '
                '언제 도는지는 "운영 → 자동 작업"에서 봅니다.')
     sc.row([{'label': '서비스 스킬', 'value': f'{len(service)}개', 'icon': 'auto_stories', 'tone': 'off',
              'sub': ' · '.join(f"{k.replace(' 스킬', '')} {n}개" for k in ('도식·차트 스킬', '개발 보조 스킬')

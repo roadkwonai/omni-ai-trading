@@ -80,5 +80,37 @@ class EnvironmentTests(unittest.TestCase):
                 build_environment(path, 'readonly', 'test-account', {}, guarded_paper_root=root)
 
 
-if __name__ == "__main__":
+
+class LaunchTests(unittest.TestCase):
+    """POSIX becomes Node; Windows keeps a parent, because exec there starts a new process and the caller loses the pipe."""
+
+    def test_posix_replaces_the_process(self):
+        import nhplug_mcp as M
+        with patch('nhplug_mcp.os.execve') as execute, patch('nhplug_mcp.os.chdir') as chdir, patch('nhplug_mcp.subprocess.run', side_effect=AssertionError):
+            M.launch('/node', Path('/x/dist/index.js'), {'A': '1'}, windows=False)
+        chdir.assert_called_once_with(Path('/x'))
+        execute.assert_called_once_with('/node', ['/node', '/x/dist/index.js'], {'A': '1'})
+
+    def test_windows_hands_over_the_pipes_the_environment_and_the_exit_code(self):
+        import subprocess
+        import sys
+        code = ('import sys, pathlib; sys.path.insert(0, "scripts"); import nhplug_mcp as M, os; env = {"PATH": os.environ["PATH"], "ONLY": "한글", "PYTHONUTF8": "1"}; '
+                'M.launch(sys.executable, pathlib.Path(sys.argv[1]), env, windows=True)')
+        with tempfile.TemporaryDirectory() as d:
+            server = Path(d) / 'dist/index.py'
+            server.parent.mkdir()
+            server.write_text('import os, sys\nfor line in sys.stdin:\n    print("got", line.strip(), os.environ["ONLY"], "HOME" in os.environ, os.path.basename(os.getcwd()), flush=True)\nsys.exit(7)\n', encoding='utf-8')
+            done = subprocess.run([sys.executable, '-c', code, str(server)], input='{"id": 1}\n', capture_output=True, text=True, encoding='utf-8', cwd=Path(__file__).parents[1])
+            self.assertEqual(done.stdout, f'got {{"id": 1}} 한글 False {Path(d).name}\n')
+            self.assertEqual(done.returncode, 7)
+
+    def test_windows_folders_node_needs_are_passed_and_secrets_are_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / 'e'
+            path.write_text("APP_KEY='k'\nAPP_SECRET='s'\n", encoding='utf-8')
+            env = build_environment(path, 'readonly', 'a', {'TEMP': 't', 'TMP': 't', 'USERPROFILE': 'u', 'APPDATA': 'x', 'OPENAI_API_KEY': 'secret', 'JEV_API_KEY': 'secret'})
+        self.assertEqual({k for k in env if not k.startswith('NHPLUG_')}, {'TEMP', 'TMP', 'USERPROFILE'})
+
+
+if __name__ == '__main__':
     unittest.main()

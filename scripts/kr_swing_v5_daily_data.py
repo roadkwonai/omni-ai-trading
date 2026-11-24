@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -22,6 +21,7 @@ import requests
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from backtest.loaders.yahoo_loader import DataLoader
+from src import file_lock
 from src.config.paths import get_runtime_root
 from strategies.kr_swing_v5.signal_engine import SignalEngine
 
@@ -123,7 +123,7 @@ def _read(directory):
 
 
 def verify_snapshot(directory):
-    manifest = json.loads((directory / 'manifest.json').read_text())
+    manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8'))
     if set(manifest['sha256']) != set(CODES):
         raise ValueError('manifest symbols mismatch')
     for code in CODES:
@@ -183,7 +183,7 @@ def merge_frames(old, fetched, end, today, holidays=None):
 def _write_csv(path, frame, previous):
     # Preserve every byte of the published prefix so comparison hashes stay stable.
     shutil.copyfile(previous, path)
-    with path.open('a') as stream:
+    with path.open('a', encoding='utf-8') as stream:
         frame.to_csv(stream, header=False)
         stream.flush()
         os.fsync(stream.fileno())
@@ -197,8 +197,8 @@ def _lock(root):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(root, 0o700)
     fd = os.open(root / '.lock', os.O_CREAT | os.O_RDWR, 0o600)
-    with os.fdopen(fd, 'r+') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with os.fdopen(fd, 'r+', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         yield
 
 
@@ -224,7 +224,7 @@ def _publish(root, files, calendar=None):
             manifest['holiday_calendar'] = calendar
         manifest_path = stage/'manifest.json'
         fd = os.open(manifest_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, 'w') as stream:
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
             json.dump(manifest, stream, indent=2)
             stream.write('\n')
             stream.flush()
@@ -268,7 +268,7 @@ def initialize(root, source):
     with _lock(root):
         if (root/'current').exists():
             raise ValueError('baseline already initialized')
-        meta = json.loads((source/'metadata.json').read_text())
+        meta = json.loads((source/'metadata.json').read_text(encoding='utf-8'))
         for code in CODES:
             if digest(source/f'{code}.csv') != meta['symbols'][code]['clean_sha256']:
                 raise ValueError('baseline hash mismatch')
@@ -319,7 +319,7 @@ def main():
         calendar = {'source': KRX_ROOT + KRX_PAGE, 'years': sorted(years),
                     'retrieved_at': checked_at, 'holidays': sorted(d.isoformat() for d in holidays)}
         path = update(root, frames, args.as_of, today, holidays=holidays, calendar=calendar)
-    print(json.dumps({'status':'published','snapshot':str(path),'last_session':json.loads((path/'manifest.json').read_text())['last_session']}))
+    print(json.dumps({'status':'published','snapshot':str(path),'last_session':json.loads((path/'manifest.json').read_text(encoding='utf-8'))['last_session']}))
 
 
 if __name__ == '__main__':

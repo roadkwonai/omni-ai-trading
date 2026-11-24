@@ -69,7 +69,7 @@
 
 ## Jev 판단이 뉴스 때문에 건너뜁니다
 
-Jev에게는 장중 **90분 안**의 기사만 보냅니다(`scripts/etf_news.py` `RECENT`). 새 기사가 없는 주제는 빠지고, 하나도 없으면 그 회차는 대기합니다(이벤트 `v2_news_error`). 밤사이·장전 소식은 장전 브리프(`premarket_context`)로 따로 갑니다.
+Jev에게는 장중 **90분 안**의 기사만 보냅니다(`scripts/etf_news.py` `RECENT`). 새 기사가 없는 주제는 빠집니다. 하나도 없거나 조회가 실패하면 최근 뉴스 칸을 비우고 안내(`news_status`)를 보내며, 판단은 계속합니다([Jev가 받는 자료](strategy.md#jev가-받는-자료)). 조회 실패는 이벤트 `v2_news_error`로 남습니다. 밤사이·장전 소식은 장전 브리프(`premarket_context`)로 따로 갑니다.
 
 | 증상 | 원인 | 지금 동작 |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ flowchart LR
 
 ## 장기투자 적립식 매수가 미체결로 남았습니다
 
-가상 계좌의 적립식 매수가 체결되지 않으면 그 금액을 재매수 대기금(`retry`)으로 남기고 다음 확인 때 먼저 다시 삽니다(`longterm_dca.add_unfilled`). 계좌 전략이 더는 사지 않는 종목의 몫은 현금(저수지)으로 돌립니다. 주문 전송 중 오류가 난 날도 정산을 먼저 해서 같은 적립을 두 번 사지 않습니다. 장기투자 → 계좌·실행 → 기록에서 '적립식' 기록을 봅니다.
+가상 계좌의 적립식 매수가 체결되지 않으면 그 금액을 재매수 대기금(`retry`)으로 남기고 다음 확인 때 먼저 다시 삽니다(`longterm_dca.add_unfilled`). 계좌 전략이 더는 사지 않는 종목의 몫은 현금(저수지)으로 되돌립니다. 주문 전송 중 오류가 난 날도 정산을 먼저 해서 같은 적립을 두 번 사지 않습니다. 장기투자 → 계좌·실행 → 기록에서 '적립식' 기록을 봅니다.
 
 ## NXT(넥스트레이드)에서도 거래하나요?
 
@@ -117,7 +117,7 @@ NH 나무 PLUG는 **앱 키당 초당 5회**까지 받습니다. 공유 모의 �
 
 - **확인**: 운영 → API 연동 → NH 나무 PLUG → 실패 이력. 오류 종류·코드가 남습니다.
 - **이미 들어간 완화**: 대시보드의 화면용 조회는 초당 2회로 묶고, 거래일 09:00\~15:30에만 자동 갱신합니다. 장기 엔진의 가상 브로커 시세는 유량 초과일 때만 0.5초·1초 뒤 두 번 더 묻고, 장기투자 실계좌 계획 시세도 두 번 더 묻습니다. 순위 계산은 키움 순위로 후보를 먼저 고른 뒤 그 종목만 NH로 조회합니다. 그 조회도 시작 간격을 0.5초(초당 2회)로 띄우고, 유량 초과로 거절되면 1초 뒤 한 번 더 묻습니다(2026-11-19: 5분마다 60종목을 쉬지 않고 조회해 실행기·실계좌 미러 호출까지 함께 거절되던 문제). 같은 프로그램이 한 시간에 IGW42902를 20번 넘게 받으면 장중 감사가 `nh.app_rate_limit`로 알립니다.
-- **할 일**: 장중에 손으로 NH를 부르는 스크립트를 여러 개 돌리지 않습니다. 대시보드 탭을 여러 개 열어 두고 자동 갱신을 켜 두지 않습니다.
+- **할 일**: 장중에 NH를 직접 호출하는 스크립트를 여러 개 실행하지 않습니다. 대시보드 탭을 여러 개 열어 두고 자동 갱신을 켜 두지 않습니다.
 
 > [!NOTE]
 > 주문 경로(`nh_guarded_live`, 주문 가드)는 유량 초과에도 자동 재전송하지 않습니다. 주문이 같은 회차에 두 번 나가는 것을 막기 위해서입니다.
@@ -154,7 +154,7 @@ NH 시세 조회가 몰리면(특히 08:50 순위 후보 수집과 겹칠 때) �
 
 08:55 `trading-day-start`가 실행기를 띄우고 30초 뒤에도 실행기가 시작되지 않으면 최대 5번 다시 띄웁니다. 2026-11-18 08:12에 NH 계좌 목록 조회가 일시 오류를 내 실행기가 `paper account list unavailable`로 멈춘 사례가 계기입니다. 기록은 `shared-etf-paper/trading-day-start.jsonl`과 `com.vibetrading.shared-etf-paper.log`에 있습니다. 공개 v0.1.3에서 `ModuleNotFoundError`가 나면 [설치 후 확인](getting-started.md#공개-v013-설치-후-확인)을 보세요.
 
-다섯 번 모두 실패하면 계좌·정책 문제일 수 있습니다. `shared account policy unavailable`·`shared account owner unavailable`은 주문 가드 정책(`paper-policy-scopes.json`)이나 계좌 소유 등록(`paper-account-owners.json`)을 읽지 못한 것입니다. 이 파일은 손으로 만들지 말고 백업에서 되살립니다([이식](portability.md)). 장전 사전 점검(08:20·08:53, `scripts/preflight.py`)이 같은 시작 검사를 미리 해 Discord로 알립니다.
+다섯 번 모두 실패하면 계좌·정책 문제일 수 있습니다. `shared account policy unavailable`·`shared account owner unavailable`은 주문 가드 정책(`paper-policy-scopes.json`)이나 계좌 소유 등록(`paper-account-owners.json`)을 읽지 못한 것입니다. 이 파일은 직접 만들지 말고 백업에서 되살립니다([이식](portability.md)). 장전 사전 점검(08:20·08:53, `scripts/preflight.py`)이 같은 시작 검사를 미리 해 Discord로 알립니다.
 
 ## 원장 반영이 멈췄다는 경고가 뜹니다
 
@@ -176,20 +176,20 @@ plist가 `~/Library/LaunchAgents`가 아닌 곳에서 등록됐을 가능성이 
 | --- | --- |
 | `shared-etf-paper`, `shared-etf-learning`, `shared-etf-regime`, `shared-etf-dashboard`, `discord-notify`, `nxt-virtual` | `market-movers`, `premarket`, `trading-day-start`, `preflight`, `vibe-longterm`, `us-ideas`, `trading-backup`, `state-sync`, `exit-replay`, `live-follow-1`, `longterm-live-2` |
 
-Mac이 꺼져 있던 동안 지난 예약 시각은 다시 돌지 않을 수 있습니다. 예를 들어 08:40 이후에 켜면 그날 `vibe-longterm`이 시작되지 않습니다. 판단 창(08:45\~09:30)이 지나기 전이면 서비스를 한 번 시작합니다(`launchctl kickstart gui/$(id -u)/com.vibetrading.vibe-longterm`). 그 뒤에 시작하면 판단 단계는 '시간 놓침'으로 남고 그날은 계획 없이 지나갑니다. 공유 모의 실행기는 로그인 때 바로 시작하므로 09:00 뒤에 켜도 돌아갑니다. `nxt-virtual`도 같은 이유로 로그인 시 시작하도록 바뀌었습니다.
+Mac이 꺼져 있던 동안 지난 예약 시각은 다시 실행되지 않을 수 있습니다. 예를 들어 08:40 이후에 켜면 그날 `vibe-longterm`이 시작되지 않습니다. 판단 창(08:45\~09:30)이 지나기 전이면 서비스를 한 번 시작합니다(`launchctl kickstart gui/$(id -u)/com.vibetrading.vibe-longterm`). 그 뒤에 시작하면 판단 단계는 '시간 놓침'으로 남고 그날은 계획 없이 지나갑니다. 공유 모의 실행기는 로그인 때 바로 시작하므로 09:00 뒤에 켜도 실행됩니다. `nxt-virtual`도 같은 이유로 로그인 시 시작하도록 바뀌었습니다.
 
 ## 대시보드에 ImportError가 뜹니다
 
-다른 세션이 `scripts/`에 새 함수를 더했는데 대시보드가 옛 모듈을 들고 있을 때 납니다(2026-11-18 `ledger_owned`, `order_times` 두 번). Streamlit은 앱 폴더나 `PYTHONPATH` 안의 모듈만 바뀌면 다시 읽습니다.
+다른 세션이 `scripts/`에 새 함수를 더했는데 대시보드가 옛 모듈을 그대로 쓰고 있을 때 생깁니다(2026-11-18 `ledger_owned`, `order_times` 두 번). Streamlit은 앱 폴더나 `PYTHONPATH` 안의 모듈만 바뀌면 다시 읽습니다.
 
 - launchd로 띄운 대시보드: `scripts/launchd_services.py`가 만든 plist에 `PYTHONPATH`(agent·scripts)가 들어 있습니다. 옛 plist라면 다시 만들어 대시보드 서비스만 재등록합니다.
-- 손으로 띄운 대시보드: `PYTHONPATH=agent:scripts .venv/bin/streamlit run streamlit_namuh/app.py ...`처럼 붙여서 띄웁니다([대시보드 가이드](dashboard.md#열기)).
+- 직접 띄운 대시보드: `PYTHONPATH=agent:scripts .venv/bin/streamlit run streamlit_namuh/app.py ...`처럼 붙여서 띄웁니다([대시보드 가이드](dashboard.md#열기)).
 
 Discord 알림 서비스가 `engine_compare`를 못 읽던 것도 같은 원인이라 `scripts/discord_notify.py`가 경로를 직접 더합니다.
 
 ## 종합 현황에 실계좌 잔고가 비어 있습니다
 
-실계좌 잔고는 미러·장기 실행기가 5분마다 `nhplug/live-balance-<키>.jsonl`에 남깁니다. 실행기가 이 코드 이전에 시작했거나 오늘 아직 돌지 않았으면 기록이 없습니다. 종합 현황 → 잔고 현황의 **실계좌 잔고 조회**를 누르면 증권사 잔고를 한 번 읽어(조회 전용) 같은 기록에 남깁니다. 전체 손익이 비어 있으면 **원금 설정**에 원금이 없는 것입니다.
+실계좌 잔고는 미러·장기 실행기가 5분마다 `nhplug/live-balance-<키>.jsonl`에 남깁니다. 실행기가 이 코드 이전에 시작했거나 오늘 아직 실행되지 않았으면 기록이 없습니다. 종합 현황 → 잔고 현황의 **실계좌 잔고 조회**를 누르면 증권사 잔고를 한 번 읽어(조회 전용) 같은 기록에 남깁니다. 전체 손익이 비어 있으면 **원금 설정**에 원금이 없는 것입니다.
 
 ## 금액 칸을 빠르게 누르면 숫자가 한 박자 늦습니다
 
@@ -199,11 +199,11 @@ Discord 알림 서비스가 `engine_compare`를 못 읽던 것도 같은 원인�
 
 장전 상세 분석(`shared-etf-paper/reviews/premarket-YYYY-MM-DD.md`)은 Claude 예약 작업 `premarket-analysis-daily`(평일 08:31)가 `premarket-analysis` 스킬로 씁니다. 08:53 장전 사전 점검이 '장전 상세 분석 작성'(작성·템플릿 검사 통과)을 확인해 빠지면 Discord로 알립니다.
 
-2026-11-18에 빠진 원인은 같은 일을 하던 Codex 자동화('장전 상세 분석 작성', '장중 매매·차단 감사')가 11-17부터 일시 정지였기 때문입니다. 지금은 Claude 예약 작업이 맡습니다. Codex 자동화를 다시 켜면 같은 일이 두 번 도므로 **둘 중 하나만** 씁니다. 손으로 쓸 때는 `.agents/skills/premarket-analysis/SKILL.md` 절차를 따르고 `scripts/premarket_template.py --check`로 검사합니다. 자세한 내용은 [장전 분석](premarket.md)에 있습니다.
+2026-11-18에 빠진 원인은 같은 일을 하던 Codex 자동화('장전 상세 분석 작성', '장중 매매·차단 감사')가 11-17부터 일시 정지였기 때문입니다. 지금은 Claude 예약 작업이 맡습니다. Codex 자동화를 다시 켜면 같은 일이 두 번 실행되므로 **둘 중 하나만** 씁니다. 직접 쓸 때는 `.agents/skills/premarket-analysis/SKILL.md` 절차를 따르고 `scripts/premarket_template.py --check`로 검사합니다. 자세한 내용은 [장전 분석](premarket.md)에 있습니다.
 
 ## 예약 작업이 승인 대기로 멈춥니다
 
-2026-11-18 08:50 장기 리포트 예약 작업이 셸 명령 승인 대기로 30분 멈춘 뒤, 읽기 전용 예약 작업은 모두 `scripts/ro`를 거치도록 바꿨습니다. `scripts/ro`는 허용 목록의 읽기 스크립트, 읽기 전용 SQL(`SELECT`·`WITH`·`PRAGMA`), 서비스 상태, 테스트만 돌리고 `--execute`·`--live`·`--watch`를 거절합니다. `.claude/settings.local.json`(git 제외)에 `Bash(scripts/ro *)` 같은 허용 규칙이 있어야 사람 없이 돌아갑니다.
+2026-11-18 08:50 장기 리포트 예약 작업이 셸 명령 승인 대기로 30분 멈춘 뒤, 읽기 전용 예약 작업은 모두 `scripts/ro`를 거치도록 바꿨습니다. `scripts/ro`는 허용 목록의 읽기 스크립트, 읽기 전용 SQL(`SELECT`·`WITH`·`PRAGMA`), 서비스 상태, 테스트만 실행하고 `--execute`·`--live`·`--watch`를 거절합니다. `.claude/settings.local.json`(git 제외)에 `Bash(scripts/ro *)` 같은 허용 규칙이 있어야 사람이 개입하지 않아도 실행됩니다.
 
 새 기기에서 이 파일이 없으면 다시 멈춥니다. 서비스 등록·재시작·코드 수정은 이 실행기 밖이라 여전히 승인이 필요합니다. 예약 작업 목록과 규칙은 [자동 작업](automation.md)에 있습니다.
 

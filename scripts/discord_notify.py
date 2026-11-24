@@ -138,7 +138,7 @@ def names_map():
     names.update({a[0]: a[1] for a in L.ASSETS.values()})  # the long-term ETFs (379810 KODEX 미국나스닥100 ...)
     for file, key in (('movers.json', 'rows'), ('watchlist.json', 'stocks')):
         try:
-            data = json.loads((HOME / 'shared-etf-paper' / file).read_text())
+            data = json.loads((HOME / 'shared-etf-paper' / file).read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
         for code, row in ((data or {}).get(key) or {}).items():
@@ -322,7 +322,7 @@ def plan_items(seen):
     path = HOME / 'longterm-live.jsonl'
     items = []
     try:
-        lines = path.read_text().splitlines()[-400:]
+        lines = path.read_text(encoding='utf-8').splitlines()[-400:]
     except OSError:
         return items
     for line in lines:
@@ -361,7 +361,7 @@ def sold_cost(row):
 def paper_balances(day):
     """Today's paper account snapshots (account-snapshots.jsonl, every 5 minutes), oldest first."""
     try:
-        lines = (HOME / 'shared-etf-paper' / 'account-snapshots.jsonl').read_text().splitlines()
+        lines = (HOME / 'shared-etf-paper' / 'account-snapshots.jsonl').read_text(encoding='utf-8').splitlines()
     except OSError:
         return []
     from live_fills import plausible
@@ -484,9 +484,47 @@ def summary_item(seen, accounts=None):
     return [('realtime', ident, '\n'.join(lines))]
 
 
+# the evening reports a scheduled task writes: task -> (channel, name, file under HOME, told after, Friday only)
+EVENING = {'trading-daily-improvement': ('realtime', '장 마감 개선안', 'shared-etf-paper/reviews/improvement-{day}.md', '18:00', False),
+           'trading-journal': ('realtime', '매매일지', 'shared-etf-paper/reviews/journal-{day}.md', '18:00', False),
+           'longterm-review-daily': ('longterm', '장기투자 일일 복기·감사', 'vibe-longterm/reviews/audit-{day}.md', '18:00', False),
+           'oversold-weekly-audit': ('realtime', '낙폭과대 주간 감사', 'shared-etf-paper/reviews/oversold-weekly-{day}.md', '18:00', True),
+           'longterm-strategy-weekly': ('longterm', '장기투자 주간 전략 리포트', 'vibe-longterm/reports/strategy-{week}.md', '18:00', True),
+           'longterm-audit-weekly': ('longterm', '장기투자 주간 감사', 'vibe-longterm/reviews/audit-{week}.md', '19:00', True)}
+
+
+def report_runs():
+    """{task: {'enabled', 'last': the last start}} from the Claude app's store; None when it cannot be read."""
+    from state_sync import app_schedules, app_stores, last_runs
+    stores = app_stores()
+    (tasks, _), last = app_schedules(stores), last_runs(stores)
+    return None if tasks is None else {k: {'enabled': t['enabled'], 'last': last.get(k)} for k, t in tasks.items()}
+
+
+def missing_reports(seen):
+    """An evening report that is not there (2026-11-24 복기 (A)4: a run that waited for a permission ended without a word):
+    told once, with whether its task started today. A disabled task, or one the app does not have, is not expected."""
+    now = datetime.now(KST)
+    day, hhmm = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
+    year, week, weekday = now.isocalendar()
+    due = [(task, row) for task, row in EVENING.items() if hhmm >= row[3] and (not row[4] or weekday == 5) and f'missing:{task}:{day}' not in seen
+           and not (HOME / row[2].format(day=day, week=f'{year}-W{week:02d}')).exists()]
+    if not due or not L.trading_day(now.date()):
+        return []
+    runs, out = report_runs(), []
+    if runs is not None:
+        due = [(task, row) for task, row in due if (runs.get(task) or {}).get('enabled')]
+    for task, (channel, name, *_) in due:
+        last = runs[task]['last'] if runs is not None else None
+        why = ('' if runs is None else f' · 예약 작업은 {last:%H:%M}에 시작했지만 결과가 없음(승인 대기나 중단일 수 있음)'
+               if last and last.astimezone(KST).strftime('%Y-%m-%d') == day else ' · 예약 작업이 오늘 시작하지 않음(앱이 꺼져 있었을 수 있음)')
+        out.append((channel, f'missing:{task}:{day}', f'⚠️ {day} {name} 없음{why}'))
+    return out
+
+
 def collect(state, accounts, names, names_ko, urls=None):
     seen = done_ids(state, {ch: as_targets(v) for ch, v in (urls or {}).items()}) if urls else set(state.get('seen', []))
-    items = paper_items(names, seen) + live_items(accounts, names, seen) + plan_items(seen) + summary_item(seen, accounts)
+    items = paper_items(names, seen) + live_items(accounts, names, seen) + plan_items(seen) + summary_item(seen, accounts) + missing_reports(seen)
     extra, state['lt_cursor'] = longterm_items(seen, state.get('lt_cursor', 0), names_ko)
     return items + extra
 
@@ -667,7 +705,7 @@ def deliver(items, state, urls, sender=post, sleep=time.sleep, save=lambda: None
 # ---------- loop ----------
 def load_state():
     try:
-        state = json.loads(STATE.read_text())
+        state = json.loads(STATE.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
     # live ids carried the fill time until 2026-11-19 (it flips once the guard DB resolves it): keep only its day

@@ -12,7 +12,7 @@ from strategies.kr_swing_v5.signal_engine import SignalEngine
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / '.venv/kr-swing-data'
 OUT = ROOT / 'results/kr-swing-v5'
-PROTOCOL = json.loads((ROOT / 'strategies/kr_swing_v5/protocol.json').read_text())
+PROTOCOL = json.loads((ROOT / 'strategies/kr_swing_v5/protocol.json').read_text(encoding='utf-8'))
 
 
 class CappedEngine(KoreaEquityEngine):
@@ -49,7 +49,7 @@ class StaticSignal:
 
 
 def validate_snapshot(directory, codes):
-    metadata = json.loads((directory / 'metadata.json').read_text())
+    metadata = json.loads((directory / 'metadata.json').read_text(encoding='utf-8'))
     frames = {}
     for code in codes:
         path = directory / f'{code}.csv'
@@ -109,7 +109,7 @@ def run():
         metrics = engine.run_backtest(cfg, Loader({benchmark_code: benchmark}), ETFSignal(start), OUT / label / 'etf_reference')
         outputs[f'{label}_etf_reference'] = {'metrics': metrics,
             'note': 'Hypothetical initial 50% ETF allocation; no strategy order caps; split/dividend-adjusted price reference, not official total-return index; ETF sell tax set to zero.'}
-    (OUT / 'summary.json').write_text(json.dumps(outputs, ensure_ascii=False, indent=2, default=str))
+    (OUT / 'summary.json').write_text(json.dumps(outputs, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
     oos = outputs['out_of_sample_strategy']['metrics']
     static = outputs['out_of_sample_static']['metrics']
     stress = outputs['out_of_sample_stress']['metrics']
@@ -134,7 +134,7 @@ def run():
                    'Static basket starts at 50% target, enters up to 6000000 KRW per day, and then its weight drifts; not constant-risk matched.',
                    'Historical replay is not forward paper performance.',
                    'Yahoo adjusted prices and quarantined sessions limit historical execution fidelity.']}
-    (OUT / 'validation_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2))
+    (OUT / 'validation_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(outputs, ensure_ascii=False, default=str))
 
 if __name__ == '__main__': run()

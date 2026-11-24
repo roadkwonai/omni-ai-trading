@@ -53,7 +53,7 @@ flowchart LR
 ```
 
 > [!IMPORTANT]
-> 주문은 실행기만 냅니다. 대시보드·리포트·예약 작업은 기록을 읽고 설정을 바꿀 뿐 주문을 보내지 않습니다(예외는 [대시보드 가이드](dashboard.md#주문을-내지-않는-원칙과-예외)에 정리). 실계좌 주문은 계좌별 실주문 스위치와 보호 경로(`scripts/nh_guarded_live.py`)를 거쳐야만 실행됩니다.
+> 주문은 실행기만 냅니다. 대시보드·리포트·예약 작업은 기록을 읽고 설정을 바꿀 뿐 주문을 보내지 않습니다(예외는 [대시보드 가이드](dashboard.md#주문을-내지-않는-원칙과-예외)에 정리돼 있습니다). 실계좌 주문은 계좌별 실주문 스위치와 보호 경로(`scripts/nh_guarded_live.py`)를 거쳐야만 실행됩니다.
 
 ## 두 엔진
 
@@ -110,7 +110,7 @@ flowchart LR
 | --- | --- | --- |
 | 공유 모의 실행기 | `scripts/nh_paper_isolated.py` | 장중 1분 주기로 잔고 대조, 보유 관리(손절·익절·Jev 보유 의견), 진입(Jev·관심종목 강도·신규주·낙폭과대) |
 | Jev 입력 묶음 | `scripts/nh_etf_auto_v2.py`, `scripts/jev_context.py`, `scripts/market_playbook.py` | 차트 이미지·당일 요약·근거 질문 7개, 시황 점검 질문 |
-| 거래일 시작 | `scripts/trading_day_start.py` | 08:55 휴장·STOP·중복 확인 뒤 실행기·학습기·국면 관측기 준비, 30초 뒤 실행 여부 확인(최대 5번 재시작) |
+| 거래일 시작 | `scripts/trading_day_start.py` | 08:55 휴장·STOP·중복 확인 뒤 실행기·학습 관찰기·국면 관찰기 준비, 30초 뒤 실행 여부 확인(최대 5번 재시작) |
 | 장전 사전 점검 | `scripts/preflight.py` | 08:20·08:53 서비스·계좌·설정·장전 자료 점검(읽기 전용), 실패는 Discord |
 | 시황 | `scripts/market_context.py`, `scripts/etf_regime_observer.py --watch` | 코스피·코스닥 국면, 투자자·프로그램 수급, 테마, 해외 지표, 장중 해외 선물 |
 | 후보 종목 | `scripts/market_movers.py`, `scripts/new_listings.py`, `scripts/issue_candidates.py` | 순위 후보(키움 선별 → NH 현재가), 신규상장, 이슈·테마 그림자 후보 |
@@ -160,7 +160,7 @@ flowchart LR
 
 ## Jev 한 회차의 흐름
 
-공유 모의 실행기는 장중 약 60초마다 아래 순서대로 돌아갑니다. 개장부터 이월 보유와 신규 진입을 판단하며, 보호 조건을 충족한 주문을 보냅니다. 개장 첫 8분에는 당일 분봉이 부족할 때 전 거래일 마감 분봉이나 확인 가능한 당일 NXT 프리마켓 분봉을 참고합니다. [개장 준비](strategy.md#장전-분석과-개장-준비)
+공유 모의 실행기는 장중 약 60초마다 아래 순서대로 동작합니다. 개장부터 이월 보유와 신규 진입을 판단하며, 보호 조건을 충족한 주문을 보냅니다. 개장 첫 8분에는 당일 분봉이 부족할 때 전 거래일 마감 분봉이나 확인 가능한 당일 NXT 프리마켓 분봉을 참고합니다. [개장 준비](strategy.md#장전-분석과-개장-준비)
 
 ```mermaid
 sequenceDiagram
@@ -306,7 +306,7 @@ flowchart LR
 </details>
 
 > [!CAUTION]
-> 원장·이벤트 파일은 지우거나 손으로 고치지 않습니다. 실행기는 매 회차 이 기록으로 증권사와 대조합니다. 바로잡을 일이 있으면 새 이벤트를 남기는 방식으로만 고칩니다. 옮기거나 되살릴 때는 [이식](portability.md) 절차를 씁니다.
+> 원장·이벤트 파일은 지우거나 직접 고치지 않습니다. 실행기는 매 회차 이 기록으로 증권사와 대조합니다. 바로잡을 일이 있으면 새 이벤트를 남기는 방식으로만 고칩니다. 옮기거나 되살릴 때는 [이식](portability.md) 절차를 씁니다.
 
 ## 설정 저장과 변경 이력
 
@@ -344,7 +344,7 @@ flowchart LR
 - **MCP 어댑터와 설정**: `src.tools.mcp.MCPServerAdapter`, `src.config.loader.load_agent_config`로 `agent.json`의 NH 서버를 엽니다.
 - **런타임 폴더 규칙**: `src.config.paths.get_runtime_root`(`VIBE_TRADING_HOME`, 기본 `~/.vibe-trading`).
 - **HALT 장치**: `src.live.halt.halt_flag_set`.
-- **에이전트**: 장기 엔진의 테마 스토리 점검은 `scripts/vibe_agent_safe.py`로 원본 CLI를 돌립니다. 이 실행기는 셸·코드·파일·주문·브로커 도구를 빼고 띄웁니다. 주간 미국 종목 아이디어 리포트도 vibe-trading MCP의 읽기 전용 도구만 씁니다.
+- **에이전트**: 장기 엔진의 테마 스토리 점검은 `scripts/vibe_agent_safe.py`로 원본 CLI를 실행합니다. 이 실행기는 셸·코드·파일·주문·브로커 도구를 빼고 띄웁니다. 주간 미국 종목 아이디어 리포트도 vibe-trading MCP의 읽기 전용 도구만 씁니다.
 
 > [!NOTE]
 > 루트 `.env`는 `scripts/local_env.py`가 **파싱만** 합니다. 셸로 실행하지 않고 `os.environ`으로 내보내지도 않으므로, 증권사 키가 LLM 에이전트 프로세스에 들어가지 않습니다.

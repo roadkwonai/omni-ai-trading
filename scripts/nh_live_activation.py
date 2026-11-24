@@ -22,7 +22,7 @@ def resume_nh(expected_global):
             trip_halt('cli','Preserve existing global pause while enabling requested NH-only trading',broker)
             created.append(broker)
     audit=live_root()/'nh-activation.json'
-    audit.write_text(json.dumps({'prior_global_halt':expected_global,'preserved_brokers':sorted(brokers),'created_broker_halts':created},ensure_ascii=False))
+    audit.write_text(json.dumps({'prior_global_halt':expected_global,'preserved_brokers':sorted(brokers),'created_broker_halts':created},ensure_ascii=False), encoding='utf-8')
     audit.chmod(0o600)
     if read_halt()!=expected_global:raise ValueError('global halt changed; activation stopped')
     clear_halt()

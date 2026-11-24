@@ -137,4 +137,4 @@ if __name__ == '__main__':
     parser.add_argument('--since', required=True)
     args = parser.parse_args()
     config, _ = read_settings(get_runtime_root() / 'nhplug' / 'shared-etf-paper')
-    print(json.dumps(compare(json.loads(args.candles.read_text()), args.since, config), ensure_ascii=False))
+    print(json.dumps(compare(json.loads(args.candles.read_text(encoding='utf-8')), args.since, config), ensure_ascii=False))

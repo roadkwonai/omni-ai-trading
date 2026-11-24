@@ -1,7 +1,8 @@
-"""macOS launchd definitions for the Korean NH services, rendered for this checkout and this user's home.
+"""The Korean NH services and their macOS launchd definitions, rendered for this checkout and this user's home.
 
     PYTHONPATH=agent:scripts .venv/bin/python scripts/launchd_services.py            # list services
     PYTHONPATH=agent:scripts .venv/bin/python scripts/launchd_services.py --out DIR  # write plists into DIR
+    ... --out DIR --system windows | linux                                           # Task Scheduler XML, systemd units (os_services)
 
 Writes files only; it never loads, starts or replaces a running service. To install one, copy its plist to
 ~/Library/LaunchAgents and `launchctl bootstrap gui/$(id -u) <plist>`. `shared-etf-paper` runs with `--execute`
@@ -11,7 +12,6 @@ Times are Asia/Seoul wall-clock as seen by launchd (the Mac must be on KST). Wee
 from __future__ import annotations
 
 import argparse
-import plistlib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -104,14 +104,14 @@ def schedule_text(name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--out', type=Path, help='folder to write com.vibetrading.*.plist files into')
+    parser.add_argument('--out', type=Path, help='folder to write the definitions into')
+    parser.add_argument('--system', choices=['macos', 'windows', 'linux'], default='macos')
     args = parser.parse_args()
+    if args.out:
+        import os_services
+        os_services.write(args.system, args.out)
     for name in SERVICES:
-        plist = render(name)
-        if args.out:
-            args.out.mkdir(parents=True, exist_ok=True)
-            (args.out / f'{plist["Label"]}.plist').write_bytes(plistlib.dumps(plist))
-        print(f'{plist["Label"]:42} {schedule_text(name)}')
+        print(f'{"com.vibetrading." + name:42} {schedule_text(name)}')
 
 if __name__ == '__main__':
     main()

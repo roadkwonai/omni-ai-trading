@@ -1,6 +1,5 @@
 """Bounded NH paper ETF experiment. Never connects to a live order endpoint."""
 from __future__ import annotations
-import fcntl
 import json
 import math
 import os
@@ -13,6 +12,7 @@ from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.mcp import MCPServerAdapter
@@ -119,7 +119,7 @@ def decision(bars, news):
 
 def log(event, **data):
     record = {'time': datetime.now(KST).isoformat(), 'event': event, **data}
-    with (ROOT / 'events.jsonl').open('a') as f:
+    with (ROOT / 'events.jsonl').open('a', encoding='utf-8') as f:
         f.write(json.dumps(record, ensure_ascii=False) + '\n')
     print(json.dumps(record, ensure_ascii=False), flush=True)
 
@@ -171,8 +171,8 @@ def main():
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(ROOT, 0o700)
     os.umask(0o077)
-    with (ROOT / 'runner.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (ROOT / 'runner.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         run()
 
 
@@ -232,7 +232,7 @@ def run():
                 fields = {'iem_cd': code, 'orr_qty': 1, 'orr_pr': price, 'nmn_pr_tp_cd': '01', 'orr_cnd_dit_cd': '00',
                           'ssl_nmn_pr_dit_cd': '00', 'rmt_mkt_cd': 'KRX', 'sor_mkt_sli_yn': 'N'}
                 fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, 'w') as f:
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
                     json.dump({'symbol': code, 'time': now.isoformat()}, f); f.flush(); os.fsync(f.fileno())
                 result = api(broker, account, 'krstockOrderCashBuy', fields)
                 number = result.get('Output_0', {}).get('mkt_orr_no')

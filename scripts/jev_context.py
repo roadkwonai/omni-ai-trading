@@ -63,7 +63,7 @@ def _backfill(day, path):
     """Today's bars from the runner's logged market_bars (one pass a day per process); a failure leaves it empty."""
     iso = f'{day[:4]}-{day[4:6]}-{day[6:]}'
     try:
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 if '"market_bars"' not in line or f'"time": "{iso}' not in line:
                     continue

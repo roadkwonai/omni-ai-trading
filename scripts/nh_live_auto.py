@@ -3,7 +3,6 @@
 Default is observation. --execute still obeys the global HALT and pending intents.
 """
 import argparse
-import fcntl
 import hashlib
 import json
 import math
@@ -13,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import dotenv_values
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.live.halt import halt_flag_set
@@ -189,14 +189,14 @@ def main():
     root=get_runtime_root()/'nhplug';root.mkdir(mode=0o700,parents=True,exist_ok=True);os.umask(0o077)
     values=dotenv_values(ENV,interpolate=False);account=''.join(c for c in (values.get('ACCOUNT_NUMBER') or '') if c.isdigit());guard=LiveOrderGuard(account,root)
     reader=MCPServerAdapter('nhplug_readonly',load_agent_config().mcp_servers['nhplug_readonly'])
-    with (root/'live-auto.lock').open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        (root/'live-buy-control.pid').write_text(str(os.getpid()))
+    with (root/'live-auto.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
+        (root/'live-buy-control.pid').write_text(str(os.getpid()), encoding='utf-8')
         while True:
             try:result=step(reader,guard,values,args.execute,args.manage_existing,args.ai_confirm)
             except Exception as exc:result={'action':'BLOCK','error_type':type(exc).__name__}
             event={'time':datetime.now(KST).isoformat(),**result}
-            with (root/'live-auto.jsonl').open('a') as stream:stream.write(json.dumps(event,ensure_ascii=False)+'\n')
+            with (root/'live-auto.jsonl').open('a', encoding='utf-8') as stream:stream.write(json.dumps(event,ensure_ascii=False)+'\n')
             print(json.dumps(event,ensure_ascii=False),flush=True)
             if args.once or result.get('action')=='STOP':break
             time.sleep(CHECK_INTERVAL_SECONDS)

@@ -752,3 +752,42 @@ def test_a_yeo_books_cash_floor_counts_the_reservoir_etf_but_spends_only_cash():
         return sum(orders.values())
     assert spent(300_000, 9_700_000) == spent(10_000_000, 0) > 0
     assert spent(30_000, 9_970_000) <= 30_000
+
+
+# ---- 2026-11-24 복기 제안 (C)1·(A)2: why nothing is bought today, and the condition under which it would be ----
+
+YEO = {**CFG, 'frequency': 'daily', 'amount_krw': 100_000, 'profile': 'yeo', 'when_by': 'master', 'size_by': 'master', 'buy_every': 'day'}
+UP = {'day_ret': 0.069, 'vix': 26.6, 'krx_close': {'NDX': 22_000, 'SPX': 20_000}}
+ABOVE = {k: 23_000 for k in WANT}
+
+
+def test_a_day_without_a_buy_says_why_and_until_when_it_waits():
+    orders, state, notes = D.plan(YEO, {}, AT(18, 14, 20), UP, 'correction', WANT, {}, 5_000_000, prices=ABOVE)
+    text = next(n for n in notes if '오늘은 사지 않음' in n)
+    assert orders == {} and '전날 나스닥100 +6.9%' in text and '어제 종가 위' in text and '11-18부터' in text and '11-25' in text
+    bought = {'last_buy': '2026-11-18'}
+    _, _, notes = D.plan({**YEO, 'buy_every': 'week'}, bought, AT(19, 14, 20), UP, 'correction', WANT, {}, 5_000_000, prices=ABOVE)
+    assert any('매주 한 번' in n and '2026-11-18' in n for n in notes)
+
+
+def test_an_unknown_market_is_said_as_unknown():
+    _, _, notes = D.plan(YEO, {}, AT(18, 14, 20), {}, 'correction', WANT, {}, 5_000_000)
+    assert any('전날 나스닥100 자료 없음' in n for n in notes)
+
+
+def test_the_morning_condition_matches_what_the_day_then_does():
+    say = lambda cfg, state, ind, h=8: D.today_text(cfg, state, AT(18, h), ind, 'correction', WANT)  # noqa: E731
+    auto = {**YEO, 'time_mode': 'auto'}
+    text = say(auto, {}, UP)
+    assert '어제 종가 이하' in text and '14:20' in text and '그때도 위면 사지 않음' in text and '적립 100,000원' in text
+    assert D.plan(auto, {}, AT(18, 14, 20), UP, 'correction', WANT, {}, 5_000_000, prices=ABOVE)[0] == {}
+    down = {**UP, 'day_ret': -0.02}
+    assert '오늘 삼' in say(auto, {}, down) and '전날 나스닥100 -2.0%' in say(auto, {}, down)
+    assert D.plan(auto, {}, AT(18, 14, 20), down, 'correction', WANT, {}, 5_000_000, prices=ABOVE)[0]
+    long_wait = {'since': '2026-11-10', 'waiting_krw': 500_000}
+    assert '오늘 삼' in say(auto, long_wait, UP) and D.plan(auto, long_wait, AT(18, 14, 20), UP, 'correction', WANT, {}, 5_000_000, prices=ABOVE)[0]
+    broke = {**CFG, 'when_by': 'master', 'profile': 'yeo'}
+    assert say(broke, {'last_contribution': '2026-11-18'}, UP) == '적립식 몫이 없어 사지 않음'
+    assert '이미 삼' in say({**auto, 'buy_every': 'week'}, {'last_buy': '2026-11-17'}, UP)
+    assert say({**CFG, 'day': 18}, {}, UP).startswith('오늘 삼') and '적립일이 아님' in say({**CFG, 'day': 25}, {}, UP)
+    assert say({**CFG, 'on': False}, {}, UP) == '꺼짐' and '알림만' in say({**CFG, 'on': False, 'alert': True}, {}, UP)

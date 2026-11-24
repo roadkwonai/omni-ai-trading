@@ -191,7 +191,7 @@ def observe(read, now, universe, root=ROOT, db=None, state=None):
         errors['dart'] = type(exc).__name__
     try:
         import market_context
-        context = json.loads((root / 'market-context.json').read_text())
+        context = json.loads((root / 'market-context.json').read_text(encoding='utf-8'))
         # the engines' own view: no file older than MAX_AGE, no theme INTRADAY_MAX_LAG behind it (yesterday's leaders)
         current = {str(t['theme']) for t in (market_context.summary(context, now) or {}).get('theme_leaders') or []}
         for code, name, theme in theme_leaders(context):

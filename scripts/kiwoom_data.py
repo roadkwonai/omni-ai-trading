@@ -114,7 +114,7 @@ def day_bars(code, day, scope=1, adjusted=False, now=None):
     now = now or datetime.now(KST)
     path = BARS_DIR / f"{code}-{day:%Y%m%d}-{scope}m{'-adj' if adjusted else ''}.json"
     try:
-        cached = json.loads(path.read_text())
+        cached = json.loads(path.read_text(encoding='utf-8'))
         return {'bars': [(datetime.fromisoformat(t), *v) for t, *v in cached['bars']], 'prev_close': cached['prev_close']}
     except (OSError, ValueError, KeyError, TypeError):
         pass

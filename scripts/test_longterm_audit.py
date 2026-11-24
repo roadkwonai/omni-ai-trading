@@ -164,3 +164,18 @@ def test_collect_checks_orders_against_fills_every_day(tmp_path):
     json.dumps(data, ensure_ascii=False)
     early = A.collect(root, date(2026, 11, 18), days=3, journal_dir=tmp_path / 'none', live_log=log, now=at(date(2026, 11, 18), 10, 0))
     assert early['fills']['live'] == []  # today's live orders still have the session to fill
+
+
+def test_what_waiting_for_a_down_day_cost_is_measured_from_the_recorded_asks(tmp_path):
+    db = L.connect(tmp_path)
+    row = lambda d, asks, bought, orders=(): L.log(db, 'dca', f'2026-11-{d}', orders=list(orders), reason='x', now=at(date(2026, 11, d), 14, 20),  # noqa: E731
+                                                   indicators={'asks': asks, 'bought': bought, 'waiting_after': 276_000})
+    row(16, {'NDX': 10_000}, False)
+    row(17, {'NDX': 10_300}, False)
+    row(18, {'NDX': 9_700}, True, [{'key': 'NDX', 'side': 'BUY', 'qty': 2, 'price': 9_700, 'filled': 2}])
+    row(19, {'NDX': 9_900}, True, [{'key': 'NDX', 'side': 'BUY', 'qty': 1, 'price': 9_900, 'filled': 1}])  # no wait before it
+    db.execute("INSERT INTO decisions (time, day, kind, indicators) VALUES ('2026-11-13T14:20:00+09:00','2026-11-13','dca','{}')")  # before the asks were kept
+    db.commit()
+    waits = A.collect(tmp_path, end=date(2026, 11, 19), days=5)['dca_waits']
+    assert waits == {'rows': [{'from': '2026-11-16', 'bought': '2026-11-18', 'key': 'NDX', 'ask_then': 10_000, 'paid': 9_700, 'diff_pct': -3.0, 'krw': 19_400}],
+                     'n': 1, 'mean_diff_pct': -3.0, 'waiting_since': None}

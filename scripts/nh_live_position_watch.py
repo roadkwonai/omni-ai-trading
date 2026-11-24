@@ -71,7 +71,7 @@ def main():
             event['policy']=decide(event,halted=halt_flag_set('nhplug'),transport_ready=False)
             record(ROOT/'live-policy.sqlite3',event,event['policy'])
         except Exception as exc: event={'time':now.isoformat(),'event':'live_readonly_error','error_type':type(exc).__name__}
-        with (ROOT/'live-watch.jsonl').open('a') as f:f.write(json.dumps(event,ensure_ascii=False)+'\n')
+        with (ROOT/'live-watch.jsonl').open('a', encoding='utf-8') as f:f.write(json.dumps(event,ensure_ascii=False)+'\n')
         print(json.dumps(event,ensure_ascii=False),flush=True)
         time.sleep(60)
 if __name__=='__main__':main()

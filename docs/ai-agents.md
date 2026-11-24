@@ -49,13 +49,13 @@ docs/getting-started.md와 docs/ai-agents.md를 읽고 그 순서대로 설치�
 > 모든 정보는 투자 판단을 위한 참고 자료이며 투자 권유가 아닙니다. 투자의 최종 판단과 손익(원금 손실 포함)의 책임은 투자자 본인에게 있습니다. AI 판단은 미래 수익을 보장하지 않습니다. [README · 투자 유의사항 및 면책 고지](../README.md#투자-유의사항-및-면책-고지)
 
 > [!IMPORTANT]
-> 키와 계좌번호는 사람이 `.env`에 직접 넣습니다. 에이전트에게 값을 붙여 넣거나 출력하게 하지 마세요. 실계좌 실주문 스위치, `--execute`, 한도 변경은 사람이 승인한 뒤에만 합니다.
+> 키와 계좌번호는 사용자가 `.env`에 직접 넣습니다. 에이전트에게 값을 붙여 넣거나 출력하게 하지 마세요. 실계좌 실주문 스위치, `--execute`, 한도 변경은 사용자가 승인한 뒤에만 합니다.
 
 ## 먼저 알아 둘 것: 채팅은 주문하지 않습니다
 
-AI를 붙인 이유는 사용자가 시황·뉴스·수급과 거래 기록을 여러 화면에서 직접 모으는 부담을 줄이기 위해서입니다. 장중에는 Jev가 차트 이미지와 시장 자료에서 후보나 보유 의견을 냅니다. 장기 엔진은 수치 규칙으로 국면과 비중을 계산하고, AI 테마 점검은 해당 전략의 참고 입력으로 사용합니다. Claude Code·Codex는 이 두 경로의 자료를 읽고 오늘 왜 거래하거나 기다렸는지 설명하고, 다음에 검토할 질문을 정리하는 데 씁니다. [장중 판단 자료](strategy.md#jev가-받는-자료) · [장기 국면과 모듈](longterm.md#국면-판정)
+AI를 쓰는 이유는 사용자가 시황·뉴스·수급과 거래 기록을 여러 화면에서 직접 모으는 부담을 줄이기 위해서입니다. 장중에는 Jev가 차트 이미지와 시장 자료에서 후보나 보유 의견을 냅니다. 장기 엔진은 수치 규칙으로 국면과 비중을 계산하고, AI 테마 점검은 해당 전략의 참고 입력으로 쓰입니다. Claude Code·Codex는 이 두 경로의 자료를 읽고 오늘 왜 거래하거나 기다렸는지 설명하고, 다음에 검토할 질문을 정리합니다. [장중 판단 자료](strategy.md#jev가-받는-자료) · [장기 국면과 모듈](longterm.md#국면-판정)
 
-주문은 launchd로 도는 실행기만 냅니다. 실행기는 매 회차 증권사 잔고와 거래 기록을 맞춰 보고, 주문 가드를 거쳐서만 주문합니다. 채팅하는 에이전트는 이 경로 밖에 있습니다.
+주문은 launchd로 실행되는 실행기만 냅니다. 실행기는 매 회차 증권사 잔고와 거래 기록을 맞춰 보고, 주문 가드를 거쳐서만 주문합니다. 채팅하는 에이전트는 이 경로 밖에 있습니다.
 
 ```mermaid
 flowchart LR
@@ -108,7 +108,7 @@ flowchart TB
 | Claude Code | `npm install -g @anthropic-ai/claude-code` 또는 Claude 데스크톱 앱 (Claude Pro·Max 또는 API 사용료 필요) | 저장소 폴더에서 `claude` | `CLAUDE.md` | `.claude/skills/` |
 | Codex | `npm install -g @openai/codex` 또는 Codex 앱 (ChatGPT Plus·Pro 등 또는 API 사용료 필요) | 저장소 폴더에서 `codex` | `AGENTS.md` | `.agents/skills/` |
 
-예약 작업(사람이 없을 때 도는 리포트·감사)은 Claude는 데스크톱 앱의 예약 작업, Codex는 Codex 앱의 자동화로 만듭니다. 둘 다 이 Mac에서 돌아야 `~/.vibe-trading`의 기록을 읽을 수 있습니다. 클라우드에서 도는 예약 실행은 로컬 기록을 볼 수 없으니 쓰지 않습니다.
+예약 작업(사람이 없을 때 실행되는 리포트·감사)은 Claude는 데스크톱 앱의 예약 작업, Codex는 Codex 앱의 자동화로 만듭니다. 둘 다 이 Mac에서 실행되어야 `~/.vibe-trading`의 기록을 읽을 수 있습니다. 클라우드에서 실행되는 예약 작업은 로컬 기록을 볼 수 없으니 쓰지 않습니다.
 
 ## 2. 지침 파일 만들기
 
@@ -154,11 +154,11 @@ docs/ai-agents.md 2절 템플릿으로 저장소 루트에 AGENTS.md와 CLAUDE.m
 
 ### 프로젝트 스킬 (저장소에 들어 있음)
 
-`.claude/skills/` 아래 9개는 저장소에 들어 있습니다. Claude Code는 이 폴더를 자동으로 읽으므로 따로 설치할 것이 없습니다.
+`.claude/skills/` 아래 10개는 저장소에 들어 있습니다. Claude Code는 이 폴더를 자동으로 읽으므로 따로 설치할 것이 없습니다.
 
-| 스킬 | 하는 일 | 쓰는 때 | 결과 |
+| 스킬 | 하는 일 | 쓸 때 | 결과 |
 | --- | --- | --- | --- |
-| `vibe-trading` | 운영 규칙, 진행·마감 보고, 시황·종목 분석, 정리 요청, 리서치 도구 안내 | "진행 상황 알려줘", "이 종목 정리해", 예약 보고·개선안 | 대화 보고, `reviews/improvement-DAY.md` |
+| `vibe-trading` | 운영 규칙, 진행·마감 보고, 시황·종목 분석, 정리 요청, 리서치 도구 안내 | "진행 상황 알려 줘", "이 종목 정리해", 예약 보고·개선안 | 대화 보고, `reviews/improvement-DAY.md` |
 | `premarket-analysis` | 장전 상세 분석을 템플릿대로 쓰고 검사 | 평일 08:31, "오늘 장 전망" | `reviews/premarket-DAY.md` |
 | `intraday-audit` | 장중 매매·차단·시세·체결 감사 | 매시 20분, "장중 감사" | `reviews/operations-audit-DAY.md` |
 | `trading-journal-writer` | 하루·월·분기·반기·연 매매일지 | 16:40, 매월 1일 | `reviews/journal-DAY.md·json` |
@@ -167,6 +167,7 @@ docs/ai-agents.md 2절 템플릿으로 저장소 루트에 AGENTS.md와 CLAUDE.m
 | `ops-bootstrap` | 새 계정·새 기기에서 이어 가기, 백업 복원 | "다른 계정에서 이어서" | 점검 보고 |
 | `verify-dashboard` | 대시보드 변경을 실제 화면으로 확인 | 대시보드 수정 뒤 | 화면 확인 보고 |
 | `automation-guideline-review` | 예약 작업·자동화 지침 검수 | 지침을 고칠 때 | 검수 결과 |
+| `omni-cli` | 명령 `omni`로 기록을 읽고 설정 변경을 계획·적용 | 조회 질문, 설정 확인·변경 | 대화 보고, 설정 변경 이력 |
 
 `reviews/`는 `~/.vibe-trading/nhplug/shared-etf-paper/reviews/`, `vibe-longterm/`은 `~/.vibe-trading/nhplug/vibe-longterm/`입니다. 스킬별 구동 시점과 화면은 `scripts/skill_catalog.py`(대시보드 **운영 → 스킬**)에도 있습니다.
 
@@ -176,7 +177,7 @@ Codex는 저장소의 `.agents/skills/`에서 스킬을 찾습니다. 같은 스
 
 ```bash
 mkdir -p .agents/skills
-for s in vibe-trading premarket-analysis intraday-audit trading-journal-writer longterm-strategy-writer report-html-publisher ops-bootstrap verify-dashboard automation-guideline-review; do
+for s in vibe-trading premarket-analysis intraday-audit trading-journal-writer longterm-strategy-writer report-html-publisher ops-bootstrap verify-dashboard automation-guideline-review omni-cli; do
   ln -sfn "../../.claude/skills/$s" ".agents/skills/$s"
 done
 ```
@@ -184,13 +185,13 @@ done
 프롬프트로 맡길 때:
 
 ```text
-.claude/skills/의 프로젝트 스킬 9개를 Codex가 읽도록 .agents/skills/에 상대 경로 링크로 연결하고,
+.claude/skills/의 프로젝트 스킬 10개를 Codex가 읽도록 .agents/skills/에 상대 경로 링크로 연결하고,
 각 링크의 SKILL.md가 열리는지 확인해 줘. .agents/가 git에 잡히지 않는지도 확인해.
 ```
 
 ### 선택 스킬
 
-없어도 매매와 리포트는 그대로 돌아갑니다. 화면·디자인 작업을 할 때만 필요합니다.
+없어도 매매와 리포트는 그대로 동작합니다. 화면·디자인 작업을 할 때만 필요합니다.
 
 | 스킬 | 쓰임 | 설치 |
 | --- | --- | --- |
@@ -199,7 +200,7 @@ done
 | Archify | 대시보드·리포트의 흐름도 | `~/.claude/skills/archify/bin/archify.mjs`(또는 `ARCHIFY_BIN`)가 있으면 씁니다. 없으면 같은 내용의 Graphviz 도식으로 대신 그립니다 |
 
 > [!NOTE]
-> 장전 분석과 매매일지가 참고하는 『실전 시황 트레이딩』 판단표 스킬(`danswer-market-trading`)은 운영자 개인 자료라 배포하지 않습니다. Jev 판단에 들어가는 점검 질문은 저장소의 `scripts/market_playbook.py`에 자체 문장으로 요약돼 있어, 이 스킬이 없어도 실행기는 똑같이 돌아갑니다.
+> 장전 분석과 매매일지가 참고하는 『실전 시황 트레이딩』 판단표 스킬(`danswer-market-trading`)은 운영자 개인 자료라 배포하지 않습니다. Jev 판단에 들어가는 점검 질문은 저장소의 `scripts/market_playbook.py`에 자체 문장으로 요약돼 있어, 이 스킬이 없어도 실행기는 똑같이 동작합니다.
 
 ## 4. MCP 연결
 
@@ -233,7 +234,7 @@ search_symbol로 KODEX 200을 찾아 연결을 확인해 줘. NH 주문 MCP는 �
 
 ## 5. 읽기 전용 권한
 
-예약 작업은 사람이 없을 때 돌아갑니다. 셸 명령마다 승인을 기다리면 멈추므로, 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 주문·실주문 스크립트와 `--execute`·`--live`·`--watch`는 `scripts/ro`가 거절합니다(허용 목록은 [자동 작업](automation.md#읽기-전용-실행기-scriptsro)).
+예약 작업은 사람이 없을 때 실행됩니다. 셸 명령마다 승인을 기다리면 멈추므로, 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 주문·실주문 스크립트와 `--execute`·`--live`·`--watch`는 `scripts/ro`가 거절합니다(허용 목록은 [자동 작업](automation.md#읽기-전용-실행기-scriptsro)).
 
 `.claude/settings.local.json` (git에 들어가지 않음):
 
@@ -268,9 +269,52 @@ scripts/ro sql ~/.vibe-trading/nhplug/shared-etf-paper/orders.sqlite3 "SELECT * 
 scripts/ro vibe-status                                # 장기 엔진 켜짐 여부
 ```
 
+### omni 명령
+
+`omni`는 기록을 조회하고, 설정 변경을 계획하고, 사용자가 승인한 요청을 남기는 명령행 도구입니다. 직접 주문하는 명령은 없습니다. Claude Code와 Codex를 비롯해 셸 명령을 실행할 수 있는 에이전트라면 같은 명령을 씁니다. 사용법은 [omni CLI 가이드](omni-cli.md), 명령과 설정 목록은 [참조](omni-cli-reference.md)에 있습니다.
+
+```bash
+uv pip install --python .venv --no-deps -e agent-harness   # 설치
+.venv/bin/omni guide 잔고                                  # 명령 찾기
+.venv/bin/omni status --json                               # 전체 상태
+.venv/bin/omni settings explain accounts.paper-shared.budget.per_symbol_krw
+```
+
+설정은 계획(`settings plan`) → 적용(`plan apply`) 순서로만 바뀝니다. 실계좌에 영향을 주는 변경은 실시간 알림 채널로 간 일회용 승인 코드를 **사용자가** 알려 줘야 적용됩니다.
+
+다음 요청도 같은 순서로 처리하며, 늘 승인 코드가 필요합니다.
+
+- 모의 매도·추가 매수, 실계좌(Jev 미러) 매도·보유 종목 추가 매수 요청
+- 실행기 중단·해제·재시작, 거래일 시작, 서비스 시작, 리포트 재발송
+- 실주문 켜기·끄기, 매수 재개, HALT 걸기·풀기, 백업 가져오기
+
+실주문 켜기, HALT 풀기, 백업 가져오기는 **확인 문구**도 사용자가 말해야 합니다(`--phrase`). 직접 주문, 새 종목 매수, 서비스 등록 명령은 없습니다.
+
+에이전트에 권한을 줄 때는 조회와 계획만 자동으로 허용하고, 값을 바꾸는 명령은 매번 물어보게 둡니다. Claude Code라면 `.claude/settings.local.json`에 직접 추가합니다.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/omni status)", "Bash(.venv/bin/omni status --json)", "Bash(.venv/bin/omni guide *)",
+      "Bash(.venv/bin/omni jev blocks *)", "Bash(.venv/bin/omni jev events *)", "Bash(.venv/bin/omni lt today *)",
+      "Bash(.venv/bin/omni settings list *)", "Bash(.venv/bin/omni settings explain *)", "Bash(.venv/bin/omni settings get *)"
+    ],
+    "ask": [
+      "Bash(.venv/bin/omni status refresh*)", "Bash(.venv/bin/omni plan *)", "Bash(.venv/bin/omni settings apply *)", "Bash(.venv/bin/omni settings approve *)",
+      "Bash(.venv/bin/omni trade *)", "Bash(.venv/bin/omni live *)", "Bash(.venv/bin/omni ops *)", "Bash(.venv/bin/omni backup *)",
+      "Bash(.venv/bin/omni jev stop*)", "Bash(.venv/bin/omni jev unstop*)", "Bash(.venv/bin/omni jev restart*)", "Bash(.venv/bin/omni lt stop*)", "Bash(.venv/bin/omni lt unstop*)",
+      "Bash(.venv/bin/omni ai search *)", "Bash(.venv/bin/omni ai ask *)"
+    ]
+  }
+}
+```
+
+`omni jev *`처럼 묶음 전체를 허용하지 않습니다. 같은 묶음에 중단·재시작 명령이 있습니다.
+
 ## 6. 예약 작업 등록
 
-리포트·감사·점검은 예약 작업이 씁니다. **Claude 예약 작업과 Codex 자동화 중 한쪽만** 켭니다. 둘 다 켜면 같은 리포트가 두 번 생깁니다.
+예약 작업이 리포트를 쓰고 감사와 점검을 합니다. **Claude 예약 작업과 Codex 자동화 중 한쪽만** 켭니다. 둘 다 켜면 같은 리포트가 두 번 생깁니다.
 
 ```mermaid
 gantt
@@ -343,7 +387,7 @@ launchd 서비스(실행기·수집기·알림)는 예약 작업과 별개입니
 
 ## 기능별 사용 지도
 
-기능마다 대시보드에서 하는 곳과 AI에게 맡기는 말을 짝지었습니다. 화면에서 직접 해도 되고, 프롬프트로 물어도 됩니다. 실주문 스위치처럼 사람이 확인 문구를 넣어야 하는 일은 화면에서만 합니다.
+기능마다 대시보드에서 하는 곳과 AI에게 맡기는 말을 짝지었습니다. 화면에서 직접 해도 되고, 프롬프트로 물어도 됩니다. 실주문 스위치처럼 확인 문구가 필요한 일은 사용자가 화면에서 하거나, 사용자가 알려 준 승인 코드와 확인 문구로 `omni` 계획을 적용합니다.
 
 | 기능 | 대시보드에서 | AI에게 이렇게 | 가이드 |
 | --- | --- | --- | --- |
@@ -499,14 +543,14 @@ STOP을 지우고 공유 모의 실행기를 다시 켜 줘. restart_runner.py �
 ```
 
 ```text
-관심종목에 005930을 더하고 035720을 빼 줘. 관심종목 편집 경로(watchlist-manual.json)로 바꾸고 변경 이력을 남겨.
+관심종목에 005930을 더하고 035720을 빼 줘. `omni`로 계획을 만들어 보여 주고, 내가 좋다고 하면 적용해.
 ```
 
 ### 설정 바꾸기 (승인 절차)
 
 ```text
 신규 매수 마감을 14:30에서 14:00으로 바꾸면 무엇이 달라지는지 먼저 설명해 줘.
-내가 승인하면 config_store로 저장해 변경 이력을 남기고, AGENTS.md에 날짜와 이유를 한 줄 적어.
+`omni settings plan`으로 계획을 만들고, 내가 알려 주는 코드로만 적용해. AGENTS.md에 날짜와 이유를 한 줄 적어.
 ```
 
 ```text
@@ -515,7 +559,7 @@ STOP을 지우고 공유 모의 실행기를 다시 켜 줘. restart_runner.py �
 
 ### 실계좌 단계적으로 열기
 
-실계좌는 관찰 → 가상 실행 → 보호된 실주문 순서로 한 단계씩 넘어갑니다. 실주문 스위치는 사람이 대시보드에서 확인 문구를 넣어 켭니다.
+실계좌는 관찰 → 가상 실행 → 보호된 실주문 순서로 한 단계씩 넘어갑니다. 실주문 스위치는 사용자가 대시보드에서 확인 문구를 넣어 켭니다.
 
 ```text
 실계좌 1을 실주문으로 열기 전에 확인할 것을 점검해 줘: 운용금, 하루 손실 한도, 1주 가격 상한, 하루 새 종목,
@@ -652,8 +696,8 @@ nh_paper_isolated.py를 고치기 전에 실패하는 테스트부터 써 줘. �
 | 하지 않는 것 | 이유 | 대신 |
 | --- | --- | --- |
 | 키·계좌번호 붙여 넣기, 출력 | 대화·기록에 남음 | 사람이 `.env`에 직접 |
-| 공유 모의계좌에 직접 주문 | 거래 기록과 잔고가 어긋나 실행기가 멈춤 | 요청 파일, 대시보드 수동 매수·매도 |
-| 실주문 스위치 켜기, `--execute` 재등록 | 실제 돈이 움직임 | 사람이 대시보드에서 확인 문구로 |
+| 공유 모의계좌에 직접 주문 | 거래 기록과 잔고가 어긋나 실행기가 멈춤 | `omni trade` 요청, 대시보드 수동 매수·매도 |
+| 실주문 스위치 켜기를 스스로 정하기, `--execute` 재등록 | 실제 돈이 움직임 | 사용자가 대시보드에서 확인 문구로, 또는 `omni live on` 계획에 사용자가 코드와 문구를 줌 |
 | 승인 없이 한도·매매 기준 바꾸기 | 승인된 값이 근거 | 설명을 듣고 승인한 뒤 저장 |
 | 원장·이벤트 파일 지우기·고치기 | 대조 근거가 사라짐 | 증권사 조회로 대조 |
 | 장중 무계획 재시작 | 그동안 손절 감시가 멈춤 | `restart_runner.py`, 가능하면 장 전 |

@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -24,7 +26,7 @@ def build_environment(
             raise ValueError(f"missing {name} in the selected credential file")
     # Parse assignments only: sourcing .envrc would execute shell code and export unrelated keys.
     env = {key: value for key, value in inherited.items()
-           if key in {"PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMPDIR", "LANG", "LC_ALL"}}
+           if key in {"PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL"}}
     env.update({
         "NHPLUG_APP_KEY": values["APP_KEY"].strip(),
         "NHPLUG_APP_SECRET": values["APP_SECRET"].strip(),
@@ -39,6 +41,16 @@ def build_environment(
             guarded_paper_root.expanduser().resolve() / "nhplug/shared-etf-paper/STOP"
         )
     return env
+
+
+def launch(node: str, server: Path, env: dict[str, str], *, windows: bool = os.name == "nt") -> None:
+    """Become Node. Windows has no such exec (it starts a new process and ends this one, so the MCP client loses its pipe):
+    there this process waits with the same standard streams and ends with Node's exit code, without a console window."""
+    if not windows:
+        os.chdir(server.parent.parent)
+        return os.execve(node, [node, str(server)], env)
+    sys.exit(subprocess.run([node, str(server)], env=env, cwd=server.parent.parent,
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).returncode)
 
 
 def main() -> None:
@@ -61,8 +73,7 @@ def main() -> None:
                                 guarded_paper_root=runtime if args.guarded_paper else None)
     except (ValueError, OSError):
         parser.error("NH credentials could not be loaded; check APP_KEY and APP_SECRET in --env-file")
-    os.chdir(server.parent.parent)
-    os.execve(node, [node, str(server)], env)
+    launch(node, server, env)
 
 
 if __name__ == "__main__":

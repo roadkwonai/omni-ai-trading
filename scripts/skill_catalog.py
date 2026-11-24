@@ -59,6 +59,12 @@ SKILLS = [
       [('장 마감 개선안', f'{REVIEWS}/improvement-{DAY}.md'), ('낙폭과대 주간 감사', f'{REVIEWS}/oversold-weekly-{DAY}.md')],
       '전략 구조 → 장 마감 개선안 · 보고는 대화(예약 작업 실행 기록)',
       '실행기 이벤트·원장·시황·설정·장 마감 개선안 데이터(scripts/daily_improvement.py)'),
+    S('omni-cli', 'omni 명령', '서비스 스킬',
+      '명령 omni로 계좌·매매·판단·리포트 기록을 읽고, 설정 변경을 계획하고 적용합니다. 주문 명령은 없습니다.',
+      ['요청: "오늘 손익", "왜 안 샀어", "한도 바꿔 줘"'],
+      [],
+      '전용 화면 없음(설정 변경은 운영 → 운영 상태의 변경 이력)', '기록 파일·DB(읽기 전용), 설정 저장 함수',
+      '설정은 계획 → 적용, 실계좌에 영향을 주면 사용자가 받은 일회용 승인 코드가 있어야 적용'),
     S('automation-guideline-review', '자동화 지침 검수', '서비스 스킬',
       'Codex 자동화·예약 작업 지침을 리뷰·검수·테스트합니다. 상시 규칙은 스킬로, 반복 수집은 읽기 전용 스크립트로, 일회성 점검은 날짜별 확인 목록으로 나눈 짧은 개정 지침을 만듭니다.',
       ['요청할 때만: "자동화 지침 리뷰", "예약 작업 프롬프트 점검"'],
@@ -183,7 +189,7 @@ def job_state(job, home=None):
     home = Path(home or Path.home())
     if job['runner'] == 'Codex 자동화':
         try:
-            status = re.search(r'^status\s*=\s*"([A-Z]+)"', (home / '.codex/automations' / job['key'] / 'automation.toml').read_text(), re.M)
+            status = re.search(r'^status\s*=\s*"([A-Z]+)"', (home / '.codex/automations' / job['key'] / 'automation.toml').read_text(encoding='utf-8'), re.M)
         except OSError:
             return '없음'
         return {'ACTIVE': '실행 중', 'PAUSED': '일시 정지'}.get(status.group(1) if status else '', '확인 불가')

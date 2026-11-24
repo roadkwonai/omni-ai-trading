@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import math
 import os
@@ -19,6 +18,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 ROOT = Path.home() / '.vibe-trading/nhplug/shared-etf-paper'
@@ -69,7 +70,7 @@ def _section(source, now, data, status='ok', **extra):
 
 def _read(root):
     try:
-        value = json.loads((Path(root) / FILE).read_text())
+        value = json.loads((Path(root) / FILE).read_text(encoding='utf-8'))
         return value if isinstance(value, dict) else None
     except (OSError, ValueError):
         return None
@@ -90,7 +91,7 @@ def load(root=None, now=None):
 
 def _json_file(path, default):
     try:
-        value = json.loads(Path(path).read_text())
+        value = json.loads(Path(path).read_text(encoding='utf-8'))
         return value if isinstance(value, type(default)) else default
     except (OSError, ValueError):
         return default
@@ -656,9 +657,9 @@ def engine_brief(root=None, now=None):
 def run_once():
     import research_store
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with (ROOT / 'premarket.lock').open('a') as lock:
+    with (ROOT / 'premarket.lock').open('a', encoding='utf-8') as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            file_lock.lock(lock, blocking=False)
         except BlockingIOError:
             print('premarket collection already running', flush=True)
             return

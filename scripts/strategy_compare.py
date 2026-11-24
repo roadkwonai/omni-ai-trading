@@ -49,7 +49,7 @@ def _snapshots(path):
     from live_fills import plausible
     out = {}
     try:
-        lines = Path(path).read_text().splitlines()
+        lines = Path(path).read_text(encoding='utf-8').splitlines()
     except OSError:
         return out
     for line in lines:

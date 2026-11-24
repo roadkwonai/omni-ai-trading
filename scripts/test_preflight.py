@@ -101,3 +101,21 @@ def test_before_the_first_collection_yesterdays_premarket_brief_is_not_a_failure
     with patch('trading_day_start.trading_day', return_value=(True, 'trading_day')):
         assert pf.run(NOW.replace(hour=6, minute=13), checks)['results'][0]['ok'] is None
         assert pf.run(NOW.replace(hour=8, minute=20), checks)['results'][0]['ok'] is False  # really missing by then
+
+
+def test_an_order_halt_of_nh_alone_is_seen():
+    import src.live.halt as halt
+    with patch.object(halt, 'halt_flag_set', side_effect=lambda broker=None: broker == 'nhplug'):
+        assert pf.stop_files(NOW)[0] is False
+
+
+def test_an_unregistered_service_fails_the_check():
+    import os_services
+    up = {name: {'registered': True, 'running': False} for name in pf.NEEDED}
+    with patch.object(os_services, 'states', return_value=up):
+        assert pf.services(NOW)[0] is True
+    up.popitem()
+    with patch.object(os_services, 'states', return_value=up):
+        assert pf.services(NOW)[0] is False
+    with patch.object(os_services, 'states', side_effect=os_services.Unknown('x')):
+        assert pf.services(NOW)[0] is False

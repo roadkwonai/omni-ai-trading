@@ -322,3 +322,9 @@ def test_the_buy_time_choice_has_a_guide_with_its_diagram(tmp_path, monkeypatch)
     import longterm_inputs_guide as IG
     a, b = IG._example_series(True), IG._example_series(False)
     assert any(r['가격'] <= r['어제 종가'] for r in a) and all(r['가격'] > r['어제 종가'] for r in b)  # the two cases they show
+
+
+def test_carried_parts_are_named_not_coded():
+    import longterm_dca_view as V
+    text = V.carry_text({'carry': {'NDXMIX': 5_866, '379800': 100}}, {'379800': '내 종목'})
+    assert 'NDXMIX' not in text and '혼합' in text and '내 종목' in text

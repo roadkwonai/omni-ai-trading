@@ -3,7 +3,7 @@
     .venv/bin/python scripts/restart_runner.py --runner shared --reason "load the 11/17 ledger fix"
 
 Steps (.claude/skills/vibe-trading/SKILL.md): no unconfirmed order -> STOP -> wait for the runner's own `stopped` event
-and the process to exit -> delete STOP -> launchctl kickstart -> wait for its first cycle. It refuses when an order is
+and the process to exit -> delete STOP -> start the service -> wait for its first cycle. It refuses when an order is
 unconfirmed or a holding sits within --stop-margin %p of its stop (the stop watch pauses for the restart; pass --force
 to accept that). Every attempt is appended to <runner folder>/restarts.jsonl with its reason and downtime, so the day's
 restarts can be counted (11/17 had seven, each pausing the stop watch). Never places or cancels an order.
@@ -20,8 +20,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import os_services
+
 KST = ZoneInfo('Asia/Seoul')
-RUNNERS = {'shared': ('com.vibetrading.shared-etf-paper', 'shared-etf-paper')}
+RUNNERS = {'shared': ('shared-etf-paper', 'shared-etf-paper')}  # service, folder
+TAIL_BYTES = 4 << 20
 FIRST_CYCLE = ('market_context', 'v2_entry_gate', 'jev_shadow', 'jev_holding_decision', 'v2_risk_exit')
 
 
@@ -47,7 +50,7 @@ def near_stops(folder, margin):
     from strategy_settings import read_settings
     folder = Path(folder)
     try:
-        holdings = json.loads((folder / 'account-state.json').read_text()).get('holdings') or {}
+        holdings = json.loads((folder / 'account-state.json').read_text(encoding='utf-8')).get('holdings') or {}
     except (OSError, ValueError, AttributeError):
         return {'unknown': 'account-state.json unreadable'}
     settings, view, near = read_settings(folder)[0], market_view(folder), {}
@@ -66,7 +69,9 @@ def near_stops(folder, margin):
 
 def events_after(folder, since):
     try:
-        lines = (Path(folder) / 'events.jsonl').read_text().splitlines()[-400:]
+        with (Path(folder) / 'events.jsonl').open('rb') as stream:  # 65 MB by the close, and read every 2 s while the stop watch is paused
+            stream.seek(max(0, stream.seek(0, 2) - TAIL_BYTES))
+            lines = stream.read().decode(errors='replace').splitlines()[-400:]
     except OSError:
         return []
     out = []
@@ -80,13 +85,12 @@ def events_after(folder, since):
     return out
 
 
-def pid(label, run=subprocess.run):
-    result = run(['launchctl', 'list'], capture_output=True, text=True, check=False)
-    for line in result.stdout.splitlines():
-        parts = line.split('\t')
-        if len(parts) == 3 and parts[2] == label:
-            return None if parts[0] == '-' else parts[0]
-    return None
+def running(service, run=subprocess.run):
+    """Whether the service runs now, or None when the service manager cannot be asked."""
+    try:
+        return os_services.states(run=run).get(service, os_services.MISSING)['running']
+    except os_services.Unknown:
+        return None
 
 
 def restart(runner, reason, *, root, force=False, stop_margin=0.5, timeout=150, run=subprocess.run,
@@ -98,7 +102,7 @@ def restart(runner, reason, *, root, force=False, stop_margin=0.5, timeout=150, 
 
     def finish(**fields):
         record.update(fields, seconds=round((clock() - started).total_seconds(), 1))
-        with (folder / 'restarts.jsonl').open('a') as stream:
+        with (folder / 'restarts.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + '\n')
         os.chmod(folder / 'restarts.jsonl', 0o600)
         return record
@@ -112,7 +116,10 @@ def restart(runner, reason, *, root, force=False, stop_margin=0.5, timeout=150, 
     record['near_stop'] = near
     if near and not force:
         return finish(result='refused', why='a holding is near its stop and the stop watch pauses during the restart')
-    if pid(label, run) is None:
+    up = running(label, run)
+    if up is None:
+        return finish(result='refused', why='the service state is unknown; nothing was stopped')
+    if not up:
         return finish(result='refused', why='the runner is not running; start it through trading-day-start or kickstart')
     since = started.isoformat()
     (folder / 'STOP').touch()
@@ -120,7 +127,7 @@ def restart(runner, reason, *, root, force=False, stop_margin=0.5, timeout=150, 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             stopped = [e for e in events_after(folder, since) if e.get('event') == 'stopped']
-            if stopped and pid(label, run) is None:
+            if stopped and running(label, run) is False:
                 break
             sleep(2)
         else:
@@ -129,11 +136,11 @@ def restart(runner, reason, *, root, force=False, stop_margin=0.5, timeout=150, 
         (folder / 'STOP').unlink(missing_ok=True)
     record['stopped'] = {k: stopped[-1].get(k) for k in ('time', 'reason', 'remaining', 'reconciliation_required')}
     down = clock()
-    run(['launchctl', 'kickstart', f'gui/{os.getuid()}/{label}'], check=False, capture_output=True)
+    os_services.start(label, run=run)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         cycle = [e for e in events_after(folder, stopped[-1]['time']) if e.get('event') in FIRST_CYCLE]
-        if cycle and pid(label, run):
+        if cycle and running(label, run):
             return finish(result='restarted', first_cycle=cycle[0]['time'],
                           watch_paused_seconds=round((datetime.fromisoformat(cycle[0]['time']) -
                                                       datetime.fromisoformat(stopped[-1]['time'])).total_seconds(), 1))

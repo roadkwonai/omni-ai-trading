@@ -446,7 +446,7 @@ def books_from_rows(rows, day):
 def movers_snapshot():
     """Latest market_movers.py scan (rankings and Jev candidates); None when unavailable."""
     try:
-        return json.loads((get_runtime_root() / 'nhplug' / 'shared-etf-paper' / 'movers.json').read_text())
+        return json.loads((get_runtime_root() / 'nhplug' / 'shared-etf-paper' / 'movers.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
 
@@ -454,7 +454,7 @@ def movers_snapshot():
 def watchlist_snapshot():
     """Latest Jev watchlist selection (watchlist.py); None when unavailable."""
     try:
-        return json.loads((get_runtime_root() / 'nhplug' / 'shared-etf-paper' / 'watchlist.json').read_text())
+        return json.loads((get_runtime_root() / 'nhplug' / 'shared-etf-paper' / 'watchlist.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return None
 
@@ -700,7 +700,7 @@ def new_listing_panel(now):
         st.caption('신규주 진입이 꺼져 있습니다. 전략·AI 설정의 "신규주 진입 · 빠른 선택"에서 켤 수 있습니다.')
     root = get_runtime_root() / 'nhplug' / 'shared-etf-paper'
     try:  # the runner's daily list as it saved it: this 30-second fragment never asks KIND or Toss itself
-        cache = json.loads((root / new_listings.FILE).read_text())
+        cache = json.loads((root / new_listings.FILE).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         cache = {}
     listings = sorted(cache.get('rows') or [], key=lambda r: r['listed'], reverse=True)[:6]
@@ -2763,7 +2763,7 @@ def operations_panel(root):
             with cols[i % 4]:
                 st.caption(name)
                 st.badge(('● ' if state == '실행 중' else '○ ') + state, color=tone.get(state, 'red'))
-        st.caption('미등록: 시스템에 등록되지 않은 작업입니다. 재부팅 뒤 자동으로 올라오도록 ~/Library/LaunchAgents에 등록돼 있어야 합니다.')
+        st.caption('미등록: 시스템에 등록되지 않은 작업입니다. 재부팅 뒤 자동으로 올라오도록 운영체제의 자동 실행에 등록돼 있어야 합니다.')
     st.markdown(f'##### 모의 실행기 활동 ({day:%m/%d}, 10분 단위)')
     activity_charts(counts, waits)
 
@@ -3989,34 +3989,10 @@ def execution_reason_label(reason):
 
 
 def entry_reason_label(reason):
+    import entry_reasons
     if not isinstance(reason, str):
         return '—'
-    return {'signal_or_session_invalid': '시그널 만료 또는 거래 중단',
-            'jev_low_confidence': 'Jev 신뢰도가 진입 기준 미만', 'jev_wait': 'Jev 대기 의견',
-            'trend_not_rising': '최근 분봉 상승 아님', 'volume_not_rising': '거래량 증가 조건 미충족',
-            'stale_model_signal': '모델 판단 시각 만료', 'stale_market_bars': '분봉 시각 만료',
-            'market_bars_unavailable': '분봉 자료 확인 불가', 'entry_window_closed': '매수 시간 종료',
-            'auto_off': '자동매매 꺼짐', 'scale_signal_disabled': '새 판단 추가 매수 설정 꺼짐',
-            'entry_conditions_met': '진입 조건 충족',
-            'opposite_direction_holding': '보유 종목과 반대 방향(레버리지↔인버스)이라 진입 안 함',
-            'split_plan_holding': '보유 종목의 추가 진입 조건 미충족',
-            'reentry_below_last_exit': '같은 날 재진입 제한(오늘 판 종목의 직전 매도가 아래)',
-            'one_share_over_buy': '1주 값이 한 번 매수 금액보다 큼(강도 후보 건너뜀)',
-            'losing_streak_cooldown': '연속 손실 쉬기(3번 연속 손실 후 30분)',
-            'direction_not_confirmed': '지수 방향이 맞지 않음', 'market_unconfirmed': '시장 요약 없음(지수 확인 불가)',
-            'downtrend_no_averaging_down': '약세장 물타기 금지',
-            # 11-20 매수 차단 사유 탭: strength candidates and the inverse gate
-            'strength_change_out_of_range': '오늘 등락률이 강도 범위 밖', 'jev_below_min': 'Jev 관심도 기준 미만',
-            'not_in_movers': '관심종목 시세 목록에 없음', 'held': '이미 보유 중', 'bars_missing': '분봉 자료 없음',
-            'pick_cooldown': '주문 거절 뒤 쉬는 중', 'picked': '강도 후보로 고름', 'no_strength_candidate': '강도 후보 없음',
-            'below_open': '시가 아래', 'below_base': '기준가 아래', 'off_high': '고가에서 멀어짐', 'no_new_listing': '신규주 없음',
-            'ipo_daily_limit': '오늘 신규주 매수 한도', 'inverse_low_confidence': '인버스: Jev 신뢰도 부족',
-            'inverse_too_late': '인버스: 지수가 이미 많이 빠짐', 'inverse_chase': '인버스: 추격 금지(VWAP·범위 위)',
-            'inverse_index_not_falling': '인버스: 지수 하락 부족', 'inverse_index_not_falling_now': '인버스: 최근 30분 하락 아님',
-            'inverse_index_rebounding': '인버스: 지수 반등 중', 'inverse_regime_not_falling': '인버스: 하락장 아님',
-            'inverse_flows_not_selling': '인버스: 프로그램 순매도 아님', 'inverse_us_not_falling': '인버스: 전날 나스닥 하락 아님',
-            'inverse_market_unknown': '인버스: 시장 자료 없음', 'careful_reentry_chase': '신중 재진입: 추격 금지',
-            'careful_reentry_weak': '신중 재진입: VWAP 아래'}.get(reason, reason or '—')
+    return entry_reasons.ENTRY.get(reason, reason or '—')
 
 
 def block_rows(events, day):

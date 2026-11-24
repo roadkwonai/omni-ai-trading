@@ -46,14 +46,14 @@ def universe(root=ROOT):
         return dict(DEFAULT_UNIVERSE)
 
 
-def save_universe(codes, root=ROOT):
+def save_universe(codes, root=ROOT, who='dashboard'):
     import config_store
     clean = {c: str(n)[:40] for c, n in codes.items() if is_code(str(c))}
     if not clean:
         raise ValueError('낙폭과대 감시 종목이 하나 이상 있어야 합니다.')
     before = universe(root)
     config_store.write_json(Path(root) / 'oversold-universe.json', {'version': 1, 'codes': clean})
-    config_store.record('oversold_universe', before, clean, saved=Path(root) / 'oversold-universe.json')
+    config_store.record('oversold_universe', before, clean, who, saved=Path(root) / 'oversold-universe.json')
     return clean
 
 

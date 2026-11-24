@@ -44,13 +44,13 @@ def load(path):
     return load_from(saved if isinstance(saved, dict) else {})
 
 
-def save(path, values):
+def save(path, values, who='dashboard'):
     """Write only known keys with allowed values; returns what was written."""
     import config_store
     clean = load_from(values)
     before = load(path)
     config_store.write_json(path, clean)
-    config_store.record('prefs', before, clean, saved=path)
+    config_store.record('prefs', before, clean, who, saved=path)
     return clean
 
 

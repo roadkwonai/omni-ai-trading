@@ -89,7 +89,7 @@ def days_order_times(root, account_key, days):
     sent = {}  # (day, fingerprint) -> first submission time
     for name in SENT_LOGS:
         try:
-            lines = (Path(root) / name).read_text().splitlines()
+            lines = (Path(root) / name).read_text(encoding='utf-8').splitlines()
         except OSError:
             continue
         for line in lines:
@@ -182,18 +182,18 @@ def record_balance(root, account_key, balance, now, every=BALANCE_MINUTES):
         reason = ('보유 종목이 있는데 총매수 0원' if held and not row['invested'] else
                   '주문가능금액·보유가 있는데 총자산 0원' if not plausible(row) else None)
         if reason:  # kept apart for the audit, never in the account's record
-            with (Path(root) / REJECTED).open('a') as stream:
+            with (Path(root) / REJECTED).open('a', encoding='utf-8') as stream:
                 stream.write(json.dumps({**row, 'account': account_key, 'reason': reason}, ensure_ascii=False) + '\n')
             (Path(root) / REJECTED).chmod(0o600)
             return False
         path = balance_file(root, account_key)
         try:
-            last = json.loads(path.read_text().strip().splitlines()[-1])['time']
+            last = json.loads(path.read_text(encoding='utf-8').strip().splitlines()[-1])['time']
             if last[:10] == now.date().isoformat() and (now - datetime.fromisoformat(last)).total_seconds() < every * 60:
                 return False
         except (OSError, ValueError, IndexError, KeyError, TypeError):
             pass
-        with path.open('a') as stream:
+        with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(row) + '\n')
         path.chmod(0o600)
         return True
@@ -204,7 +204,7 @@ def record_balance(root, account_key, balance, now, every=BALANCE_MINUTES):
 def balances(root, account_key, day):
     """Today's balance snapshots of one live account, oldest first ([] when none)."""
     try:
-        lines = balance_file(root, account_key).read_text().splitlines()
+        lines = balance_file(root, account_key).read_text(encoding='utf-8').splitlines()
     except OSError:
         return []
     out = []

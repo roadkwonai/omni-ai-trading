@@ -14,7 +14,6 @@ Log: nhplug/longterm-live.jsonl. Day state per account: nhplug/longterm-live/sta
 from __future__ import annotations
 
 import argparse
-import fcntl
 import json
 import os
 import time
@@ -28,6 +27,8 @@ import longterm_dca
 import longterm_watchlist
 import vibe_longterm as L
 import yeo_method
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 LOG = 'longterm-live.jsonl'
@@ -55,7 +56,7 @@ def state_path(root, key):
 
 def load_state(root, key):
     try:
-        data = json.loads(state_path(root, key).read_text())
+        data = json.loads(state_path(root, key).read_text(encoding='utf-8'))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -517,8 +518,8 @@ def main():
     # lock for this account: two loops never run on one account
     primary = configured[0] if configured else None
     name = 'live-auto.lock' if account == primary else f'live-follow-exec-{args.account}.lock'
-    with (root / name).open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (root / name).open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         last, idle = None, set()
         while True:
             now = datetime.now(KST)
@@ -539,7 +540,7 @@ def main():
                      'armed': bool(args.execute), **result}
             fold = (event.get('action'), event.get('reason'))
             if worth_logging(event, last, idle):
-                with (root / LOG).open('a') as stream:
+                with (root / LOG).open('a', encoding='utf-8') as stream:
                     stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
                 print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
             last = fold

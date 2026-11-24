@@ -266,7 +266,7 @@ def problems(values):
 def read_settings(root):
     """(settings, status): status is 'default', 'custom' or 'invalid' (invalid falls back to defaults)."""
     try:
-        stored = json.loads((Path(root) / FILE).read_text())
+        stored = json.loads((Path(root) / FILE).read_text(encoding='utf-8'))
     except FileNotFoundError:
         return dict(DEFAULTS), 'default'
     except (OSError, ValueError):
@@ -278,7 +278,7 @@ def read_settings(root):
     return {key: float(value) for key, value in values.items()}, 'custom'
 
 
-def write_settings(root, values):
+def write_settings(root, values, who='dashboard'):
     issues = problems(values)
     if issues:
         raise ValueError(' '.join(issues))
@@ -286,7 +286,7 @@ def write_settings(root, values):
     before = read_settings(root)[0]
     config_store.write_json(Path(root) / FILE, {**{k: float(values[k]) for k in DEFAULTS},
                                                  'updated': datetime.now(ZoneInfo('Asia/Seoul')).isoformat()}, indent=None)
-    config_store.record('strategy', before, {k: float(values[k]) for k in DEFAULTS}, saved=Path(root) / FILE)
+    config_store.record('strategy', before, {k: float(values[k]) for k in DEFAULTS}, who, saved=Path(root) / FILE)
 
 
 # Ready-made choices for the watchlist strength entry (dashboard presets; the user can still edit each value).

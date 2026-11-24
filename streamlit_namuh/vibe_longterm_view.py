@@ -831,7 +831,7 @@ def run_panel(root, settings):
         if not stop.exists():
             if c1.button('실행기 중지 요청', key='lt_stop', icon=':material/pause:', help='STOP 파일을 만들어 실행기가 다음 단계에서 멈춥니다.'):
                 stop.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                stop.write_text(datetime.now().isoformat())
+                stop.write_text(datetime.now().isoformat(), encoding='utf-8')
                 st.toast('중지 요청을 남겼습니다.', icon=':material/pause_circle:')
                 st.rerun()
         elif c1.button('중지 요청 해제', key='lt_unstop', icon=':material/play_arrow:'):

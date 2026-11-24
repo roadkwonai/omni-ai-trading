@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import sqlite3
-import fcntl
 import time
 import uuid
 import math
@@ -22,6 +21,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from config_store import write_json
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.mcp import MCPServerAdapter
@@ -174,7 +174,7 @@ def reserved_hashes(runtime):
     result = set()
     directory = Path(runtime) / 'nhplug/strategies'
     for path in directory.glob('*/forward.json'):
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
         value = data.get('account_sha256')
         if not isinstance(value, str) or len(value) != 64:
             raise ValueError('strategy account identity unavailable')
@@ -285,7 +285,7 @@ def shared_default_config(configs, runtime, adapter_factory=MCPServerAdapter):
             or policy.get('_account_independent') is True):
         raise ValueError('shared account policy unavailable')
     try:
-        owner = json.loads((Path(runtime) / 'nhplug/paper-account-owners.json').read_text())
+        owner = json.loads((Path(runtime) / 'nhplug/paper-account-owners.json').read_text(encoding='utf-8'))
         if (not isinstance(owner, dict) or owner.get('version') != 1 or not isinstance(owner.get('accounts'), dict)
                 or owner['accounts'].get(guard.scope) != 'nhplug_paper_isolated'):
             raise ValueError('shared account owner unavailable')
@@ -329,7 +329,7 @@ def journal_event(root, event, **fields):
     root = Path(root)
     entry = {'time': datetime.now(KST).isoformat(), 'event': event, **fields}
     path = root / 'events.jsonl'
-    with path.open('a') as stream:
+    with path.open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(entry, ensure_ascii=False, allow_nan=False) + '\n')
     from trading_ledger import ingest
     marker = root / 'ledger-ingest-error.json'
@@ -377,7 +377,7 @@ def account_snapshot(root, summary, now=None):
     if not plausible(row):
         return
     try:
-        with path.open('a') as stream:
+        with path.open('a', encoding='utf-8') as stream:
             stream.write(json.dumps(row) + '\n')
         os.chmod(path, 0o600)
     except OSError:
@@ -577,7 +577,7 @@ KOSDAQ_CODES = {'229200', '233740', '251340'}
 def exit_plans(root):
     """{symbol: plan} fixed when each position was entered; positions without one use the current settings."""
     try:
-        data = json.loads((Path(root) / 'exit-plans.json').read_text())
+        data = json.loads((Path(root) / 'exit-plans.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     numeric = lambda v: type(v) in (int, float) and math.isfinite(v) and 0 < v < 50
@@ -855,7 +855,7 @@ def latest_mover_rows(root, now, max_age=timedelta(minutes=12)):
     {} when missing or stale. User 2026-11-18: the watchlist (every 30 minutes) left a candidate's change and
     turnover up to 45 minutes old in Jev's choices."""
     try:
-        data = json.loads((Path(root) / 'movers.json').read_text())
+        data = json.loads((Path(root) / 'movers.json').read_text(encoding='utf-8'))
         at = datetime.fromisoformat(data['time'])
         if not timedelta(0) <= now - at <= max_age or not isinstance(data.get('rows'), dict):
             return {}
@@ -1400,7 +1400,7 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=Non
     above its last exit price. With `sized(code, price)` (strength_shares), a stock one buy cannot afford a share of is
     skipped (11-19 009150 at 847,000원 came out 0 shares every minute and held Jev's turn). (None, why) otherwise."""
     try:
-        data = json.loads((Path(root) / 'watchlist.json').read_text())
+        data = json.loads((Path(root) / 'watchlist.json').read_text(encoding='utf-8'))
         at = datetime.fromisoformat(data['time'])
         probabilities = data['probabilities'] if at.astimezone(KST).date() == now.astimezone(KST).date() else {}
     except (OSError, ValueError, KeyError, TypeError):
@@ -2062,7 +2062,7 @@ def update_v2_plan(root, symbol, price, cycle_id=None, held=0, added=0):
     stay."""
     path = Path(root) / 'exit-plans.json'
     try:
-        plans = json.loads(path.read_text())
+        plans = json.loads(path.read_text(encoding='utf-8'))
         plan = plans[symbol]
         basis = plan['target_basis']
         first = float(basis['entry_price'])
@@ -2205,7 +2205,7 @@ def stop_symbol_index(root, symbol):
         return '코스닥' if symbol in KOSDAQ_CODES else '코스피'
     for name, filename in (('stocks', 'watchlist.json'), ('rows', 'movers.json')):
         try:
-            market = str(((json.loads((Path(root) / filename).read_text()).get(name) or {}).get(symbol) or {}).get('index') or '').upper()
+            market = str(((json.loads((Path(root) / filename).read_text(encoding='utf-8')).get(name) or {}).get(symbol) or {}).get('index') or '').upper()
         except (OSError, ValueError, AttributeError):
             continue
         if 'KOSDAQ' in market:
@@ -2421,7 +2421,7 @@ def scale_in_history(db, root, symbol, quantity, *, allow_profit_rebuy=True):
             missing = {r[5] for r in sells if r[4] not in known and r[5]}
             legacy = {}
             if missing:
-                with (Path(root) / 'events.jsonl').open() as stream:
+                with (Path(root) / 'events.jsonl').open(encoding='utf-8') as stream:
                     for line in stream:
                         event = json.loads(line)
                         if event.get('event') == 'sell_submitted' and event.get('cycle_id') in missing and event.get('symbol') == symbol:
@@ -3142,7 +3142,7 @@ def request_exits(root, codes):
     """Ask to sell these codes entirely (the runner sells them through its protective path and clears each when flat)."""
     path = Path(root) / 'exit-requests.json'
     try:
-        current = json.loads(path.read_text())
+        current = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         current = []
     current = {c: None for c in current} if isinstance(current, list) else current if isinstance(current, dict) else {}
@@ -3155,7 +3155,7 @@ def exit_requests(root, owned):
     many (user 2026-11-17). A request lapses once the journal no longer owns the symbol."""
     path = Path(root) / 'exit-requests.json'
     try:
-        requested = json.loads(path.read_text())
+        requested = json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
         return {}
     except (OSError, ValueError):
@@ -3181,7 +3181,7 @@ def write_requests(path, requests):
 def manual_buys(root):
     """{code: shares} the user asked to buy by hand (manual-buys.json); empty on any doubt."""
     try:
-        requested = json.loads((Path(root) / 'manual-buys.json').read_text())
+        requested = json.loads((Path(root) / 'manual-buys.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     if not isinstance(requested, dict):
@@ -4203,7 +4203,7 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
         config = shared_default_config(configs, runtime, MCPServerAdapter)
         digest = account_hash(paper_account(config))
     else:
-        digest = json.loads((root / 'account.json').read_text())['account_sha256']
+        digest = json.loads((root / 'account.json').read_text(encoding='utf-8'))['account_sha256']
         if digest in reserved_hashes(runtime):
             raise ValueError('selected account now belongs to a swing strategy')
         config = selected_config(configs, digest)
@@ -4220,8 +4220,8 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
     else:
         broker_config = config
     broker = MCPServerAdapter('nhplug_paper_isolated', broker_config)
-    with (root/'runner.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (root/'runner.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         db = connect_journal(root/'orders.sqlite3', digest)
         stop = wake = None
         if websocket_wakeup:
@@ -4343,11 +4343,11 @@ def main():
         try:
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            old = json.loads(path.read_text())
+            old = json.loads(path.read_text(encoding='utf-8'))
             if old != {'account_sha256': digest}:
                 raise ValueError('existing selection differs; no overwrite')
         else:
-            with os.fdopen(fd, 'w') as f:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump({'account_sha256': digest}, f)
                 f.flush()
                 os.fsync(f.fileno())

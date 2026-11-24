@@ -1196,7 +1196,8 @@ def trade(root, read, now, execute=False):
               + ('' if execute else ' (dry-run: 주문 안 보냄)') + (f'; 오류 {error}' if error else ''))
     put_state(db, **{'book:actual': book if execute else before, ('traded_day' if execute else 'planned_day'): day,  # before the log
                      'last_plan': {'day': day, 'want': want, 'trade_to': target, 'orders': sent, 'why': why, 'notes': notes,
-                                   'nav': nav, 'weights': weights, 'execute': execute, 'error': error}})
+                                   'nav': nav, 'weights': weights, 'execute': execute, 'error': error},
+                     'book_settings': {'day': day, 'books': settings['books']}})  # what the day trades by: close() follows it
     log(db, 'order' if execute and sent else 'plan', day, regime=plan['regime'], raw=plan['raw'], mode=plan['mode'],
         modules=['yeo_method'] if yeo_cfg is not None else plan['active'], recommended=plan['recommended'],  # what traded
         indicators={'nav': nav, 'weights': weights}, orders=sent, reason=reason, now=now,
@@ -1290,7 +1291,8 @@ def dca(root, read, now, execute=False):
     reason = '; '.join(notes) or '적립일·대기 자금 투입 조건 없음'
     seen = {k: cfg.get(k) for k in ('style', 'profile', 'when_by', 'size_by', 'me_when', 'buy_every', 'amount_krw', 'size', 'shares_n',
                                     'frequency', 'day', 'weekday', 'time', 'time_mode', 'tune')}
-    seen.update(due=due, waiting_before=state.get('waiting_krw', 0),
+    bought = new_state.get('last_buy') == day != state.get('last_buy')
+    seen.update(due=due, bought=bought, asks={k: quotes[k][1] for k in want if k in quotes}, waiting_before=state.get('waiting_krw', 0),
                 waiting_after=new_state.get('waiting_krw', 0), contributed=new_state.get('contributed_krw', 0), cash_after=broker.cash())
     log(db, 'dca', day, regime=plan.get('regime'), mode=plan.get('mode'), orders=sent, indicators=seen,
         targets={'want': want, 'planned': {k: round(v) for k, v in planned.items()}},
@@ -1384,6 +1386,9 @@ def close(root, read, now, execute=False, accounts=None):
     stories = (st.get('story') or {}).get('stories') or {}
     settings = load_settings(root)
     execute = execute or settings['execute']
+    used = st.get('book_settings') or {}
+    if used.get('day') == day:  # a strategy changed after the day's trade reaches the paper books with the real one, on its next trade
+        settings = {**settings, 'books': used['books']}
     dca_cfg = settings['dca'].get('actual') if execute else None  # the virtual book's 적립식 acts only when executing
     dca_cfg = dca_cfg and longterm_watchlist.for_dca(dca_cfg, root)
     broker = broker_for(root, read)

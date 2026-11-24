@@ -174,8 +174,8 @@ def main():
     parser.add_argument('--benchmark', type=Path, default=root/'benchmark.json')
     parser.add_argument('--sessions', type=Path, help='JSON array of verified completed session dates after baseline')
     args = parser.parse_args()
-    sessions = json.loads(args.sessions.read_text()) if args.sessions else None
-    print(json.dumps(compare(args.journal, json.loads(args.benchmark.read_text()), sessions), ensure_ascii=False, indent=2, allow_nan=False))
+    sessions = json.loads(args.sessions.read_text(encoding='utf-8')) if args.sessions else None
+    print(json.dumps(compare(args.journal, json.loads(args.benchmark.read_text(encoding='utf-8')), sessions), ensure_ascii=False, indent=2, allow_nan=False))
 
 
 if __name__ == '__main__':

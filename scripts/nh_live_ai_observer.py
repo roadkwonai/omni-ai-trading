@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import io
 import json
@@ -17,6 +16,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
 from src.tools.mcp import MCPServerAdapter
@@ -124,7 +124,7 @@ def publish(path, result):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, tmp = tempfile.mkstemp(prefix='.live-ai-', dir=path.parent)
     try:
-        with os.fdopen(fd, 'w') as output:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
             json.dump(result, output, ensure_ascii=False, allow_nan=False)
             output.flush()
             os.fsync(output.fileno())
@@ -139,8 +139,8 @@ def observer_lock(path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-    with os.fdopen(fd, 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with os.fdopen(fd, 'a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         yield
 
 

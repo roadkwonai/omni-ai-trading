@@ -226,7 +226,7 @@ def main():
         result = minute_agreement(read, codes)
         OUT.mkdir(parents=True, exist_ok=True)
         path = OUT / f"minute_bars-{datetime.now(KST):%Y%m%d-%H%M}.json"
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
         path.chmod(0o600)
         print(json.dumps(result, ensure_ascii=False))
         print(path)
@@ -237,7 +237,7 @@ def main():
         result = mover_agreement(read, universe, list(targets(universe)[0]))
         OUT.mkdir(parents=True, exist_ok=True)
         path = OUT / f"mover_quotes-{datetime.now(KST):%Y%m%d-%H%M}.json"
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
         path.chmod(0o600)
         print(json.dumps({k: v for k, v in result.items() if k not in ('only_nh', 'only_kiwoom')}, ensure_ascii=False))
         print(path)
@@ -245,7 +245,7 @@ def main():
     result = bench(args.need, args.runs, universe)
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"{args.need}-{datetime.now(KST):%Y%m%d-%H%M}.json"
-    path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
     path.chmod(0o600)
     for s in result['ranking']:
         print(f"{s['rank']}. {s['source']:12} {'적격' if s['qualified'] else '부적격'} {s['score']:5.1f}점  {s['points']}  {s['median_s']}s  호출 {s['calls']}  종목 {s['rows']}/{result['union']}  "

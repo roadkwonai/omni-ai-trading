@@ -1,7 +1,6 @@
 """NH paper-only bounded execution with durable intent and fail-closed recovery."""
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import math
@@ -15,6 +14,7 @@ import io
 from datetime import datetime
 from decimal import Decimal
 
+from src import file_lock
 from src.config.loader import load_agent_config
 from src.tools.mcp import MCPServerAdapter
 from src.tools.nhplug_calendar import check_session
@@ -747,8 +747,8 @@ def run():
         raise ValueError('paper account unverified')
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.umask(0o077)
-    with (ROOT / 'runner.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (ROOT / 'runner.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         with init_db(ROOT / 'auto-v2.sqlite3') as db:
             now = datetime.now(old.KST)
             holdings, orders = snapshot(broker, account, now)

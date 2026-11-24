@@ -45,7 +45,7 @@ flowchart TB
 ```
 
 1. **준비**: 저장소 clone, `.venv` 준비 뒤 `.env.example`을 보고 `.env`를 직접 채웁니다(키를 대신 입력하지 않습니다).
-2. **점검**: `PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py check` — `.env` 키 이름(값 없음), 실행 데이터 폴더, launchd 서비스(`loaded`/`plist`/`missing`), 빠진 예약 작업, 일정 없는 예약 작업, 마지막 백업 나이를 JSON으로 냅니다.
+2. **점검**: `PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py check`는 `.env` 키 이름(값 없음), 실행 데이터 폴더, launchd 서비스(`loaded`/`plist`/`missing`), 빠진 예약 작업, 일정 없는 예약 작업, 마지막 백업 나이를 JSON으로 냅니다.
 3. **복원**: 실행 데이터가 없거나 비었을 때만 [복원](#복원)합니다.
 4. **서비스**: `scripts/launchd_services.py --out DIR`로 plist를 만들어 `~/Library/LaunchAgents`에 복사하고 `launchctl bootstrap`합니다. 대시보드·관찰·읽기 전용 서비스부터 올립니다([운영 가이드](operations.md#등록과-확인)).
 5. **예약 작업**: [예약 작업 옮기기](#예약-작업-옮기기)
@@ -55,7 +55,7 @@ flowchart TB
 > [!IMPORTANT]
 > 실주문과 관련된 서비스(`live-follow-*`, `longterm-live-*`, `--execute` 인자)와 계좌별 실주문 스위치는 사용자의 명시 승인 뒤에만 켭니다. 공유 모의 실행기 `shared-etf-paper`의 `--execute`도 계좌·보호 설정을 확인하고 승인받습니다.
 
-전체 절차는 `.claude/skills/ops-bootstrap/SKILL.md`에 있습니다. 이 스킬은 주문·실주문 스위치를 건드리지 않고, 서비스가 도는 중에 복원하지 않으며, 커밋하지 않습니다.
+전체 절차는 `.claude/skills/ops-bootstrap/SKILL.md`에 있습니다. 이 스킬은 주문·실주문 스위치를 건드리지 않고, 서비스가 실행 중일 때 복원하지 않으며, 커밋하지 않습니다.
 
 ## 백업 만들기
 
@@ -80,7 +80,7 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py import <아카�
 ```
 
 - `verify`는 manifest와 파일 해시, 안전한 경로인지를 확인합니다.
-- `import`는 거래 서비스(`com.vibetrading.*` 중 PID가 있는 것, 대시보드 제외)가 돌고 있으면 거부합니다.
+- `import`는 거래 서비스(`com.vibetrading.*` 중 PID가 있는 것, 대시보드 제외)가 실행 중이면 거부합니다.
 - 덮어쓸 기존 파일은 지우지 않고 `~/.vibe-trading/restore-backup-<시각>/`로 옮깁니다. 복원하는 SQLite 옆의 오래된 `-wal`·`-shm`도 함께 옮깁니다(DB 손상 방지).
 - `--force-offline`은 launchctl에 보이는 서비스가 이 체크아웃의 거래 서비스가 아님을 알 때(예: 새 기기)만 씁니다. 대시보드는 이 옵션을 제공하지 않습니다.
 
@@ -89,8 +89,8 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py import <아카�
 
 ## 예약 작업 옮기기
 
-- **내보내기**: `state_sync.py tasks-export`(평일 16:55 `state-sync`가 매일 함께 실행)가 Claude 앱의 예약 작업 저장소에서 작업마다 지시문·제목·cron·한 번 실행 시각(KST)·켜짐·권한 모드를 읽어 `ops/scheduled-tasks/`(`<taskId>/SKILL.md` + `manifest.json`)에 씁니다. 앱에서 지운 작업은 백업에서도 뺍니다. 다만 앱 저장소가 이 저장소의 작업을 하나라도 보여 줄 때만 정리하고, 새 Mac·새 계정에서 복원 전이거나 형식을 모르는 저장소면 백업을 그대로 둡니다(`ops/scheduled-tasks`는 git에 없어 지우면 되돌릴 수 없음). 비밀값처럼 보이는 문자열이 있으면 경고합니다.
-- **새 계정에서 만들기**: manifest의 항목(`taskId`, `description`, `cron`/`schedule`)과 `<taskId>/SKILL.md` 본문으로 scheduled-tasks MCP의 `create_scheduled_task`를 호출합니다. 이미 있는 taskId는 먼저 목록으로 확인해 중복으로 만들지 않습니다. 한 번 실행하는 작업은 날짜가 지났으면 만들지 않고, 날짜가 고정된 cron(일·월 칸이 숫자)도 그 날짜가 지났으면 만들지 않습니다. 꺼진 작업은 만든 뒤 끄고, 권한 모드는 사용자에게 맞추게 알립니다. cron은 Mac 시간대로 돌므로 Asia/Seoul인지 먼저 확인합니다. 대시보드 운영 → 자동 작업이 이 manifest의 모든 작업을 날짜별 시각 순으로 보여 줍니다.
+- **내보내기**: `state_sync.py tasks-export`(평일 16:55 `state-sync`가 매일 함께 실행)가 Claude 앱의 예약 작업 저장소에서 작업마다 지시문·제목·cron·한 번 실행 시각(KST)·켜짐·권한 모드를 읽어 `ops/scheduled-tasks/`(`<taskId>/SKILL.md` + `manifest.json`)에 씁니다. 앱에서 지운 작업은 백업에서도 뺍니다. 다만 앱 저장소가 이 저장소의 작업을 하나라도 보여 줄 때만 정리하고, 새 Mac·새 계정에서 복원 전이거나 형식을 모르는 저장소면 백업을 그대로 둡니다. 비밀값처럼 보이는 문자열이 있으면 경고합니다.
+- **새 계정에서 만들기**: manifest의 항목(`taskId`, `description`, `cron`/`schedule`)과 `<taskId>/SKILL.md` 본문으로 scheduled-tasks MCP의 `create_scheduled_task`를 호출합니다. 이미 있는 taskId는 먼저 목록으로 확인해 중복으로 만들지 않습니다. 한 번 실행하는 작업은 날짜가 지났으면 만들지 않고, 날짜가 고정된 cron(일·월 칸이 숫자)도 그 날짜가 지났으면 만들지 않습니다. 꺼진 작업은 만든 뒤 끄고, 권한 모드는 사용자에게 맞추게 알립니다. cron은 Mac 시간대로 실행되므로 Asia/Seoul인지 먼저 확인합니다. 대시보드 운영 → 자동 작업이 이 manifest의 모든 작업을 날짜별 시각 순으로 보여 줍니다.
 - `state_sync.py check`의 `tasks_without_schedule`·`tasks_not_in_manifest`가 manifest 빈틈을 알려 줍니다.
 
 예약 작업 목록과 일정은 [자동 작업](automation.md#claude-예약-작업)에 있습니다. Codex 자동화를 쓰는 기기라면 같은 일을 하는 Claude 예약 작업과 둘 중 하나만 켭니다.
@@ -114,5 +114,5 @@ PYTHONPATH=agent:scripts .venv/bin/python scripts/state_sync.py import <아카�
 | --- | --- |
 | 마지막 백업 · 지금 백업 | 설정 정리본과 아카이브를 바로 만듭니다(수 분 걸릴 수 있음). |
 | 백업 파일 | 보관 중인 아카이브 목록(크기·시각)과 내려받기 |
-| 가져오기 | 아카이브 업로드 → 자동 검증 → 확인 문구 `백업 가져오기` 입력 → 가져오기. 거래 서비스가 돌고 있으면 버튼이 막힙니다. |
+| 가져오기 | 아카이브 업로드 → 자동 검증 → 확인 문구 `백업 가져오기` 입력 → 가져오기. 거래 서비스가 실행 중이면 버튼이 막힙니다. |
 | 새 계정·새 기기 점검 | `state_sync.py check` 결과: 실행 데이터 폴더, `.env` 키 수(이름만), launchd 서비스 상태, 빠진 예약 작업, 마지막 백업 |

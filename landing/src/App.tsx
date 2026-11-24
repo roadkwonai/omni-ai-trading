@@ -5,11 +5,11 @@ import { Dialog, DialogBackdrop, DialogClose, DialogContent, DialogDescription, 
 import { Accordion, AccordionHeader, AccordionItem, AccordionPanel, AccordionTrigger } from '@ui-sdk/react/accordion'
 import {
   ArrowDown, ArrowRight, ArrowUpRight, Bank, BellRinging, CaretDown, Check, Copy, GithubLogo, List, ListChecks, MagnifyingGlassPlus,
-  ArrowsClockwise, CalendarCheck, ChatsCircle, Download, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, Play, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TrendDown, UserCircle, Warning, X,
+  ArrowsClockwise, CalendarCheck, ChatsCircle, Download, ClipboardText, Compass, Lightning, LockKey, Monitor, PiggyBank, Play, PlugsConnected, Moon, Notebook, Plant, Robot, Scales, ShieldCheck, Stack, Sun, TerminalWindow, TrendDown, UserCircle, Warning, X,
 } from '@phosphor-icons/react'
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
-  AI_LOOP, AI_PAID, AI_SEARCH_EXAMPLES, ASK_RULES, ASK_SCENES, ASK_WAYS, DECISIONS, EXTEND_CHECK, EXTEND_MOVE, EXTEND_NEXT, EXTEND_STEPS, FIRST_BUSINESS, FIX_CASE, HOLDING_LOSS, HORIZONS, LEARN_STEPS, SEARCH_STEPS, SEQUENCE, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
+  AI_LOOP, AI_PAID, CLI_FLOW, CLI_FROM, CLI_HUB, CLI_OPEN, CLI_SCENES, CLI_START, CLI_TO, AI_SEARCH_EXAMPLES, ASK_RULES, ASK_SCENES, ASK_WAYS, DECISIONS, EXTEND_CHECK, EXTEND_MOVE, EXTEND_NEXT, EXTEND_STEPS, FIRST_BUSINESS, FIX_CASE, HOLDING_LOSS, HORIZONS, LEARN_STEPS, SEARCH_STEPS, SEQUENCE, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
   JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_FLOW, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, RETIREMENT_POVERTY, TRAPS, WHY_CASES, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEOS,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
@@ -17,7 +17,7 @@ import { useNavState, useReveal, useTaglineWords } from './motion'
 const ScheduleChart = lazy(() => import('./Charts').then((m) => ({ default: m.ScheduleChart })))
 const chart = (el: React.ReactNode, h: number) => <Suspense fallback={<div className="chart-slot" style={{ height: h }} />}>{el}</Suspense>
 
-const ICONS = { TrendDown, Bank, Plant, Notebook, BellRinging, ListChecks, Scales, Stack, ShieldCheck, ArrowsClockwise, ChatsCircle, LockKey,
+const ICONS = { TerminalWindow, TrendDown, Bank, Plant, Notebook, BellRinging, ListChecks, Scales, Stack, ShieldCheck, ArrowsClockwise, ChatsCircle, LockKey,
   Lightning, Compass, PiggyBank, ClipboardText, PlugsConnected, Download, CalendarCheck, Robot, Monitor, MagnifyingGlassPlus } as const
 const img = (name: string) => `./img/${name}.webp`
 const shot = (id: string) => `./img/screens/${id}.webp`
@@ -148,7 +148,7 @@ function Hero() {
           <a className="btn btn-ghost button-md" href="#longterm"><Compass size={18} aria-hidden />장기투자 살펴보기</a>
         </div>
         <p className="proof small hero-step" style={css({ '--d': 3 })}>
-          <ShieldCheck size={16} aria-hidden /><span>모의매매와 가상 체결로 먼저 확인</span><span>실주문에는 별도 승인과 보호 규칙 적용</span>
+          <ShieldCheck size={16} aria-hidden /><span>모의매매와 가상 체결로 먼저 확인</span><span>실주문에는 별도 승인과 주문 보호 조건 적용</span>
         </p>
         <p className="hero-notice hero-step" style={css({ '--d': 4 })}>
           <Warning size={16} aria-hidden />
@@ -162,7 +162,7 @@ function Hero() {
         <figure className="browser">
           <div className="browser-bar" aria-hidden><span /><span /><span /></div>
           <img src={shot('overview')} width="1600" height="1000"
-            alt="Omni AI Trading 대시보드 종합 현황 화면. 오늘의 계좌별 실현손익, 잔고, 매매 프로그램 상태가 보입니다." />
+            alt="Omni AI Trading 대시보드 종합 현황 화면. 오늘의 계좌별 실현손익, 잔고, 실행기 상태가 보입니다." />
         </figure>
         <img className="hero-mascot" src={img('mascot-wave')} alt="" width="360" height="360" />
       </div>
@@ -773,7 +773,7 @@ function AiOps() {
             <p className="lead">
               Omni AI Trading은 <strong className="em">Claude Code나 Codex 같은 AI 코딩 에이전트와 함께 쓰는 투자 도구</strong>입니다.
               AI 에이전트에게 설치를 맡기고, 채팅으로 상태를 확인하거나 분석과 설정 변경을 요청할 수 있습니다. 반복 점검과 리포트 작성은 예약 작업이 맡습니다.
-              {' '}<mark className="hl">주문 실행기는 보호 조건을 충족한 실주문만 보냅니다.</mark>
+              {' '}<mark className="hl">실행기는 주문 보호 조건을 충족한 실주문만 보냅니다.</mark>
             </p>
           </div>
           <img className="art art-wide" src={img('mascot-agent')} alt="" width="1200" height="800" loading="lazy" />
@@ -793,7 +793,7 @@ function AiOps() {
         </ol>
         <div className="ai-chips" data-reveal>
           <div><p className="title-3">예약 작업이 매일 하는 일</p><ul>{SCHEDULE_CHIPS.map((c) => <li key={c} className="tag">{c}</li>)}</ul></div>
-          <div><p className="title-3">프로젝트 스킬 9개</p><ul>{AI_SKILLS.map((c) => <li key={c} className="tag">{c}</li>)}</ul></div>
+          <div><p className="title-3">프로젝트 스킬 10개</p><ul>{AI_SKILLS.map((c) => <li key={c} className="tag">{c}</li>)}</ul></div>
         </div>
         <div className="ai-ops">
           <figure className="chat" aria-label="채팅 운영 예시">
@@ -823,6 +823,143 @@ function AiOps() {
             <p className="small muted" style={{ marginTop: 20 }}>AI 도구를 쓰려면 유료 요금제가 필요합니다.</p>
             <p className="more-row" style={{ marginTop: 12 }}><a className="more button-sm" href={doc('ai-agents.md')}>AI와 함께 쓰기 가이드 <ArrowUpRight size={16} aria-hidden /></a></p>
           </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function CliNodes({ items }: { items: { icon: string; name: string; role: string }[] }) {
+  return (
+    <ul className="cli-nodes">
+      {items.map((n) => {
+        const Icon = ICONS[n.icon as keyof typeof ICONS]
+        return <li key={n.name}><span className="icon-chip" aria-hidden><Icon size={20} /></span><div><p className="title-3">{n.name}</p><p className="caption muted">{n.role}</p></div></li>
+      })}
+    </ul>
+  )
+}
+
+// Three cards meet at the hub; the dashes run toward it or away from it (still under reduced motion).
+function CliWires({ out }: { out?: boolean }) {
+  return (
+    <>
+      <svg className="cli-wires" viewBox="0 0 100 300" preserveAspectRatio="none" aria-hidden>
+        {['base', 'run'].map((layer) => [45, 150, 255].map((y) => (
+          <path key={layer + y} className={layer} d={out ? `M0 150 C50 150 50 ${y} 100 ${y}` : `M0 ${y} C50 ${y} 50 150 100 150`} vectorEffect="non-scaling-stroke" />
+        )))}
+      </svg>
+      <ArrowDown className="cli-down" size={20} aria-hidden />
+    </>
+  )
+}
+
+// The command line tool: try it, how a change is approved, what connects to it, and how to install it.
+function Cli() {
+  return (
+    <section id="cli" className="section" aria-labelledby="cli-title">
+      <div className="container">
+        <div className="head-split">
+          <div className="head">
+            <p className="kicker">omni CLI</p>
+            <h2 id="cli-title" className="heading-2">명령 한 줄로 묻고,<br />중요한 변경은 직접 승인합니다</h2>
+            <p className="lead">
+              <strong className="em">여러 AI 에이전트와 터미널을 같은 명령으로 잇는 도구</strong>입니다. Claude Code와 Codex를 비롯해 셸 명령을 실행할 수 있는 에이전트라면 기록을 조회하고, 설정을 바꾸기 전에 어떤 영향이 있는지 확인할 수 있습니다.
+            </p>
+          </div>
+          <img className="art art-wide" src={img('mascot-cli')} alt="" width="1200" height="800" loading="lazy" />
+        </div>
+
+        <div className="cli-demo" data-reveal>
+          <Tabs defaultValue={CLI_SCENES[0].id} orientation="vertical" className="cli-tabs">
+            <TabsList aria-label="omni에게 물어볼 말 고르기" className="cli-asks">
+              {CLI_SCENES.map((s) => (
+                <TabsTab key={s.id} value={s.id} className="cli-ask"><span className="cli-kind">{s.kind}</span><span>{s.ask}</span></TabsTab>
+              ))}
+            </TabsList>
+            <div className="panels cli-screen">
+              {CLI_SCENES.map((s) => (
+                <TabsPanel key={s.id} value={s.id} className="cli-panel">
+                  <div className="terminal">
+                    <p className="terminal-bar"><TerminalWindow size={16} aria-hidden /> omni</p>
+                    <pre><code>{s.lines.map((l, i) => <span key={i} className={l.startsWith('$') ? 'cmd' : 'out'}>{l}{'\n'}</span>)}</code></pre>
+                  </div>
+                  <div className="cli-reply">
+                    <span className="avatar" aria-hidden><Robot size={16} /></span>
+                    <div><p className="caption muted">AI 에이전트가 전하는 답</p><p className="body">{s.reply}</p></div>
+                  </div>
+                </TabsPanel>
+              ))}
+            </div>
+          </Tabs>
+          <p className="caption muted">실제로 쓰는 명령이며, 답에 나온 값은 예시입니다.</p>
+        </div>
+
+        <div className="cli-block">
+          <h3 className="heading-3">바꾸는 일은 네 단계를 거칩니다</h3>
+          <p className="muted">조회는 바로 답하고, <strong className="em">실계좌에 영향을 주는 변경과 매매 요청은 사용자가 승인해야</strong> 적용됩니다.</p>
+          <ol className="loop cli-flow" data-reveal>
+            {CLI_FLOW.map((f, i) => {
+              const Icon = ICONS[f.icon as keyof typeof ICONS]
+              return (
+                <li key={f.title} className={f.tag ? 'focal' : undefined}>
+                  <span className="cli-flow-head"><span className="icon-chip" aria-hidden><Icon size={20} /></span><span className="craft-no" aria-hidden>{i + 1}</span></span>
+                  <h4 className="title-1">{f.title}</h4>
+                  <p className="small muted">{rich(f.body)}</p>
+                  {f.tag && <span className="tag tag-warn">{f.tag}</span>}
+                </li>
+              )
+            })}
+          </ol>
+          <p className="cli-note small muted"><ShieldCheck size={16} aria-hidden /><span>직접 주문하는 명령은 없습니다. 매매 요청은 실행기와 주문 가드를 거칩니다. 실계좌의 신규 매수 중단만 승인 코드 없이 바로 적용됩니다.</span></p>
+          <p className="more-row"><a className="more button-sm" href="./omni-cli-flow.html">흐름도 크게 보기 <ArrowUpRight size={16} aria-hidden /></a></p>
+        </div>
+
+        <div className="cli-block">
+          <h3 className="heading-3">쓰던 AI 에이전트를 그대로 연결하세요</h3>
+          <p className="muted">omni CLI는 특정 AI 도구에 묶이지 않습니다. 새 에이전트를 쓰거나 자동화를 더해도 <strong className="em">같은 명령으로 확장할 수 있습니다.</strong></p>
+          <div className="cli-hub" role="group" aria-label="연결 구조. AI 에이전트와 스크립트가 omni CLI를 거쳐 기록, 설정 변경 계획, 승인으로 이어집니다.">
+            <CliNodes items={CLI_FROM} />
+            <CliWires />
+            <div className="cli-core"><TerminalWindow size={32} aria-hidden /><p className="heading-4">omni CLI</p><ul>{CLI_HUB.map((h) => <li key={h}><Check size={14} aria-hidden />{h}</li>)}</ul></div>
+            <CliWires out />
+            <CliNodes items={CLI_TO} />
+          </div>
+          <ul className="cli-points" data-reveal>
+            {CLI_OPEN.map((f) => {
+              const Icon = ICONS[f.icon as keyof typeof ICONS]
+              return <li key={f.title}><span className="icon-chip" aria-hidden><Icon size={20} /></span><h4 className="title-1">{f.title}</h4><p className="small muted">{rich(f.body)}</p></li>
+            })}
+          </ul>
+        </div>
+
+        <div className="cli-block cli-start">
+          <Tabs defaultValue="ai">
+            <div className="cli-start-head">
+              <h3 className="heading-3">CLI 설치하기</h3>
+              <TabsList aria-label="설치 방법 고르기" className="tab-chips">
+                <TabsIndicator className="tab-thumb" />
+                {CLI_START.map((s) => <TabsTab key={s.id} value={s.id} className="tab-chip">{s.label}</TabsTab>)}
+              </TabsList>
+            </div>
+            <div className="panels">
+              {CLI_START.map((s) => (
+                <TabsPanel key={s.id} value={s.id} className="cli-start-panel">
+                  <ol className="steps-v">
+                    {s.steps.map((x, i) => <li key={x.title}><span className="num quiet">{i + 1}</span><div><h4 className="title-2">{x.title}</h4><p className="small muted">{x.body}</p></div></li>)}
+                  </ol>
+                  <div className="prompt">
+                    <div className="prompt-head"><p className="title-3">{s.copy}</p><CopyButton text={s.code} label={s.copy} /></div>
+                    <pre tabIndex={0} aria-label={`${s.label} ${s.copy}`}><code>{s.code}</code></pre>
+                  </div>
+                </TabsPanel>
+              ))}
+            </div>
+          </Tabs>
+          <p className="more-row">
+            <a className="more button-sm" href={doc('omni-cli.md')}>omni CLI 가이드 <ArrowUpRight size={16} aria-hidden /></a>
+            <a className="more button-sm" href={doc('omni-cli-reference.md')}>명령·설정 참조 <ArrowUpRight size={16} aria-hidden /></a>
+          </p>
         </div>
       </div>
     </section>
@@ -1147,7 +1284,7 @@ function Safety() {
           <div className="head">
             <p className="kicker">안전장치와 대시보드</p>
             <h2 id="safety-title" className="heading-2">모의·가상으로 먼저 확인하고, 실주문은 직접 승인합니다</h2>
-            <p className="lead">계획과 가상 체결을 먼저 살펴볼 수 있습니다. 실계좌 주문은 계좌별 승인과 보호 조건을 거칩니다. 시세 급변이나 미체결이 생기면 실제 손실은 손실 차단 기준을 넘을 수 있습니다.</p>
+            <p className="lead">계획과 가상 체결을 먼저 살펴볼 수 있습니다. 실계좌 주문은 계좌별 승인과 보호 조건을 거칩니다. 시세 급변이나 미체결이 생기면 실제 손실이 손실 차단 기준을 넘을 수 있습니다.</p>
           </div>
           <img className="art art-sm" src={img('mascot-safety-v2')} alt="" width="360" height="360" loading="lazy" />
         </div>
@@ -1164,7 +1301,7 @@ function Safety() {
           <div>
             <h3 className="heading-4">Jev의 매수 신호를 매일 검증합니다</h3>
             <p className="small muted">
-              공유 모의계좌 첫 주(11/11~11/17)에 관찰한 Jev 진입 신호는 높은 신뢰도 구간의 적중률이 더 낮았습니다.
+              공유 모의계좌 첫 주(11/11~11/17)에 관찰한 Jev 진입 신호는 신뢰도가 높은 구간일수록 적중률이 낮았습니다.
               {' '}장 마감 뒤에는 매수 신호가 나오고 5·15·30분이 지났을 때 가격이 어떻게 움직였는지 확인합니다. 신뢰도는 Jev가 판단에 붙인 값입니다. 적중률과 수익률은 따로 집계합니다.
             </p>
           </div>
@@ -1190,7 +1327,7 @@ function Safety() {
         <div id="screens" className="screens-wrap">
           <h3 className="heading-3">대시보드 화면 10개를 살펴보세요</h3>
           <p className="small muted" style={{ marginTop: 8, maxWidth: 680 }}>
-            이 Streamlit 대시보드는 내 컴퓨터에서 엽니다. 계좌 상태를 확인하고 설정을 바꿀 수 있습니다. 실제 주문 전송은 주문 실행기가 맡습니다. 화면에 표시된 계좌번호는 가렸습니다.
+            이 Streamlit 대시보드는 내 컴퓨터에서 엽니다. 계좌 상태를 확인하고 설정을 바꿀 수 있습니다. 실제 주문은 실행기가 보냅니다. 화면의 계좌번호는 가렸습니다.
           </p>
           <Tabs defaultValue={SCREENS[0].id}>
             <TabsList aria-label="화면 고르기" className="tab-chips">
@@ -1233,7 +1370,7 @@ function Safety() {
   )
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label = '프롬프트' }: { text: string; label?: string }) {
   const [state, setState] = useState<'idle' | 'done' | 'fail'>('idle')
   const copy = async () => {
     try { await navigator.clipboard.writeText(text); setState('done') } catch { setState('fail') }
@@ -1243,10 +1380,10 @@ function CopyButton({ text }: { text: string }) {
     <>
       <button type="button" className="btn btn-ghost btn-sm button-sm copy-btn" onClick={copy} aria-describedby="copy-status">
         {state === 'done' ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
-        {state === 'done' ? '복사했습니다' : '프롬프트 복사'}
+        {state === 'done' ? '복사했습니다' : `${label} 복사`}
       </button>
       <span id="copy-status" className="sr-only" role="status">
-        {state === 'done' ? '프롬프트를 복사했습니다' : state === 'fail' ? '복사하지 못했습니다. 직접 선택해 주세요' : ''}
+        {state === 'done' ? `${label}를 복사했습니다` : state === 'fail' ? '복사하지 못했습니다. 직접 선택해 주세요' : ''}
       </span>
     </>
   )
@@ -1376,6 +1513,7 @@ export default function App() {
         <Video />
         <Principle />
         <AiOps />
+        <Cli />
         <Art />
         <Jev />
         <Longterm />

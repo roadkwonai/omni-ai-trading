@@ -23,6 +23,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import api_load
+import os_services
 from src.config.paths import get_runtime_root  # VIBE_TRADING_HOME, else ~/.vibe-trading (one rule for every tool)
 from sqlite_ro import day_rows  # a line is the day's by its own time, not by mentioning the day
 
@@ -79,19 +80,13 @@ def _query(path, sql, args=()):
 def services(run=subprocess.run):
     out = {}
     for name in SERVICES:
-        label = f'com.vibetrading.{name}'
-        result = run(['launchctl', 'list', label], capture_output=True, text=True)
-        if result.returncode != 0:
-            out[name] = {'registered': False}
+        try:
+            row = os_services.state(name, run=run)
+        except os_services.Unknown:
+            out[name] = {'registered': False, 'unknown': True}
             continue
-        pid = re.search(r'"PID" = (\d+);', result.stdout)
-        status = re.search(r'"LastExitStatus" = (-?\d+);', result.stdout)
-        row = {'registered': True, 'pid': int(pid.group(1)) if pid else None,
-               'last_exit': int(status.group(1)) if status else None}
-        if row['pid']:
-            started = run(['ps', '-o', 'lstart=', '-p', str(row['pid'])], capture_output=True, text=True).stdout.strip()
-            row['started'] = started or None
-        out[name] = row
+        out[name] = {'registered': False} if not row['registered'] else \
+            {'registered': True, 'pid': row['pid'], 'running': row['running'], 'last_exit': row['last_exit'], **({'started': row['started']} if row['running'] else {})}
     return out
 
 
@@ -125,7 +120,7 @@ def zero_totals(nhplug, now, since):
     totals of a paged balance were read from its first page, where NH gives 0."""
     out, start = {}, since or now - timedelta(hours=1)
     try:
-        lines = (Path(nhplug) / 'balance-rejected.jsonl').read_text().splitlines()
+        lines = (Path(nhplug) / 'balance-rejected.jsonl').read_text(encoding='utf-8').splitlines()
     except OSError:
         return out
     for line in lines:
@@ -425,7 +420,7 @@ def learning_rounds(log, day, tail=40):
     """The learning watcher's last minute rounds of `day` from its log: [(time, error_type or None)] (11-19: it ran but
     every round failed, which service.down cannot see)."""
     try:
-        lines = Path(log).read_text(errors='replace').splitlines()[-tail:]
+        lines = Path(log).read_text(errors='replace', encoding='utf-8').splitlines()[-tail:]
     except OSError:
         return []
     rounds = []
@@ -457,8 +452,8 @@ def anomalies(facts, now, skipped=None):
             continue
         row = facts['services'].get(name, {})
         if not row.get('registered'):
-            found[f'service.unregistered:{name}'] = 'launchd 미등록'
-        elif not row.get('pid'):
+            found[f'service.unregistered:{name}'] = '서비스 상태 확인 불가' if row.get('unknown') else '서비스 미등록'
+        elif not row.get('running'):
             found[f'service.down:{name}'] = f"실행 중 아님(last_exit={row.get('last_exit')})"
     for name, row in facts['ledgers'].items():
         if row.get('unfinished_intents'):

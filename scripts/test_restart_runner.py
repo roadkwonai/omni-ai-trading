@@ -40,8 +40,8 @@ class FakeRunner:
         if args[1] == 'kickstart':
             self.alive = True
             self.write({'event': 'strategy_settings'})
-        label = r.RUNNERS['shared'][0]
-        return SimpleNamespace(stdout=f"{'123' if self.alive else '-'}\t0\t{label}\n")
+        label = 'com.vibetrading.' + r.RUNNERS['shared'][0]
+        return SimpleNamespace(returncode=0, stdout=f"{'123' if self.alive else '-'}\t0\t{label}\n")
 
 
 class RestartTests(unittest.TestCase):

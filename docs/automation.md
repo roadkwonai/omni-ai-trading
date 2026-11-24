@@ -1,6 +1,6 @@
 # 자동 작업
 
-무엇이 언제 저절로 도는지 한곳에 모은 지도입니다. 자동 작업은 두 종류입니다. macOS launchd 서비스(실행기·수집기·알림)와 Claude 예약 작업(리포트·감사·점검을 쓰는 에이전트)입니다. 장중 감사, 장전 사전 점검, 예약 작업이 쓰는 읽기 전용 실행기 `scripts/ro`, 프로젝트 스킬 목록도 여기서 다룹니다.
+무엇이 언제 저절로 실행되는지 한곳에 모은 지도입니다. 자동 작업은 두 종류입니다. macOS launchd 서비스(실행기·수집기·알림)와 Claude 예약 작업(리포트·감사·점검을 맡는 에이전트)입니다. 장중 감사, 장전 사전 점검, 예약 작업이 쓰는 읽기 전용 실행기 `scripts/ro`, 프로젝트 스킬 목록도 여기서 다룹니다.
 
 - [평일 하루 일정](#평일-하루-일정)
 - [launchd 서비스](#launchd-서비스)
@@ -14,7 +14,7 @@
 - [작업을 더하거나 바꿀 때](#작업을-더하거나-바꿀-때)
 
 > [!NOTE]
-> 시각은 모두 한국시간입니다. launchd는 Mac 시계를 그대로 쓰므로 Mac이 KST여야 합니다. 서비스 등록·재시작 절차는 [운영 가이드](operations.md)에 있습니다.
+> 시각은 모두 한국 시간입니다. launchd는 Mac 시계를 그대로 쓰므로 Mac이 KST여야 합니다. 서비스 등록·재시작 절차는 [운영 가이드](operations.md)에 있습니다.
 
 ## 평일 하루 일정
 
@@ -61,7 +61,7 @@ gantt
 | 09:35 | launchd | `longterm-live-2` | 실계좌 2 장기투자 실행기(09:40\~14:30 주문 창, 14:40까지 미체결 정리) |
 | 11:30·13:30·14:30 | Claude | `trading-intraday-report` | 장중 진행 보고(대화) |
 | 15:35 | launchd | `nxt-virtual` | NXT 종가매매 가상 저녁 판단 |
-| 15:40 | launchd | `discord-notify` | 마감 요약 발송(늘 도는 감시 서비스) |
+| 15:40 | launchd | `discord-notify` | 마감 요약 발송, 18:00 저녁 리포트 누락 알림(계속 실행되는 감시 서비스) |
 | 15:45 | Claude | `trading-close-report` | 장 마감 후 보고(대화) |
 | 15:50 | launchd | `trading-backup` | 원장·설정 일일 사본 |
 | 실행기 종료 7분 뒤 | launchd | `shared-etf-learning` | 복기, 사후 결과, 낙폭과대 사례, 매매일지 레코드 |
@@ -102,7 +102,7 @@ gantt
 | `us-ideas` | 미국 종목 아이디어 | `us_ideas.py --scheduled` (참고 정보, 주문 없음) | 금 10:00 · 10:30 | `vibe-longterm` |
 
 > [!IMPORTANT]
-> 저장소가 생성하는 `live-follow-1`과 `longterm-live-2` 정의에는 `--execute`가 들어 있습니다. 실제 설치에 등록된 인자는 다를 수 있습니다. 실주문은 실행 인자 외에도 계좌별 자동매매·실주문 스위치, HALT 상태와 주문 보호 조건을 확인합니다. [실주문이 나가는 조건](live-accounts.md#실주문이-나가는-조건)
+> 저장소가 생성하는 `live-follow-1`과 `longterm-live-2` 정의에는 `--execute`가 들어 있습니다. 실제 설치에 등록된 인자는 다를 수 있습니다. 실주문은 실행 인자 외에도 계좌별 자동매매·실주문 스위치, HALT 상태와 주문 보호 조건을 확인한 뒤 나갑니다. [실주문이 나가는 조건](live-accounts.md#실주문이-나가는-조건)
 
 **퇴역한 서비스** (2026-11-17, plist는 `~/.vibe-trading/nhplug/retired-launchd-2026-11-17/`에 보관): `vibe-advisor`, `vibe-paper`, `vibe-fast-exit-observer`, `vibe-event-advisor`, `vibe-event-replay`, `live-follow-2`, `jev-virtual`. 다시 쓰려면 별도 승인과 재등록이 필요합니다.
 
@@ -146,7 +146,7 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 
 ## Codex 자동화와의 중복
 
-같은 일을 하는 Codex 자동화가 있습니다. 둘 다 켜면 같은 리포트·감사가 두 번 돌아갑니다.
+같은 일을 하는 Codex 자동화가 있습니다. 둘 다 켜면 같은 리포트·감사가 두 번 실행됩니다.
 
 | Codex 자동화 | 같은 일을 하는 Claude 예약 작업 | 상태 |
 | --- | --- | --- |
@@ -160,7 +160,7 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 
 ## 장전 사전 점검
 
-`scripts/preflight.py`가 개장 전에 필요한 것을 읽기 전용으로 확인합니다. launchd `preflight`가 평일 08:20·08:53에 돌리고, 기록은 `~/.vibe-trading/nhplug/preflight/<날짜>.jsonl`에 쌓입니다. 실패가 있으면 Discord 실시간 채널에 실패 항목만 보냅니다(`--no-send`면 보내지 않음).
+`scripts/preflight.py`가 개장 전에 필요한 것을 읽기 전용으로 확인합니다. launchd `preflight`가 평일 08:20·08:53에 실행하고, 기록은 `~/.vibe-trading/nhplug/preflight/<날짜>.jsonl`에 쌓입니다. 실패가 있으면 Discord 실시간 채널에 실패 항목만 보냅니다(`--no-send`면 보내지 않음).
 
 | 점검 | 통과 조건 | 시작 |
 | --- | --- | --- |
@@ -173,7 +173,7 @@ Claude Code의 scheduled-tasks에 등록된 에이전트 작업입니다. 실제
 | 장전 자료 수집 | 30분 안 수집, 실패 절 없음(09:00 뒤에는 야간선물·NXT 호가 제외) | 08:20 |
 | 시황 자료 | `market-context.json`이 24시간 안 | 08:20 |
 | 장기 엔진 아침 판단 | 오늘 `regime` 판단 기록(장기투자 꺼짐이면 통과) | 08:47 |
-| 순위 후보 | 오늘 `movers.json`. 09:00 전에는 순위 서비스가 개장을 기다리며 떠 있으면 통과 | 08:51 |
+| 순위 후보 | 오늘 `movers.json`. 09:00 전에는 순위 서비스가 실행 중이며 개장을 기다리면 통과 | 08:51 |
 | 장전 상세 분석 작성 | 오늘 리포트가 있고 템플릿 검사 통과 | 08:52 |
 
 휴장일이면 점검 없이 통과로 끝납니다. 시작 시각 전인 항목은 "HH:MM 뒤 점검"으로 남습니다.
@@ -201,7 +201,7 @@ flowchart LR
 - 다시 띄우기는 서비스마다 5번까지입니다(NH 계좌 목록 일시 오류로 시작 직후 멈춘 11-18 사례).
 - 휴장 표를 읽지 못하면 기록에 남기고 시작합니다. 실행기는 실시간 시세 없이는 매매하지 못합니다.
 - 끝나지 않은 주문은 기록만 하고 막지 않습니다. 실행기 첫 회차가 증권사와 대조하고, 풀릴 때까지 새 주문을 내지 않습니다.
-- 주문은 개장(09:00)부터입니다. 손절 주문도 09:00부터 실행됩니다(2026-11-19 사용자 결정. 예전에는 09:00\~09:09에 관찰만 함).
+- 주문은 개장(09:00)부터입니다. 손절 주문도 09:00부터 실행됩니다(2026-11-19 사용자 결정. 예전에는 09:00\~09:09에 관찰만 했습니다).
 
 ## 장중 감사
 
@@ -210,7 +210,7 @@ flowchart LR
 1. **수집**: `scripts/ro intraday_audit.py --since <직전 회차 HH:MM>`이 서비스 상태, 원장(체결·미종결 주문·회차 간격·진입 차단), 장전 입력, Jev 입력의 출처와 신선도, 실계좌 미러 모드, 날짜별 확인 진행을 JSON 하나로 냅니다. 기록 DB 6개의 `integrity_check`(손상이면 `db.corrupt`)와 학습 관찰기 연속 실패(`learning.error`), 같은 종목·같은 진입 거절 사유가 3분 연속인 경우(`entry.repeat_block`)도 봅니다. 증권사 API는 부르지 않습니다.
 2. **발견**: 수집기가 이상을 키(`영역.종류:대상`, 예 `service.down:shared-etf-paper`)로 만들고, 그날 감사 파일과 비교해 `new`·`ongoing`·`resolved`를 붙입니다.
 3. **기록**: `~/.vibe-trading/nhplug/shared-etf-paper/reviews/operations-audit-YYYY-MM-DD.md` 끝에 회차 절을 덧붙입니다. 같은 문제는 다시 쓰지 않습니다.
-4. **날짜별 확인**: 새 기능이 실제 장에서 처음 도는지 한 번 볼 항목은 `.agents/skills/intraday-audit/references/checks.md`에 있습니다. 완료하면 `[check-done:<id>]`를 씁니다.
+4. **날짜별 확인**: 새 기능이 실제 장에서 처음 동작하는지 한 번 볼 항목은 `.agents/skills/intraday-audit/references/checks.md`에 있습니다. 완료하면 `[check-done:<id>]`를 씁니다.
 5. **알림**: 스킬의 알림 기준에 맞을 때만 대화로 알립니다.
 
 ### 감사 이력 (여러 날에 걸친 재발 추적)
@@ -240,15 +240,15 @@ scripts/ro audit_incidents.py --since 2026-11-18
 
 ## 읽기 전용 실행기 scripts/ro
 
-예약 작업은 사람이 없을 때 돌아갑니다. 셸 명령마다 승인을 기다리면 멈추므로(11-18 08:50 장기 리포트가 30분 대기), 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 권한 규칙 하나(`Bash(scripts/ro *)`)로 승인 없이 돌아갑니다.
+예약 작업은 사람이 없을 때 실행됩니다. 셸 명령마다 승인을 기다리면 멈추므로(11-18 08:50 장기 리포트가 30분 대기), 허용된 읽기 전용 명령만 `scripts/ro` 하나로 묶었습니다. 권한 규칙 하나(`Bash(scripts/ro *)`)로 승인 없이 실행됩니다.
 
 | 형식 | 하는 일 |
 | --- | --- |
 | `scripts/ro <스크립트.py> [인자]` | 허용 목록의 스크립트 실행(PYTHONPATH는 `ro`가 넣음) |
 | `scripts/ro --out <파일> <스크립트.py> …` | 출력을 파일로(리다이렉트 대신) |
 | `scripts/ro sql <~/.vibe-trading 아래 DB> "<SELECT…>"` | 읽기 전용 SQLite 질의 한 문장(SELECT·WITH·PRAGMA), 줄마다 JSON |
-| `scripts/ro services` | `launchctl list`의 vibetrading 서비스 |
-| `scripts/ro pytest <scripts/test_*.py…>` | `scripts/`·`streamlit_namuh/` 테스트(`-q -x -v -k -p no:cacheprovider`만) |
+| `scripts/ro services` | 등록된 vibetrading 서비스(PID·마지막 종료 값·이름). 확인할 수 없으면 실패 |
+| `scripts/ro pytest <scripts/test_*.py…>` | `scripts/`·`streamlit_namuh/` 테스트 파일(`-q -x -v -k -p no:cacheprovider`만, 파일 하나 이상) |
 | `scripts/ro vibe-status` | 장기 엔진 켜짐 여부 |
 
 <details>
@@ -291,6 +291,7 @@ scripts/ro audit_incidents.py --since 2026-11-18
 | `danswer-market-trading` | 『실전 시황 트레이딩』 판단표(장전 분석·매매일지 복기에서 참조, 운영자 개인 자료라 배포하지 않음) | 다른 스킬이 참조 |
 | `verify-dashboard` | 대시보드 변경을 실제 화면으로 확인 | 개발할 때 |
 | `automation-guideline-review` | 예약 작업·자동화 지침 검수 | 요청할 때만 |
+| `omni-cli` | 명령 `omni`로 기록 조회, 설정 변경·승인 요청 ([안내](ai-agents.md#omni-명령)) | 요청 |
 | `developing-with-streamlit`, `ui-ux-pro-max`, `design-taste-frontend` | 대시보드·리포트 화면 개발 보조 | 개발할 때 |
 
 이 밖의 디자인·애니메이션 스킬은 랜딩페이지 작업용입니다.

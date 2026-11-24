@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
 import os
@@ -13,6 +12,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 POLL_INTERVAL = 5  # filesystem metadata only; no NH calls
@@ -411,8 +412,8 @@ def main():
     nhplug = get_runtime_root() / 'nhplug'
     directory = nhplug / 'vibe-fast-exit-shadow'
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with (directory / 'observer.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with (directory / 'observer.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         previous = object()
         from session_times import MARKET_OPEN, load as session_clock
         while True:

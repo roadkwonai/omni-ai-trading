@@ -267,7 +267,7 @@ def theme_round(read, universe, candidates, now, log=print):
     try:
         import market_context as mc
         import theme_data
-        context = json.loads((ROOT / 'market-context.json').read_text())
+        context = json.loads((ROOT / 'market-context.json').read_text(encoding='utf-8'))
         if now - datetime.fromisoformat(context['time']) > mc.MAX_AGE:
             return []
         groups = (context.get('themes') or {}).get('groups') or []
@@ -287,7 +287,7 @@ def note_theme_picks(path, now, picks, keep_days=10):
     day, hhmm = now.date().isoformat(), now.isoformat(timespec='seconds')
     from config_store import write_json
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         data = {}
     today = data.setdefault(day, {})
@@ -297,10 +297,11 @@ def note_theme_picks(path, now, picks, keep_days=10):
 
 
 def write(path, payload):
+    from config_store import replace
     tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(payload, ensure_ascii=False))
+    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
     os.chmod(tmp, 0o600)
-    tmp.replace(path)
+    replace(tmp, path)
 
 
 def collect_context():

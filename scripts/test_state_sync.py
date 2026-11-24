@@ -76,14 +76,11 @@ def test_verify_catches_bad_checksum(tmp_path):
 def test_import_refuses_while_services_run(tmp_path, monkeypatch):
     root = make_runtime(tmp_path)
     archive, _ = ss.export_archive(root, tmp_path / 'out')
-    monkeypatch.setattr(ss, 'launchctl_list', lambda: '123\t0\tcom.vibetrading.shared-etf-paper\n456\t0\tcom.vibetrading.shared-etf-dashboard\n')
+    import os_services
+    monkeypatch.setattr(os_services, 'states', lambda: {n: {'running': n != 'market-movers'} for n in ('shared-etf-paper', 'shared-etf-dashboard', 'market-movers')})
     with pytest.raises(SystemExit, match='shared-etf-paper'):
         ss.import_archive(archive, root)
-    assert ss.running_services(launchctl_text()) == ['com.vibetrading.shared-etf-paper']
-
-
-def launchctl_text():
-    return '123\t0\tcom.vibetrading.shared-etf-paper\n456\t0\tcom.vibetrading.shared-etf-dashboard\n-\t0\tcom.vibetrading.market-movers\n'
+    assert ss.running_services() == ['com.vibetrading.shared-etf-paper']
 
 
 def test_import_keeps_pre_restore_copy(tmp_path, monkeypatch):
@@ -93,7 +90,8 @@ def test_import_keeps_pre_restore_copy(tmp_path, monkeypatch):
     (root / 'nhplug' / 'ledger.sqlite3-wal').write_text('stale')
     keep = root / 'nhplug' / 'untouched.txt'
     keep.write_text('keep')
-    monkeypatch.setattr(ss, 'launchctl_list', lambda: '-\t0\tcom.vibetrading.market-movers\n')
+    import os_services
+    monkeypatch.setattr(os_services, 'states', lambda: {'market-movers': {'running': False}})
     result = ss.import_archive(archive, root)
     assert (root / 'nhplug' / 'events.jsonl').read_text() == '{"a": 1}\n'
     aside = root / result['aside'].rsplit('/', 1)[-1]

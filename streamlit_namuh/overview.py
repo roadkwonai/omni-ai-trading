@@ -230,7 +230,7 @@ def alerts(runtime, states, follow, today, now=None):
     found += [f'{k} 미러 차단·오류 {n}회 (운영 → AI·실행 기록에서 확인)' for k, n in blocked.items()]
     for path in sorted((runtime / 'live-follow').glob('lag-alert-*.json')):  # nh_live_follow.mirror_lag (11/17)
         try:
-            lag = json.loads(path.read_text())
+            lag = json.loads(path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
         if str(lag.get('since', '')).startswith(today):
@@ -285,7 +285,7 @@ def balance_records(path):
     """Read usable total-asset observations from the dashboard balance log (impossible ones skipped, live_fills.plausible)."""
     from live_fills import plausible
     try:
-        lines = Path(path).read_text().splitlines()
+        lines = Path(path).read_text(encoding='utf-8').splitlines()
     except OSError:
         return
     for line in lines:
@@ -394,10 +394,14 @@ def principal_form(items, records):
                                                        value=int(current[item['key']]) if item['key'] in current else None,
                                                        placeholder='입력 필요', key=f"principal_{item['key']}")
             if st.form_submit_button('원금 저장', type='primary', icon=':material/save:'):
-                for key, value in values.items():
-                    if value and value != current.get(key):
-                        A.save_one(PRINCIPAL_RECORD.get(key, key), {'principal_krw': int(value)})
-                st.rerun()
+                try:
+                    for key, value in values.items():
+                        if value and value != current.get(key):
+                            A.save_one(PRINCIPAL_RECORD.get(key, key), {'principal_krw': int(value)})
+                except (OSError, ValueError) as exc:
+                    st.error(f'저장하지 못했습니다: {exc}')
+                else:
+                    st.rerun()
 
 
 def balance_section(items, runtime, today, refresh=None, records=None):

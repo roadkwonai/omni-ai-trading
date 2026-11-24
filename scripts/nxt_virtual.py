@@ -157,7 +157,7 @@ def candidates(shared=SHARED, limit=SETTINGS['max_candidates']):
     found = {}
     for name in ('movers.json', 'watchlist.json'):
         try:
-            data = json.loads((Path(shared) / name).read_text())
+            data = json.loads((Path(shared) / name).read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
         rows = data.get('rows') or data.get('stocks') or {}
@@ -229,7 +229,7 @@ class Journal:
     def write(self, event, now, **data):
         row = {'time': now.isoformat(timespec='seconds'), 'event': event, **data}
         line = json.dumps(row, ensure_ascii=False, default=str)
-        with open(self.root / 'events.jsonl', 'a') as f:
+        with open(self.root / 'events.jsonl', 'a', encoding='utf-8') as f:
             f.write(line + '\n')
         with self.db:
             self.db.execute('INSERT INTO events (time,day,event,symbol,data) VALUES (?,?,?,?,?)',
@@ -298,7 +298,7 @@ def mark_running(journal, session, now):
 def running(root):
     """The session that is running now ({'pid', 'session', 'started'}), or None."""
     try:
-        data = json.loads((Path(root) / 'session.json').read_text())
+        data = json.loads((Path(root) / 'session.json').read_text(encoding='utf-8'))
         os.kill(data['pid'], 0)
         return data
     except (OSError, ValueError, KeyError, TypeError):
@@ -475,7 +475,7 @@ def audit(root=ROOT):
     root = Path(root)
     problems, report = [], {}
     try:
-        lines = [json.loads(l) for l in (root / 'events.jsonl').read_text().splitlines() if l.strip()]
+        lines = [json.loads(l) for l in (root / 'events.jsonl').read_text(encoding='utf-8').splitlines() if l.strip()]
     except OSError:
         return {'ok': False, 'problems': ['no events.jsonl yet']}
     db = sqlite3.connect(f'file:{root / "nxt.sqlite3"}?mode=ro', uri=True)

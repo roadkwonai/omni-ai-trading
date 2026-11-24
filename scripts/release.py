@@ -43,7 +43,7 @@ TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 
 def version(root=ROOT):
     """The version in VERSION, validated as Semantic Versioning."""
-    text = (Path(root) / 'VERSION').read_text().strip()
+    text = (Path(root) / 'VERSION').read_text(encoding='utf-8').strip()
     if not SEMVER.match(text):
         raise ValueError(f'VERSION이 Semantic Versioning 형식이 아닙니다: {text!r}')
     return text
@@ -59,7 +59,7 @@ def note_path(ver, folder=RELEASE_DIR):
 
 def note_parts(path):
     """(title, body) of a release note: the first '# ' line is the release name, the rest is the Release text."""
-    lines = Path(path).read_text().splitlines()
+    lines = Path(path).read_text(encoding='utf-8').splitlines()
     if not lines or not lines[0].startswith('# '):
         raise ValueError(f'{Path(path).name}: 첫 줄이 "# 제목"이어야 합니다')
     return lines[0][2:].strip(), '\n'.join(lines[1:]).strip() + '\n'
@@ -81,11 +81,11 @@ def check(root=ROOT):
             problems.append('릴리스 노트 본문이 너무 짧습니다')
     except (OSError, ValueError) as exc:
         problems.append(str(exc))
-    readme = (root / 'README.md').read_text()
+    readme = (root / 'README.md').read_text(encoding='utf-8')
     if f'release-v{ver}-' not in readme or f'releases/tag/v{ver}' not in readme:
         problems.append(f'README 릴리스 배지가 v{ver}가 아닙니다')
     content = root / 'landing' / 'src' / 'content.ts'
-    if content.is_file() and f"VERSION = '{ver}'" not in content.read_text():
+    if content.is_file() and f"VERSION = '{ver}'" not in content.read_text(encoding='utf-8'):
         problems.append(f"landing/src/content.ts의 VERSION이 '{ver}'가 아닙니다")
     return problems
 
@@ -94,7 +94,7 @@ def _git(args, env=None, cfg=None, input_text=None):
     import report_pages as rp
     if cfg:
         return rp.git(args, ROOT, cfg)
-    done = subprocess.run(['git', *args], cwd=ROOT, env=env, capture_output=True, text=True, input=input_text)
+    done = subprocess.run(['git', *args], cwd=ROOT, env=env, capture_output=True, text=True, input=input_text, encoding='utf-8')
     if done.returncode:
         raise RuntimeError(rp.clean_error((done.stderr or done.stdout).strip() or f'git {args[0]} 실패'))
     return done.stdout
@@ -109,7 +109,7 @@ def snapshot_tree(ref='HEAD'):
         if dropped:
             _git(['rm', '-r', '-q', '--cached', '--ignore-unmatch', '--', *PRIVATE_PATHS], env)
         gate = subprocess.run([sys.executable, 'tools/ci_private_files_gate.py'], cwd=ROOT, env=env,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding='utf-8')
         if gate.returncode:
             raise RuntimeError('비공개 문서 검사 실패:\n' + (gate.stdout + gate.stderr).strip())
         return _git(['write-tree'], env).strip(), dropped

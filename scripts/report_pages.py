@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import fcntl
 import filecmp
 import hashlib
 import html as htmllib
@@ -44,6 +43,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from config_store import write_json, write_text
+
+from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 RUNTIME = Path(os.environ.get('VIBE_TRADING_HOME') or Path.home() / '.vibe-trading').expanduser()
@@ -318,12 +319,12 @@ def history(db=None, action=None, limit=2000):
 def locked():
     """One writer at a time (the watcher and dashboard buttons)."""
     LOCK.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOCK, 'w') as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+    with open(LOCK, 'a', encoding='utf-8') as handle:
+        file_lock.lock(handle)
         try:
             yield
         finally:
-            fcntl.flock(handle, fcntl.LOCK_UN)
+            file_lock.unlock(handle)
 
 
 # ---------- settings ----------
@@ -383,7 +384,7 @@ def file_hash(path):
 def period_label(kind, key):
     if re.fullmatch(DAY, key):
         d = datetime.strptime(key, '%Y-%m-%d')
-        return f"{d:%Y년 %-m월 %-d일} ({'월화수목금토일'[d.weekday()]})"
+        return f"{d.year}년 {d.month}월 {d.day}일 ({'월화수목금토일'[d.weekday()]})"
     if m := re.fullmatch(r'(\d{4})-(\d{2})', key):
         return f'{m[1]}년 {int(m[2])}월'
     if m := re.fullmatch(r'(\d{4})-([QH])(\d)', key):
@@ -498,7 +499,7 @@ def archify(kind, source, out):
             data['meta']['animation'] = 'none'  # a report diagram holds still (taste loop-pause: no motion past 5 s without a pause)
         spec.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
         done = subprocess.run([node, str(ARCHIFY), 'render', kind, str(spec), str(out), '--quality', 'standard'],
-                              capture_output=True, text=True, timeout=90)
+                              capture_output=True, text=True, timeout=90, encoding='utf-8')
     except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
         return f'{type(exc).__name__}'
     finally:
@@ -635,7 +636,7 @@ def ensure_assets(site=None):
             shutil.copyfile(TEMPLATES / name, assets / name)
     for name, body in (('.nojekyll', ''), ('robots.txt', 'User-agent: *\nDisallow: /reports/\n')):
         if not (site / name).exists():
-            (site / name).write_text(body)
+            (site / name).write_text(body, encoding='utf-8')
 
 
 def build_index(con, site=None):
@@ -714,7 +715,7 @@ def git(args, cwd, cfg=None, timeout=120):
         auth = base64.b64encode(f"x-access-token:{cfg['token']}".encode()).decode()
         env |= {'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'http.https://github.com/.extraheader',
                 'GIT_CONFIG_VALUE_0': f'AUTHORIZATION: basic {auth}'}
-    done = subprocess.run(['git', *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout)
+    done = subprocess.run(['git', *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, encoding='utf-8')
     if done.returncode:
         raise RuntimeError(clean_error((done.stderr or done.stdout).strip().splitlines()[-1] if (done.stderr or done.stdout).strip() else f'git {args[0]} 실패'))
     return done.stdout

@@ -316,7 +316,7 @@ def recent_events(path, limit=3000):
 def account_state(root, now, max_age=timedelta(minutes=5)):
     """The runner's last broker/virtual balance (holdings with current price) when fresh, else None."""
     try:
-        state = json.loads((Path(root) / 'account-state.json').read_text())
+        state = json.loads((Path(root) / 'account-state.json').read_text(encoding='utf-8'))
         return state if now - datetime.fromisoformat(state['time']) <= max_age else None
     except (OSError, ValueError, KeyError, TypeError):
         return None

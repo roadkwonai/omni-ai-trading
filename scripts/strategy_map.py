@@ -113,7 +113,7 @@ def state(root=ROOT, now=None, services=None):
 
     def stamp_of(path, key='time'):
         try:
-            return json.loads((root / path).read_text()).get(key)
+            return json.loads((root / path).read_text(encoding='utf-8')).get(key)
         except (OSError, ValueError, AttributeError):
             return None
 
@@ -127,7 +127,7 @@ def state(root=ROOT, now=None, services=None):
     live_switches = [r.get('live_orders', False) if not r.get('invalid') else None for r in live_records]
     last = _last_event(root)
     try:
-        plans = json.loads((root / 'exit-plans.json').read_text())
+        plans = json.loads((root / 'exit-plans.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         plans = {}
     sources = [
@@ -345,12 +345,12 @@ def render(diagram, out_dir, kind='workflow', prefix='strategy-map'):
     work = f'{prefix}-{digest}.{uuid.uuid4().hex[:8]}'
     candidate, drawn = out_dir / f'{work}.json', out_dir / f'{work}.html'
     try:
-        candidate.write_text(json.dumps({**diagram, 'meta': {**diagram['meta'], 'output': drawn.name}}, ensure_ascii=False))
+        candidate.write_text(json.dumps({**diagram, 'meta': {**diagram['meta'], 'output': drawn.name}}, ensure_ascii=False), encoding='utf-8')
         result = subprocess.run([node, str(ARCHIFY), 'render', kind, candidate.name, drawn.name, '--quality', 'standard'],
-                                cwd=out_dir, capture_output=True, text=True, timeout=30)
+                                cwd=out_dir, capture_output=True, text=True, timeout=30, encoding='utf-8')
         if result.returncode != 0 or not drawn.exists():
             raise ValueError('Archify render failed: ' + (result.stderr or result.stdout)[-300:])
-        drawn.write_text(drawn.read_text().replace('</head>', FRAME_CSS + '</head>', 1))
+        drawn.write_text(drawn.read_text(encoding='utf-8').replace('</head>', FRAME_CSS + '</head>', 1), encoding='utf-8')
         candidate.replace(out_dir / f'{prefix}-{digest}.json')
         drawn.replace(html)
     finally:

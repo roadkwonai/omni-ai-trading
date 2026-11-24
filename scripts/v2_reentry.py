@@ -21,7 +21,7 @@ FILE = 'v2-reentry.json'
 
 def watch(root):
     try:
-        data = json.loads((Path(root) / FILE).read_text())
+        data = json.loads((Path(root) / FILE).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
     return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}

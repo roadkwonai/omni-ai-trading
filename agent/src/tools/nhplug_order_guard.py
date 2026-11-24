@@ -51,7 +51,7 @@ PAPER_LIMITS = {'order_max_krw': (100_000, 100_000_000, 3_000_000), 'daily_buy_k
 def paper_limits():
     """{key: value} for the shared paper account from accounts.json, each within PAPER_LIMITS, else its default."""
     try:
-        data = json.loads((get_runtime_root() / 'nhplug' / 'accounts.json').read_text())
+        data = json.loads((get_runtime_root() / 'nhplug' / 'accounts.json').read_text(encoding='utf-8'))
         saved = ((data.get('accounts') or {}).get('paper-shared') or {}).get('limits') or {}
     except (OSError, ValueError, AttributeError):
         saved = {}
@@ -79,7 +79,7 @@ class NHOrderGuard:
     def check_owner(self):
         path = get_runtime_root() / 'nhplug' / 'paper-account-owners.json'
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             return
         except (OSError, ValueError) as exc:
@@ -102,7 +102,7 @@ class NHOrderGuard:
         registry = root / 'paper-policy-scopes.json'
         if registry.exists():
             try:
-                data = json.loads(registry.read_text())
+                data = json.loads(registry.read_text(encoding='utf-8'))
                 if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('accounts'), dict):
                     raise ValueError('invalid account policy registry')
                 selected = data['accounts'].get(self.scope)
@@ -123,7 +123,7 @@ class NHOrderGuard:
         if not path.exists():
             return None
         try:
-            policy = json.loads(path.read_text())
+            policy = json.loads(path.read_text(encoding='utf-8'))
             if not isinstance(policy, dict) or policy.get('enabled') is not True:
                 raise ValueError('invalid swing policy')
             policy.pop('_account_independent', None)
@@ -194,7 +194,7 @@ class NHOrderGuard:
         used = token.with_suffix('.used')
         try:
             os.rename(token, used)  # atomic: the token can be spent once
-            data = json.loads(used.read_text())
+            data = json.loads(used.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return False
         return (isinstance(data, dict) and data.get('day') == NXT_TEST['day'] and data.get('symbol') == NXT_TEST['symbol']

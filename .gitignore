@@ -172,6 +172,8 @@ docs/
 !/docs/longterm.md
 !/docs/notifications.md
 !/docs/nxt.md
+!/docs/omni-cli.md
+!/docs/omni-cli-reference.md
 !/docs/operations.md
 !/docs/oversold.md
 !/docs/portability.md
@@ -289,3 +291,5 @@ state/raw/
 # installed video tools and model weights (~13GB) stay local. History: docs/portfolio-video-plan.md "제작 이력".
 .scratch/video/
 /output/
+
+agent-harness/*.egg-info/

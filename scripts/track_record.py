@@ -141,7 +141,7 @@ def engine_results(nhplug, engine, now):
     except (OSError, sqlite3.Error, TypeError, ZeroDivisionError):
         pass
     try:
-        state = json.loads((root / 'account-state.json').read_text())
+        state = json.loads((root / 'account-state.json').read_text(encoding='utf-8'))
         if str(state.get('time', ''))[:10] == now.strftime('%Y-%m-%d') and state.get('holdings'):
             out['its_holdings'] = {c: {k: h.get(k) for k in ('rsdl_qty', 'phs_pr', 'pft_rt')} for c, h in state['holdings'].items()}
     except (OSError, ValueError, AttributeError):

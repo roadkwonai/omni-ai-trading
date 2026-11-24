@@ -75,7 +75,7 @@ def position_key(db, symbol, quantity):
 
 def _load(root):
     try:
-        data = json.loads((Path(root) / TRIMS).read_text())
+        data = json.loads((Path(root) / TRIMS).read_text(encoding='utf-8'))
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}

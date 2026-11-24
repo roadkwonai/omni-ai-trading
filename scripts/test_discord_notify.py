@@ -13,6 +13,12 @@ TODAY = datetime.now(dn.KST).strftime('%Y-%m-%d')  # fills older than dn.RECENT_
 
 
 @pytest.fixture(autouse=True)
+def no_evening_tasks(monkeypatch):
+    """Whatever the hour of the test run, no evening report is expected (the real app store is not read)."""
+    monkeypatch.setattr(dn, 'report_runs', lambda: {})
+
+
+@pytest.fixture(autouse=True)
 def _no_holiday_table(monkeypatch):
     """The 15:40 summary asks the KRX holiday table; tests never fetch it."""
     monkeypatch.setattr(dn.L, 'trading_day', lambda day: day.weekday() < 5)
@@ -507,3 +513,42 @@ def test_a_dca_alert_is_posted_once_a_day_with_what_to_buy(tmp_path, monkeypatch
     items = dn.plan_items(set())
     assert len(items) == 1 and items[0][2].startswith('🔔 적립 알림')
     assert '379810' in items[0][2] and '23,315' in items[0][2] and '2주' in items[0][2] and '주문 없음' in items[0][2]
+
+
+# ---- 2026-11-24 복기 제안 (A)4: a report task that started but wrote nothing is told the same evening ----
+
+def evening(tmp_path, monkeypatch, hhmm, tasks, day='2026-11-24'):
+    monkeypatch.setattr(dn, 'datetime', type('D', (datetime,), {'now': classmethod(lambda cls, tz=None: datetime.fromisoformat(f'{day}T{hhmm}:00+09:00'))}))
+    monkeypatch.setattr(dn, 'HOME', tmp_path)
+    monkeypatch.setattr(dn.L, 'trading_day', lambda d: True)
+    monkeypatch.setattr(dn, 'report_runs', lambda: tasks)
+    return dn.missing_reports(set())
+
+
+def test_an_evening_report_that_was_not_written_is_told_once(tmp_path, monkeypatch):
+    run = lambda at=None, on=True: {'enabled': on, 'last': datetime.fromisoformat(at) if at else None}  # noqa: E731
+    tasks = {'longterm-review-daily': run('2026-11-24T16:55:19+09:00'), 'trading-journal': run('2026-11-24T16:46:00+09:00'), 'trading-daily-improvement': run(on=False)}
+    assert evening(tmp_path, monkeypatch, '17:30', tasks) == []
+    reviews = tmp_path / 'shared-etf-paper/reviews'
+    reviews.mkdir(parents=True)
+    (reviews / 'journal-2026-11-24.md').write_text('x')
+    got = evening(tmp_path, monkeypatch, '18:05', tasks)
+    assert [(c, i) for c, i, _ in got] == [('longterm', 'missing:longterm-review-daily:2026-11-24')]
+    assert '16:55에 시작' in got[0][2] and '승인 대기' in got[0][2]
+    (tmp_path / 'vibe-longterm/reviews').mkdir(parents=True)
+    (tmp_path / 'vibe-longterm/reviews/audit-2026-11-24.md').write_text('x')
+    assert evening(tmp_path, monkeypatch, '18:05', tasks) == []
+
+
+def test_a_task_that_never_started_and_an_unknown_store_are_told_apart(tmp_path, monkeypatch):
+    run = {'enabled': True, 'last': datetime.fromisoformat('2026-11-23T16:55:00+09:00')}
+    assert '오늘 시작하지 않음' in evening(tmp_path, monkeypatch, '18:05', {'longterm-review-daily': run})[0][2]
+    got = evening(tmp_path, monkeypatch, '18:05', None)  # the app's store could not be read: the files alone are judged
+    assert len(got) == 3 and all('시작' not in text for _, _, text in got)
+
+
+def test_a_weekly_report_is_expected_on_friday_only(tmp_path, monkeypatch):
+    run = {'enabled': True, 'last': None}
+    tasks = {'longterm-audit-weekly': run, 'longterm-strategy-weekly': run, 'oversold-weekly-audit': run}
+    assert evening(tmp_path, monkeypatch, '19:05', tasks) == []
+    assert {i.split(':')[1] for _, i, _ in evening(tmp_path, monkeypatch, '19:05', tasks, day='2026-11-27')} == set(tasks)

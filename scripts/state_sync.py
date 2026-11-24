@@ -152,7 +152,7 @@ def stage(root, staging):
 
 def git_commit():
     try:
-        return subprocess.run(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=10).stdout.strip()
+        return subprocess.run(['git', '-C', str(REPO), 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=10, encoding='utf-8').stdout.strip()
     except Exception:  # noqa: BLE001 - manifest info only
         return ''
 
@@ -222,21 +222,19 @@ def verify(archive):
 
 # --- services / import ------------------------------------------------------------------------------------------------
 
-def launchctl_list():
+def service_states():
+    """os_services.states(), or None when the service manager cannot be asked (that is not "nothing runs")."""
+    import os_services
     try:
-        return subprocess.run(['launchctl', 'list'], capture_output=True, text=True, timeout=15).stdout
-    except Exception:  # noqa: BLE001
-        return ''
+        return os_services.states()
+    except os_services.Unknown:
+        return None
 
 
-def running_services(text=None):
-    """com.vibetrading.* services with a live pid, except the dashboard."""
-    out = []
-    for line in (launchctl_list() if text is None else text).splitlines():
-        cols = line.split()
-        if len(cols) >= 3 and cols[2].startswith('com.vibetrading.') and cols[0].isdigit() and 'dashboard' not in cols[2]:
-            out.append(cols[2])
-    return out
+def running_services(states=...):
+    """com.vibetrading.* services running now, except the dashboard; None when that is unknown."""
+    states = service_states() if states is ... else states
+    return None if states is None else [f'com.vibetrading.{n}' for n, row in states.items() if row['running'] and 'dashboard' not in n]
 
 
 def import_archive(archive, root, force_offline=False, now_fn=now):
@@ -244,6 +242,8 @@ def import_archive(archive, root, force_offline=False, now_fn=now):
     if problems:
         raise SystemExit('검증 실패: ' + '; '.join(problems[:5]))
     running = running_services()
+    if running is None and not force_offline:
+        raise SystemExit('서비스 상태를 확인할 수 없어 가져오지 않습니다.')
     if running and not force_offline:
         raise SystemExit('거래 서비스가 실행 중이라 가져올 수 없습니다: ' + ', '.join(running))
     manifest = read_manifest(archive)
@@ -298,19 +298,19 @@ def check(root, out_dir=None):
         from launchd_services import SERVICES
     except Exception:  # noqa: BLE001
         SERVICES = {}
-    agents = Path.home() / 'Library' / 'LaunchAgents'
-    loaded = launchctl_list()
-    services = {n: ('loaded' if f'com.vibetrading.{n}' in loaded else 'plist' if (agents / f'com.vibetrading.{n}.plist').exists() else 'missing')
-                for n in SERVICES}
+    import os_services
+    states, agents = service_states(), os_services.definitions()
+    defined = {p.stem.removeprefix('com.vibetrading.') for p in agents.glob('com.vibetrading.*')} if agents and agents.is_dir() else set()
+    services = {n: ('plist' if n in defined else 'unknown') if states is None else 'loaded' if n in states else 'plist' if n in defined else 'missing' for n in SERVICES}
     manifest_file = TASKS_DST / 'manifest.json'
-    wanted = [t['taskId'] for t in json.loads(manifest_file.read_text())] if manifest_file.exists() else []
+    wanted = [t['taskId'] for t in json.loads(manifest_file.read_text(encoding='utf-8'))] if manifest_file.exists() else []
     have_tasks = sorted(p.parent.name for p in TASKS_SRC.glob('*/SKILL.md')) if TASKS_SRC.is_dir() else []
     latest = archives(out_dir)[:1]
     return {
         'runtime_root': str(root), 'runtime_exists': (root / 'nhplug').is_dir(),
         'env_present': sorted(k for k, v in have.items() if v), 'env_empty': sorted(k for k, v in have.items() if not v),
         'env_missing_vs_example': sorted(set(template) - set(have)),
-        'services': services, 'running_trading': running_services(loaded),
+        'services': services, 'running_trading': running_services(states),
         'tasks_missing': sorted(set(wanted) - set(have_tasks)), 'tasks_installed': have_tasks, **task_problems(TASKS_DST),
         'latest_backup': latest[0].name if latest else '',
         'latest_backup_age_h': round((now().timestamp() - latest[0].stat().st_mtime) / 3600, 1) if latest else None,
@@ -323,7 +323,7 @@ def task_problems(dst=TASKS_DST):
     """Manifest gaps that make ops-bootstrap ask instead of recreate: a task with neither cron nor a one-time schedule
     (tasks_export adds new tasks with cron null) and a task folder with no manifest entry."""
     manifest_file = dst / 'manifest.json'
-    entries = json.loads(manifest_file.read_text()) if manifest_file.exists() else []
+    entries = json.loads(manifest_file.read_text(encoding='utf-8')) if manifest_file.exists() else []
     listed = {t['taskId'] for t in entries}
     return {'tasks_without_schedule': sorted(t['taskId'] for t in entries if not t.get('cron') and not t.get('schedule')),
             'tasks_not_in_manifest': sorted(p.name for p in dst.iterdir() if p.is_dir() and p.name not in listed) if dst.is_dir() else []}
@@ -369,6 +369,18 @@ def app_schedules(stores, repo=None):
     return None, set()
 
 
+def last_runs(stores):
+    """{task id: when it last started} from the newest readable store (not in app_schedules: the backup manifest keeps only
+    what recreates a task)."""
+    for store in reversed(list(stores)):
+        try:
+            tasks = json.loads(Path(store).read_text(encoding='utf-8'))['scheduledTasks']
+            return {t['id']: datetime.fromisoformat(t['lastRunAt']).astimezone(KST) for t in tasks if t.get('lastRunAt')}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            continue
+    return {}
+
+
 def tasks_export(src=TASKS_SRC, dst=TASKS_DST, stores=None):
     """Copy each scheduled task's SKILL.md and write the manifest ops-bootstrap recreates them from. The schedule (cron,
     one-time time, enabled, title, permission mode) comes from the Claude app's store (user 2026-11-19: another account
@@ -376,7 +388,7 @@ def tasks_export(src=TASKS_SRC, dst=TASKS_DST, stores=None):
     project's task is never copied in. ops/ is not in git, so the backup is only ever pruned against a store that lists
     this repo's tasks: without one (new machine or account before restore, unreadable store) every backed-up task stays."""
     manifest_file = dst / 'manifest.json'
-    old = {t['taskId']: t for t in json.loads(manifest_file.read_text())} if manifest_file.exists() else {}
+    old = {t['taskId']: t for t in json.loads(manifest_file.read_text(encoding='utf-8'))} if manifest_file.exists() else {}
     app, foreign = app_schedules(app_stores() if stores is None else stores)
     entries, warnings = [], []
     for skill in sorted(src.glob('*/SKILL.md')):
@@ -417,7 +429,7 @@ def main(argv=None):
     parser.add_argument('--runtime', help='runtime root (default VIBE_TRADING_HOME or ~/.vibe-trading)')
     parser.add_argument('--out', help='state folder (default <repo>/state)')
     parser.add_argument('--force-offline', action='store_true',
-                        help='import even though launchctl shows running services: only when you know they are not this checkout\'s '
+                        help='import even though services run or their state is unknown: only when you know they are not this checkout\'s '
                              'trading services (for example a fresh machine); the dashboard never offers this')
     args = parser.parse_args(argv)
     root = runtime_root(args.runtime)

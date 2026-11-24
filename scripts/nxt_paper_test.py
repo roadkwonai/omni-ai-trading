@@ -53,7 +53,7 @@ def main():
     def finish(**fields):
         result.update(fields)
         path = root / 'nxt-test-result.json'
-        path.write_text(json.dumps(result, ensure_ascii=False, indent=1))
+        path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding='utf-8')
         os.chmod(path, 0o600)
         print(json.dumps(result, ensure_ascii=False), flush=True)
         return result
@@ -87,7 +87,7 @@ def main():
     result.update(nxt_price=price, previous_close=previous, limit=limit)
 
     token = runtime / 'nhplug' / NXT_TEST['token']
-    token.write_text(json.dumps({'day': DAY, 'symbol': SYMBOL, 'max_price': limit}))
+    token.write_text(json.dumps({'day': DAY, 'symbol': SYMBOL, 'max_price': limit}), encoding='utf-8')
     os.chmod(token, 0o600)
     fields = {'act_no': account, 'iem_cd': SYMBOL, 'orr_qty': 1, 'orr_pr': limit, 'nmn_pr_tp_cd': '01',
               'orr_cnd_dit_cd': '00', 'ssl_nmn_pr_dit_cd': '00', 'rmt_mkt_cd': 'NXT', 'sor_mkt_sli_yn': 'N'}
@@ -113,7 +113,7 @@ def main():
         rows = history() or []
         row = next((r for r in rows if r.get('itg_orr_no') == number), {})
         if (row.get('tot_cns_qty') or 0) > 0:
-            (root / 'STOP').write_text('nxt-paper-test: the test order filled; reconcile before trading\n')
+            (root / 'STOP').write_text('nxt-paper-test: the test order filled; reconcile before trading\n', encoding='utf-8')
             return finish(outcome='filled_unexpectedly', order_row=row)
         cancel = broker.call_tool('call_api', {'operationId': 'krstockOrderCancel', 'input': {
             'act_no': account, 'iem_cd': SYMBOL, 'org_mkt_orr_no': number, 'all_pat_dit_cd': '1'}}, order_intent_id=uuid.uuid4().hex)
@@ -125,7 +125,7 @@ def main():
             if row.get('can_qty') == 1 and row.get('ny_cns_qty') == 0:
                 break
         if (row.get('tot_cns_qty') or 0) > 0:
-            (root / 'STOP').write_text('nxt-paper-test: the test order filled; reconcile before trading\n')
+            (root / 'STOP').write_text('nxt-paper-test: the test order filled; reconcile before trading\n', encoding='utf-8')
             return finish(outcome='filled_unexpectedly', order_row=row)
         done = row.get('can_qty') == 1 and row.get('ny_cns_qty') == 0
         return finish(outcome='accepted_and_cancelled' if done else 'accepted_cancel_unconfirmed',
@@ -155,6 +155,6 @@ if __name__ == '__main__':
     except Exception as exc:  # leave a record; an order left open makes the 09:10 runner stop on its own
         out = Path.home() / '.vibe-trading/nhplug/shared-etf-paper/nxt-test-result.json'
         out.write_text(json.dumps({'time': datetime.now(KST).isoformat(timespec='seconds'), 'outcome': 'error',
-                                   'error': f'{type(exc).__name__}: {exc}'[:300]}, ensure_ascii=False))
+                                   'error': f'{type(exc).__name__}: {exc}'[:300]}, ensure_ascii=False), encoding='utf-8')
         os.chmod(out, 0o600)
         raise

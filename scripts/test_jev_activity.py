@@ -1,4 +1,3 @@
-import fcntl
 import io
 import json
 import multiprocessing
@@ -9,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from jev_activity import JevRequestBusy, regular_request, regular_request_busy
+from src import file_lock
 
 
 def _hold_regular(path, ready, stop):
@@ -43,13 +43,13 @@ def test_regular_request_is_visible_and_released(tmp_path):
 def test_regular_does_not_wait_or_send_when_event_has_lock(tmp_path):
     path = tmp_path / 'activity.lock'
     with path.open('w') as event:
-        fcntl.flock(event, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        file_lock.lock(event, blocking=False)
         start = time.monotonic()
         with pytest.raises(JevRequestBusy):
             with regular_request(path):
                 pytest.fail('regular request was sent while event lock was held')
         assert time.monotonic() - start < 0.5
-        fcntl.flock(event, fcntl.LOCK_UN)
+        file_lock.unlock(event)
     assert not regular_request_busy(path)
 
 

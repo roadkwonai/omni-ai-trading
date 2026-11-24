@@ -46,7 +46,7 @@ def quantity(balance):
 
 def check_previous_runs(directory):
     for path in directory.glob('nh-smoke-*.json'):
-        previous = json.loads(path.read_text())
+        previous = json.loads(path.read_text(encoding='utf-8'))
         if any(s['step'].startswith('intent_') for s in previous.get('steps', [])) and previous.get('status') not in {
             'roundtrip_verified', 'buy_unfilled_cancel_verified',
         }:
@@ -56,7 +56,7 @@ def check_previous_runs(directory):
 async def run(execute):
     if execute:
         check_previous_runs(Path('.venv'))
-    settings = json.loads((Path.home() / '.vibe-trading/agent.json').read_text())
+    settings = json.loads((Path.home() / '.vibe-trading/agent.json').read_text(encoding='utf-8'))
     servers = settings['mcpServers']
     cfg, account = paper_config(servers)
     readonly = servers['nhplug_readonly']
@@ -69,7 +69,7 @@ async def run(execute):
     def save(step, **values):
         report['steps'].append({'step': step, **values})
         fd = os.open(out, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
         print(step, json.dumps(values, ensure_ascii=False), flush=True)
 
@@ -176,7 +176,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true', help='One paper buy/sell, max 1 share and KRW 300000')
     # Hold a process lock across preflight and submission to exclude duplicate CLI runs.
-    import fcntl
-    with Path('.venv/nh-smoke.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    from src import file_lock
+    with Path('.venv/nh-smoke.lock').open('a', encoding='utf-8') as lock:
+        file_lock.lock(lock, blocking=False)
         asyncio.run(run(parser.parse_args().execute))

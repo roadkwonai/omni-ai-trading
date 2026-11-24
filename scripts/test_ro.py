@@ -74,3 +74,65 @@ def test_script_path_arguments_stay_in_task_folders(tmp_path, args):
     """A listed script's own path options (plists, incident db, idea db, report folder) write nowhere else."""
     assert run(*(a.format(tmp=tmp_path) for a in args)).returncode != 0
     assert not any(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize('args', [
+    ('etf_regime_observer.py', '--wat'), ('longterm_report.py', '--exec'), ('nh_live_shadow.py', '--li=x'),  # argparse takes a unique prefix of an option
+    ('longterm_report.py longterm_audit.py', '--status'), (), ('--out',), ('--out', '.scratch/x'), ('sql',), ('sql', '~/.vibe-trading/nhplug/x.sqlite3', ''),
+    ('pytest',), ('pytest', '-q'), ('pytest', '-k'),
+])
+def test_refuses_abbreviations_and_incomplete_calls(args):
+    assert run(*args).returncode != 0
+
+
+def test_services_prints_the_table_and_says_when_it_cannot():
+    import os_services
+    import ro
+    import io
+    out = io.StringIO()
+    row = {'registered': True, 'running': True, 'pid': 7, 'last_exit': 0, 'started': None}
+    assert ro.services(out, lambda: {'preflight': {**row, 'running': False, 'pid': None, 'last_exit': 1}, 'shared-etf-paper': row}) == 0
+    assert out.getvalue().splitlines() == ['-\t1\tcom.vibetrading.preflight', '7\t0\tcom.vibetrading.shared-etf-paper']
+
+    def unknown():
+        raise os_services.Unknown('x')
+    with pytest.raises(ro.Refused):
+        ro.services(out, unknown)
+
+
+def test_windows_paths_are_paths_too(monkeypatch):
+    import ro
+    monkeypatch.setattr(ro, 'WINDOWS', True)
+    monkeypatch.setattr(ro, 'HOME', 'C:/Users/me')
+    for bad in (r'C:\x', r'..\x', r'a\b', 'C:x', r'C:\Users\me\.vibe-trading\nhplug\vibe-longterm\longterm.sqlite3', '//server/x'):
+        assert ro.is_path(bad) and not ro.task_path(bad), bad
+    for good in (r'.scratch\x.md', '.scratch/x.md', r'C:\Users\me\.vibe-trading\nhplug\vibe-longterm\reviews\a.md'):
+        assert ro.task_path(good), good
+    monkeypatch.setattr(ro, 'WINDOWS', False)
+    assert not ro.is_path('a:b') and not ro.task_path(r'.scratch\x')
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX signals')
+def test_stopping_ro_stops_the_script_it_runs(tmp_path):
+    """As the bash runner did (exec): a killed task must not leave its script behind."""
+    import signal
+    import sys
+    import time
+    probe = ('import sys, os; sys.path.insert(0, "scripts"); import ro; ro.plan = lambda argv: (None, ["-c", "import time, os; open(%r, \'w\').write(str(os.getpid())); time.sleep(30)"]);'
+             ' sys.exit(ro.main([]))') % str(tmp_path / 'pid')
+    child = subprocess.Popen([sys.executable, '-c', probe], cwd=RO.parent.parent)
+    for _ in range(100):
+        if (tmp_path / 'pid').exists() and (tmp_path / 'pid').read_text():
+            break
+        time.sleep(0.05)
+    child.send_signal(signal.SIGTERM)
+    child.wait(5)
+    time.sleep(0.2)
+    pid = int((tmp_path / 'pid').read_text())
+    try:
+        os.kill(pid, 0)
+        alive = True
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        alive = False
+    assert not alive and child.returncode == -signal.SIGTERM

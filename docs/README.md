@@ -41,6 +41,8 @@ flowchart LR
 | 문서 | 내용 |
 | --- | --- |
 | [시작하기](getting-started.md) | 설치, `.env` 키 이름, NH 공식 MCP 연결, 대시보드 실행, 서비스 정의, 첫 모의 회차 확인 |
+| [omni CLI 가이드](omni-cli.md) | AI 에이전트용 명령행 사용법. 질문별 명령, 답 읽기, 설정 변경·승인 절차, 오류 대처 |
+| [omni 명령·설정 참조](omni-cli-reference.md) | 모든 명령의 인자·예·답 항목과 설정 주소 전체(코드에서 생성) |
 | [AI와 함께 쓰기](ai-agents.md) | Claude Code·Codex 설치, 지침 파일 템플릿, 프로젝트 스킬 설치, MCP 연결, 읽기 전용 권한, 예약 작업 등록, 상황별 프롬프트 예시 |
 | [연동 서비스](integrations.md) | NH 나무 PLUG·키움·토스·Jev·OpenAI·KRX·OpenDART·FRED 키 발급과 `.env` 키, Discord·Telegram·Slack 알림 설정, GitHub Pages |
 | [설정 레퍼런스](configuration.md) | 설정 JSON 파일별 역할·범위·기본값, 변경 이력, `.env` 키 이름 |
