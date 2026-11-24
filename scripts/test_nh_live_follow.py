@@ -688,6 +688,7 @@ class Step(unittest.TestCase):
                     patch('accounts.live_price_cap', return_value=300_000), patch('src.live.halt.halt_flag_set', return_value=False):
                 plan = f.step(broker, A, {}, RECORD, root=Path(d), now=NOW, key='live-1')
             self.assertEqual((plan['action'], plan['target']), ('SELL', {}))  # the paper sold it out
+            self.assertEqual(json.loads(json.dumps(plan['quotes'])), {'005930': [50_000, 50_100]})  # the quote it was judged on (11-24)
             self.assertEqual(broker.quotes, ['005930'])
 
     # ---- M5: the dashboard card (nh_live_shadow) replays what the mirror does ----

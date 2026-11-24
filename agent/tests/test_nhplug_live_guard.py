@@ -269,3 +269,31 @@ def test_aborted_replacement_preserves_original_cancel_requirement(tmp_path):
         reserve(guard,'krstockOrderCashSell',{**sell,'orr_pr':1398},balance=balance,sellable=sellable)
     next_replacement=reserve(guard,'krstockOrderCashSell',sell,balance=balance,sellable=sellable,replacement_of=original)
     assert next_replacement != replacement
+
+
+# 2026-11-24 (user): 005930 was sold and orr_pbl_amt1 did not recover: it leaves out sale money that settles in two days, while NH
+# itself lets that money buy today without any unpaid balance (krstockInquiryBuyableQuantity csh_orr_pbl_amt)
+SHORT = {**BALANCE, 'Output_0': {'orr_pbl_amt1': 1000, 'tot_aet_amt': 1000000, 'tot_byn_amt': 0}}
+CAN = {'_account': A, '_symbol': '114800', '_price': 1400, 'rsp_cd': '00221', 'csh_orr_pbl_amt': 187000}
+
+
+def test_money_of_a_sale_not_settled_yet_may_buy_when_the_broker_says_so_for_this_order(tmp_path):
+    with pytest.raises(LiveOrderBlocked, match='insufficient'):
+        reserve(LiveOrderGuard(A, tmp_path / 'a'), balance=SHORT)
+    assert reserve(LiveOrderGuard(A, tmp_path / 'b'), balance=SHORT, buyable=CAN)
+
+
+@pytest.mark.parametrize('wrong', [{'_account': '00000000000'}, {'_symbol': '069500'}, {'_price': 1300}, {'rsp_cd': '12988'},
+                                   {'csh_orr_pbl_amt': None}, {'csh_orr_pbl_amt': True}, {'csh_orr_pbl_amt': '187000'}, {'csh_orr_pbl_amt': 1399}])
+def test_an_unverified_or_smaller_broker_answer_never_opens_the_buy(tmp_path, wrong):
+    with pytest.raises(LiveOrderBlocked, match='insufficient'):
+        reserve(LiveOrderGuard(A, tmp_path), balance=SHORT, buyable={**CAN, **wrong})
+
+
+def test_the_capital_and_total_assets_still_hold_with_the_brokers_answer(tmp_path):
+    with pytest.raises(LiveOrderBlocked, match='capital limit'):
+        reserve(LiveOrderGuard(A, tmp_path / 'a'), balance={**SHORT, 'Output_0': {**SHORT['Output_0'], 'tot_byn_amt': 999_000}}, buyable=CAN, capital=1_000_000)
+    with pytest.raises(LiveOrderBlocked, match='capital limit'):
+        reserve(LiveOrderGuard(A, tmp_path / 'b'), balance={**SHORT, 'Output_0': {**SHORT['Output_0'], 'tot_aet_amt': 1300}}, buyable=CAN)
+    with pytest.raises(LiveOrderBlocked, match='single order'):
+        reserve(LiveOrderGuard(A, tmp_path / 'c'), balance=SHORT, buyable=CAN, order_max=1000)

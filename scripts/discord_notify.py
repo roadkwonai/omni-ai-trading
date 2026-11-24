@@ -364,13 +364,14 @@ def paper_balances(day):
         lines = (HOME / 'shared-etf-paper' / 'account-snapshots.jsonl').read_text().splitlines()
     except OSError:
         return []
+    from live_fills import plausible
     out = []
     for line in lines:
         try:
             row = json.loads(line)
         except ValueError:
             continue
-        if str(row.get('time', '')).startswith(day) and isinstance(row.get('total_assets'), (int, float)):
+        if plausible(row) and str(row.get('time', '')).startswith(day):
             out.append(row)
     return out
 

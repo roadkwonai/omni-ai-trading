@@ -721,3 +721,49 @@ def test_no_alert_without_the_switch(tmp_path):
     send_all(tmp_path, broker, start=(9, 40), dca={**ALERT, 'alert': False})
     send_all(tmp_path, broker, start=(9, 41), dca={**ALERT, 'alert': False})
     assert run(tmp_path, at(10, 0), broker, execute_orders=True, dca={**ALERT, 'alert': False})['action'] == 'HOLD'
+
+
+def test_alternating_idle_lines_are_written_once_and_a_refusal_or_an_event_always():
+    import longterm_live as LL
+    written, last, idle = [], None, set()
+    hold, wait = {'action': 'HOLD', 'reason': 'today done'}, {'action': 'WAIT', 'reason': 'dca alert'}
+    retry = {'action': 'WAIT', 'reason': 'quote', 'execution': 'RETRY'}
+    for e in (hold, wait, hold, wait, retry, retry, hold, {'action': 'BUY'}, hold, {'action': 'BLOCK'}, {'action': 'BLOCK'}):
+        if LL.worth_logging(e, last, idle):
+            written.append(e)
+        last = (e.get('action'), e.get('reason'))
+    assert written == [hold, wait, retry, hold, {'action': 'BUY'}, hold, {'action': 'BLOCK'}, {'action': 'BLOCK'}]
+
+
+def test_a_parked_yeo_account_puts_only_the_cash_beyond_the_next_step_into_the_reservoir_etf(tmp_path):
+    books = {'live-2': L.clean_book({'strategy': 'yeo_method', 'yeo': {'park': True}})}
+    calm = {**PLAN, 'indicators': {**PLAN['indicators'], 'ath': {'ndx': {'dd': -0.15}}}}
+    first = run(tmp_path, at(9, 41), Broker(cash=600_000), execute_orders=False, books=books, plan=calm)
+    assert [(o['code'], o['side'], o['qty']) for o in first['orders']] == [(L.RESERVOIR_SMALL, 'BUY', 29)]  # 300,000 at 10,010 and the fee
+    assert any('다음 단계 몫 200,000원은 현금' in n for n in first['notes'])
+    held = {L.RESERVOIR_SMALL: 29}  # the next day nothing moves, and the step day buys from the cash kept
+    again = run(tmp_path / 'b', at(9, 41), Broker(cash=209_000, held=held), execute_orders=False, books=books, plan=calm)
+    assert again['orders'] == []
+    fall = {**PLAN, 'indicators': {**PLAN['indicators'], 'ath': {'ndx': {'dd': -0.21}}}}
+    step = run(tmp_path / 'c', at(9, 41), Broker(cash=209_000, held=held), execute_orders=False, books=books, plan=fall)
+    assert {(o['code'], o['side']) for o in step['orders']} == {('379810', 'BUY'), ('0261H0', 'BUY')}
+    assert sum(o['qty'] * o['price'] for o in step['orders']) <= 209_000
+
+
+def test_what_a_dca_left_is_the_reservoirs_while_it_is_off(tmp_path):
+    # user 2026-11-24: 실계좌 2's 16,000 of the 적립식 turned off on 11-20
+    books = {'live-2': L.clean_book({'strategy': 'yeo_method'})}
+    for name, on, nav in (('off', False, CAPITAL), ('on', True, CAPITAL - 16_000)):
+        root = tmp_path / name
+        root.mkdir()
+        LL.save_state(root, 'live-2', {'day': '2026-11-17', 'dca': {'waiting_krw': 16_000.0}})
+        got = run(root, at(9, 41), Broker(cash=600_000), execute_orders=False, books=books, dca={'on': on, 'style': 'master', 'profile': 'yeo'})
+        assert got['nav'] == nav and LL.load_state(root, 'live-2')['dca']['waiting_krw'] == 16_000
+
+
+def test_a_step_whose_orders_never_went_out_is_planned_again_the_next_day(tmp_path):
+    books = {'live-2': L.clean_book({'strategy': 'yeo_method'})}
+    fall = {**PLAN, 'indicators': {**PLAN['indicators'], 'ath': {'ndx': {'dd': -0.21}}}}
+    LL.save_state(tmp_path, 'live-2', {'day': '2026-11-17', 'book': {'yeo': {'ndx': {'used': [], 'base': None, 'rebalanced': '2026-11'}}}})
+    run(tmp_path, at(9, 41), Broker(cash=600_000), execute_orders=True, books=books, plan=fall)
+    assert LL.load_state(tmp_path, 'live-2')['book']['yeo']['ndx']['used'] == []  # nothing sent yet

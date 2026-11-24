@@ -6,7 +6,7 @@
   preflight.py --no-send  the same without Discord
 
 Each check returns (ok, detail); a check that raises fails with the exception type only (no values, no account
-numbers). Checks with a `due` time run only from that time (data that arrives at 08:45/08:50). launchd runs it at
+numbers). Checks with a `due` time run only from that time (data that arrives at 07:40/08:45/08:50). launchd runs it at
 08:20 and 08:53; the scheduled task 'trading-preflight' (08:25) reads the result and fixes what it can before 09:00.
 Exit code 1 when any check failed.
 """
@@ -128,11 +128,11 @@ def env_keys(now):
 
 
 def premarket_report(now):
-    """The detailed premarket analysis (reviews/premarket-DAY.md), written by the 08:42 task and template-checked."""
+    """The detailed premarket analysis (reviews/premarket-DAY.md), written by the 08:31 task 'premarket-analysis-daily' and template-checked."""
     import premarket
     state = premarket.status(now=now)
     if not state.get('written'):
-        return False, '장전 상세 분석 없음(08:42 작업 확인)'
+        return False, '장전 상세 분석 없음(08:31 작업 확인)'
     problems = state.get('checked') or []
     return not problems, f'템플릿 문제 {len(problems)}건' if problems else '작성·검사 통과'
 
@@ -141,7 +141,7 @@ def premarket_report(now):
 CHECKS = [('services', '서비스 등록', services, None), ('stop', '중단 파일·HALT', stop_files, None),
           ('paper_account', 'NH 모의 계좌·계좌 목록', paper_account, None), ('unfinished', '미확인 주문', unfinished, None),
           ('settings', '계좌·매매 기준 설정', settings, None), ('env', '.env 키', env_keys, None),
-          ('premarket', '장전 자료 수집', premarket, None), ('market_context', '시황 자료', market_context, None),
+          ('premarket', '장전 자료 수집', premarket, '07:45'), ('market_context', '시황 자료', market_context, None),
           ('longterm', '장기 엔진 아침 판단', longterm_decided, '08:47'), ('movers', '순위 후보(movers)', movers, '08:51'),
           ('premarket_report', '장전 상세 분석 작성', premarket_report, '08:52')]
 

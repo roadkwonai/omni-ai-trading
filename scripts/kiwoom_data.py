@@ -8,7 +8,7 @@ Kiwoom terms (오픈 API 서비스 이용약관 §5③): quote data is for the c
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import broker_token
@@ -148,6 +148,25 @@ def num(text):
         return float(s)
     except ValueError:
         return None
+
+
+def krx_minute_rows(code, prior=False, now=None):
+    """Up to 30 KRX regular-session 1-minute rows (ka10080, the plain KRX code), newest first, in the shape of NH's
+    krstockQuotePeriod Output_1: today's only, or with `prior` the sessions before it too. NH stamps a bar with the minute
+    it ends and Kiwoom with the minute it starts, so a minute is added (11-24, six codes: highs and lows then agree, closes
+    within a tick or two, volume within a few percent; the two cut the minute about a second apart)."""
+    now = now or datetime.now(KST)
+    out = []
+    for r in call('ka10080', {'stk_cd': code, 'tic_scope': '1', 'upd_stkpc_tp': '0'}, 'stk_min_pole_chart_qry', max_pages=1):
+        t = str(r.get('cntr_tm') or '')
+        values = [abs(num(r.get(f)) or 0) for f in ('open_pric', 'high_pric', 'low_pric', 'cur_prc')]
+        if not '090000' <= t[8:] <= '153000' or not all(values) or (t[:8] != f'{now:%Y%m%d}' and not prior):
+            continue  # NXT pre/after-market rows come in the same answer
+        ends = min(f'{datetime.strptime(t, "%Y%m%d%H%M%S") + timedelta(minutes=1):%H%M%S}', '153000')
+        out.append({'bsop_date': t[:8], 'bsop_time': ends,
+                    **{k: str(int(v)) for k, v in zip(('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr'), values)},
+                    'vol': str(int(abs(num(r.get('trde_qty')) or 0)))})
+    return sorted(out, key=lambda r: (r['bsop_date'], r['bsop_time']), reverse=True)[:30]
 
 
 def nxt_premarket_bars(code, now=None):

@@ -77,3 +77,26 @@ class CallTests(unittest.TestCase):
         with patch.object(k, '_post') as post, self.assertRaises(k.KiwoomError):
             k.call('kt10000', {}, None)
         post.assert_not_called()
+
+
+def test_krx_minute_rows_take_the_place_of_nhs_bars(monkeypatch):
+    """NH stamps a 1-minute bar with the minute it ends, Kiwoom with the minute it starts (11-24 10:31~10:38, 6 codes)."""
+    from datetime import datetime
+    import kiwoom_data as k
+    row = lambda t, close, vol='100': {'cntr_tm': t, 'open_pric': '+1000', 'high_pric': '+1010', 'low_pric': '-990',  # noqa: E731
+                                       'cur_prc': close, 'trde_qty': vol}
+    raw = [row('20261124103800', '-995'), row('20261124103700', '+1005'), row('20261124085500', '+1'), row('20261124090000', '0'),
+           row('20261123200000', '+900'), row('20261123153000', '+900'), row('20261123151900', '+901')]
+    asked = []
+    monkeypatch.setattr(k, 'call', lambda *a, **kw: asked.append(a) or raw)
+    now = datetime(2026, 11, 24, 10, 38, 41, tzinfo=k.KST)
+    today = k.krx_minute_rows('005930', now=now)
+    assert asked[0][1]['stk_cd'] == '005930'  # the KRX code: `_AL` and Toss mix NXT volume in
+    assert today == [{'bsop_date': '20261124', 'bsop_time': '103900', 'stck_oprc': '1000', 'stck_hgpr': '1010', 'stck_lwpr': '990',
+                      'stck_prpr': '995', 'vol': '100'},
+                     {'bsop_date': '20261124', 'bsop_time': '103800', 'stck_oprc': '1000', 'stck_hgpr': '1010', 'stck_lwpr': '990',
+                      'stck_prpr': '1005', 'vol': '100'}]
+    prior = k.krx_minute_rows('005930', prior=True, now=now)
+    assert prior[:2] == today and [(r['bsop_date'], r['bsop_time']) for r in prior[2:]] == [('20261123', '153000'), ('20261123', '152000')]
+    raw[:] = [row(f'2026112409{m:02d}00', '+1000') for m in range(60)]
+    assert len(k.krx_minute_rows('005930', now=now)) == 30 and k.krx_minute_rows('005930', now=now)[0]['bsop_time'] == '100000'

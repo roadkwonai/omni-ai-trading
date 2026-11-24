@@ -165,6 +165,107 @@ def hide_live(html_text):
     return ''.join(parts)
 
 
+# Kiwoom's and Toss's terms allow the operator's own use only, so their figures stay off the public pages (user 2026-11-24,
+# docs/report-pages-data-policy-plan.md). Local markdown and the dashboard keep them. `키움증권` names an analyst's firm,
+# and a replay computed from `키움 1분봉` is our own figure.
+SOURCE_NAME = re.compile(r'(?<![가-힣])(?:토스(?!페이|뱅크)|키움(?!증권|\s?1분봉))')
+SOURCE_ONLY = re.compile(r'금융투자(?!협회|업|소득|상품)|기타법인|연기금|괴리율|외국계\s?창구|신용융자|대차\s?잔고|공매도')  # only they give us these
+PREMARKET = re.compile(r'(?<!미국 )(?<!뉴욕 )프리마켓')  # NXT trades (Toss): the figures after the word, and prices to the end of the block
+PRICE = re.compile(r'\d{1,3}(?:,\d{3})+(?:\.\d+)?(?:\s*(원))?(?!\d|,\d|\s*(?:조|억|만|천|주))')
+SOURCE_AMOUNT = re.compile(r'(?:[+−-]\s?)?\d[\d,]*(?:\.\d+)?\s*((?:조|억|만|천)?\s*(?:원|주(?!문|간|식|가|일|기|말|차|년|도)|%p?|배(?!경|당|분))|조|억)|[+−-]\d[\d,]*(?:\.\d+)?|' + PRICE.pattern.replace('(원)', '원'))
+SOURCE_NOTE = '제공처 약관에 따라 공개 페이지에서는 수치를 뺐습니다. 대시보드에서 볼 수 있습니다.'
+SOURCE_SECTION = re.compile(r'(<h[34]\b[^>]*>)(.*?)(</h[34]>)(\s*(?:<div class="table-wrap">)?<table\b.*?</table>(?:</div>)?(?:\s*<p><em>[^<]*</em></p>)*)?', re.S)  # the text after the table stays
+
+
+def _hide_source_nodes(nodes):
+    """Text nodes of one block (None: link text and tags stay as they are) with the figures of every sentence hidden that
+    names Kiwoom or Toss or a figure only they give. A sentence may run over several nodes (bold, italics)."""
+    joined, starts = '', []
+    for n in nodes:
+        starts.append(len(joined))
+        joined += n or ''
+    edges = [0, *(m.end() for m in SENTENCE.finditer(joined)), len(joined)]
+    cuts = [m for a, b in zip(edges, edges[1:]) if SOURCE_NAME.search(joined, a, b) or SOURCE_ONLY.search(joined, a, b)
+            for m in SOURCE_AMOUNT.finditer(joined, a, b)]
+    if early := PREMARKET.search(joined):
+        end = next(e for e in edges if e >= early.end())
+        cuts += [*SOURCE_AMOUNT.finditer(joined, early.end(), end), *PRICE.finditer(joined, end)]
+    out, last = list(nodes), len(joined) + 1
+    for m in sorted(cuts, key=lambda m: (-m.end(), m.start())):
+        if m.end() > last:
+            continue  # already hidden
+        last = m.start()
+        for i in reversed(range(len(nodes))):
+            a, b = max(m.start(), starts[i]), min(m.end(), starts[i] + len(nodes[i] or ''))
+            if a < b:
+                new = LIVE_HIDDEN + (m.group(1) or '') if a == m.start() else ''
+                out[i] = out[i][:a - starts[i]] + new + out[i][b - starts[i]:]
+    return out
+
+
+def hide_source_text(text):
+    return _hide_source_nodes([str(text or '')])[0]
+
+
+THOUSANDS = re.compile(r'(?<![\d,.])\d{1,3}(?:,\d{3})+(?!\d|,\d)')
+
+
+def source_figures(html_text):
+    """Large figures of the sections hide_sources takes out that no remaining table shows: the writer repeats them in prose
+    without the source (journal 11-20: the top net sellers)."""
+    taken = [m.group(0) for m in SOURCE_SECTION.finditer(html_text) if SOURCE_NAME.search(htmllib.unescape(re.sub(r'<[^>]+>', '', m.group(2))))]
+    rest = html_text
+    for section in taken:
+        rest = rest.replace(section, '')
+    shown = set(THOUSANDS.findall(' '.join(re.findall(r'<table.*?</table>', rest, flags=re.S))))
+    return set(THOUSANDS.findall(re.sub(r'<[^>]+>', ' ', ' '.join(taken)))) - shown
+
+
+def hide_figures(text, figures):
+    """`text` without those figures (sign and number; the unit stays)."""
+    return THOUSANDS.sub(lambda m: LIVE_HIDDEN if m.group(0) in figures else m.group(0), str(text)) if figures else str(text)
+
+
+def hide_sources(html_text):
+    """Sections headed with Kiwoom or Toss as the source are replaced by a note; sentences with their figures lose the numbers.
+    shortcut: a figure of theirs in a sentence that names neither them nor a SOURCE_ONLY kind is not caught, so the writer
+    skills put the source in the same sentence."""
+    def section(m):
+        if not SOURCE_NAME.search(htmllib.unescape(re.sub(r'<[^>]+>', '', m.group(2)))):
+            return m.group(0)
+        title = re.sub(r'\s*\([^()]*\)', '', re.sub(r'<[^>]+>', '', m.group(2))) if '(' in m.group(2) else ''
+        return f'{m.group(1)}{SOURCE_NAME.sub("", title).strip() or "공개하지 않는 표"}{m.group(3)}<p class="label">{SOURCE_NOTE}</p>'
+    parts = BLOCK.split(SOURCE_SECTION.sub(section, html_text))
+    for i in range(0, len(parts), 2):
+        text = htmllib.unescape(re.sub(r'<[^>]+>', '', parts[i]))
+        if not (SOURCE_NAME.search(text) or SOURCE_ONLY.search(text) or PREMARKET.search(text)):
+            continue
+        nodes, link, plain_nodes = re.split(r'(<[^>]+>)', parts[i]), False, []
+        for n in nodes:
+            if n.startswith('<'):
+                link = n.startswith('<a') or (link and not n.startswith('</a'))
+            plain_nodes.append(None if n.startswith('<') or link else htmllib.unescape(n))
+        hidden = _hide_source_nodes(plain_nodes)
+        parts[i] = ''.join(htmllib.escape(h, quote=False) if h is not None and h != o else n for n, o, h in zip(nodes, plain_nodes, hidden))
+    return ''.join(parts)
+
+
+def hide_outside_links(html_text, figures):
+    parts, link = re.split(r'(<[^>]+>)', html_text), False
+    for i, n in enumerate(parts):
+        if n.startswith('<'):
+            link = n.startswith('<a ') or (link and not n.startswith('</a'))
+        elif not link:
+            parts[i] = hide_figures(n, figures)
+    return ''.join(parts)
+
+
+def public_text(text, figures=()):
+    """One line of a public page: no account number, no live amount, no Kiwoom or Toss figure. An address stays as it is."""
+    text = str(text if text is not None else '')
+    return text if re.match(r'https?://', text) else hide_figures(hide_source_text(hide_live_text(mask(text))), figures)
+
+
 # ---------- records ----------
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -407,6 +508,14 @@ def archify(kind, source, out):
     return None
 
 
+def _hide_source_strings(value):
+    if isinstance(value, dict):
+        return {k: _hide_source_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_hide_source_strings(v) for v in value]
+    return hide_source_text(value) if isinstance(value, str) else value
+
+
 def blocks(md, key, out_dir):
     """Fenced ```chart and ```archify-<type> blocks → placeholders, and the HTML that replaces each."""
     import report_figures as F
@@ -417,11 +526,13 @@ def blocks(md, key, out_dir):
         info, source = m.group(1), mask(m.group(2))
         token = f'@@FIGURE{n}@@'
         if info == 'chart':
-            made[token] = F.chart_block(source)
+            named = SOURCE_NAME.search(source) or SOURCE_ONLY.search(source)
+            made[token] = f'<p class="label">{SOURCE_NOTE}</p>' if named else F.chart_block(source)
         else:
             kind = info.split('-', 1)[1]
             try:
-                title = str(json.loads(source).get('meta', {}).get('title') or '흐름도')
+                data = _hide_source_strings(json.loads(source))
+                source, title = json.dumps(data, ensure_ascii=False), str(data.get('meta', {}).get('title') or '흐름도')
             except (ValueError, AttributeError):
                 title = '흐름도'
             if out_dir is None:
@@ -455,21 +566,24 @@ def render(kind, key, path, url='', out_dir=None):
         except ValueError:
             extra = {}
     extra = extra if isinstance(extra, dict) else {}
-    summary = hide_live_text(mask(str(extra.get('summary') or lede or '').strip()))
+    html_body = markdown(rest)
+    figures_out = source_figures(html_body)
+    public = lambda v: public_text(v, figures_out)  # noqa: E731
+    summary = public(str(extra.get('summary') or lede or '').strip())
     listed = lambda name: extra.get(name) if isinstance(extra.get(name), list) else []  # noqa: E731 - a string is not a list of items
-    extra = {'top_issues': [{k: hide_live_text(mask(v)) for k, v in i.items()} for i in listed('top_issues') if isinstance(i, dict) and i.get('title')],
-             'watch_next': [hide_live_text(mask(w)) for w in listed('watch_next') if isinstance(w, (str, int, float))],
-             'scenarios': [{k: hide_live_text(mask(v)) for k, v in sc.items()} for sc in listed('scenarios') if isinstance(sc, dict) and sc.get('name')]}
+    extra = {'top_issues': [{k: public(v) for k, v in i.items()} for i in listed('top_issues') if isinstance(i, dict) and i.get('title')],
+             'watch_next': [public(w) for w in listed('watch_next') if isinstance(w, (str, int, float))],
+             'scenarios': [{k: public(v) for k, v in sc.items()} for sc in listed('scenarios') if isinstance(sc, dict) and sc.get('name')]}
     for issue in extra['top_issues']:
         try:
             issue['stars'] = max(0, min(5, int(float(issue.get('stars') or 0))))
         except ValueError:
             issue['stars'] = 0
-    body, toc = decorate(markdown(rest))
-    body = F.table_charts(F.marks(F.callouts(hide_live(body))))  # hidden before the bars are drawn from the table
+    body, toc = decorate(html_body)
+    body = F.table_charts(F.marks(F.callouts(hide_outside_links(hide_sources(hide_live(body)), figures_out))))  # hidden before the bars are drawn from the table
     for token, html_figure in figures.items():
         body = body.replace(f'<p>{token}</p>', html_figure)
-    title = hide_live_text(mask(title or f"{spec['name']} · {period_label(kind, key)}"))
+    title = public(title or f"{spec['name']} · {period_label(kind, key)}")
     page = environment().get_template(spec['template']).render(
         title=title, description=summary or title, summary=summary, body=body, toc=toc, extra=extra, url=url,
         kind_name=spec['name'], period_label=period_label(kind, key), channel_label=CHANNELS[spec['channel']],
@@ -498,6 +612,8 @@ def check(html_text):
         issues.append('계좌번호·계좌 해시처럼 보이는 값이 본문에 있음')
     if hide_live(html_text) != html_text:
         issues.append('실계좌 금액·수량이 공개 페이지에 있음')
+    if hide_sources(html_text) != html_text:
+        issues.append('키움·토스 수치가 공개 페이지에 있음')
     if re.search(r'(ghp_|github_pat_|discord(app)?\.com/api/webhooks)', html_text):
         issues.append('토큰·웹훅 주소가 들어 있음')
     if len(re.findall(r'<h1', html_text)) != 1:

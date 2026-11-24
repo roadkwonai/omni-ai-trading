@@ -61,7 +61,11 @@ def record(root, account_key, history, now=None):
         stamp = datetime.now(KST).isoformat()
         with sqlite3.connect(Path(root) / NAME, timeout=5) as db:
             db.execute(SCHEMA)
-            db.executemany('INSERT OR REPLACE INTO fills VALUES (?,?,?,?,?,?,?,?,?)',
+            # `recorded` is the first look that showed this filled quantity: NH's live fills have no clock
+            db.executemany('INSERT INTO fills VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT (account, day, order_no) DO UPDATE SET '
+                           'symbol=excluded.symbol, side=excluded.side, price=excluded.price, time=excluded.time, '
+                           'recorded=CASE WHEN quantity=excluded.quantity THEN recorded ELSE excluded.recorded END, '
+                           'quantity=excluded.quantity',
                            [(account_key, day, *fill, stamp) for fill in fills])
         return len(fills)
     except Exception:
@@ -136,6 +140,16 @@ def rows(root, account_key):
 
 
 BALANCE_MINUTES = 5
+REJECTED = 'balance-rejected.jsonl'
+
+
+def plausible(row):
+    """Whether a balance record can be true: a number for the total, and no zero total while the account has cash,
+    holdings or an evaluation (11-23: the zero totals of a paged balance's first page). Writers and readers share it."""
+    total = row.get('total_assets') if isinstance(row, dict) else None
+    if type(total) not in (int, float) or total != total or total < 0:
+        return False
+    return total > 0 or not any((row.get(k) or 0) for k in ('cash', 'invested', 'evaluation'))
 
 
 def balance_file(root, account_key):
@@ -154,14 +168,23 @@ def record_balance(root, account_key, balance, now, every=BALANCE_MINUTES):
             return None
         return out if out == out and out >= 0 else None
     try:
+        from nh_live_broker import orderable_cash
         summary = (balance or {}).get('Output_0') or {}
         if isinstance(summary, list):
             summary = summary[0] if summary else {}
-        row = {'time': now.isoformat(), 'cash': num(summary.get('orr_pbl_amt1')), 'total_assets': num(summary.get('tot_aet_amt')),
+        row = {'time': now.isoformat(), 'cash': num(orderable_cash(summary)), 'total_assets': num(summary.get('tot_aet_amt')),
                'invested': num(summary.get('tot_byn_amt')), 'evaluation': num(summary.get('tot_eal_amt'))}
         if row['total_assets'] is None and row['cash'] is not None and row['evaluation'] is not None:
             row['total_assets'] = row['cash'] + row['evaluation']
         if row['total_assets'] is None:
+            return False
+        held = any(isinstance(r, dict) and type(r.get('rsdl_qty')) is int and r['rsdl_qty'] > 0 for r in (balance.get('Output_1') or []))
+        reason = ('보유 종목이 있는데 총매수 0원' if held and not row['invested'] else
+                  '주문가능금액·보유가 있는데 총자산 0원' if not plausible(row) else None)
+        if reason:  # kept apart for the audit, never in the account's record
+            with (Path(root) / REJECTED).open('a') as stream:
+                stream.write(json.dumps({**row, 'account': account_key, 'reason': reason}, ensure_ascii=False) + '\n')
+            (Path(root) / REJECTED).chmod(0o600)
             return False
         path = balance_file(root, account_key)
         try:
@@ -190,7 +213,7 @@ def balances(root, account_key, day):
             row = json.loads(line)
         except ValueError:
             continue
-        if str(row.get('time', '')).startswith(day):
+        if plausible(row) and str(row.get('time', '')).startswith(day):
             out.append(row)
     return out
 

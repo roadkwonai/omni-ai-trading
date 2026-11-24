@@ -27,9 +27,10 @@
 | | `market-movers`, `premarket`, `preflight` | 순위·관심종목, 장전 자료, 장전 사전 점검 |
 | 실계좌 | `live-follow-1` | 실계좌 1 미러(`--execute` 등록, 실주문은 계좌 스위치가 켜졌을 때만) |
 | | `longterm-live-2` | 실계좌 2 장기투자 실행기(저장소 정의에 `--execute` 포함, 계좌별 실주문 조건 확인) |
-| 장기투자 | `vibe-longterm`, `us-ideas` | 장기 엔진(가상 계좌), 미국 종목 아이디어(참고) |
+| 장기투자 | `vibe-longterm`, `longterm-watch`, `us-ideas` | 장기 엔진(가상 계좌), 장중 상시 감시(기록만 읽고 Discord 장기 채널로 알림), 미국 종목 아이디어(참고) |
 | 기타 | `nxt-virtual` | [NXT 종가매매](nxt.md) 가상 실행 |
 | | `discord-notify` | [알림](notifications.md)과 [리포트 발행](report-pages.md) |
+| | `api-watch` | API 부하·분산 상시 감사(호출 기록만 읽고 Discord 실시간 채널로 알림) |
 | | `trading-backup`, `state-sync`, `exit-replay` | 일일 사본, 설정·전체 백업, 청산 규칙 재현 |
 | | `shared-etf-dashboard` | 대시보드 `http://127.0.0.1:8501` |
 

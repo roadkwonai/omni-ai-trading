@@ -15,6 +15,19 @@ RATE_LIMIT_WAITS = (0.5, 1.0, 2.0)  # NH's per-app call limit (IGW42902) is retr
 # NH answers one request of a kind about once a second (11-19, measured on the paper balance: a continuation page asked
 # 0.5 s after the previous one's start was refused with IGW42903, 1.0 s passed); a continuation page waits this long.
 PAGE_GAP = 1.1
+# NH gives these balance totals only once every holding is read, so a paged balance carries 0 until its last page
+BALANCE_TOTALS = ('nas_amt', 'tot_aet_amt', 'tot_byn_amt', 'tot_eal_amt', 'tot_eal_pls')
+
+
+def orderable_cash(summary):
+    """The cash a live account may plan buys with: orr_pbl_amt4 (100% orderable, a sale that settles in two days counted) within
+    the D+2 deposit, else orr_pbl_amt1 (settled only). 2026-11-24: 005930's sale never came back in orr_pbl_amt1. The guard
+    still asks NH for the very order (nh_guarded_live._buyable)."""
+    summary = summary if isinstance(summary, dict) else {}
+    settled, full, d2 = (summary.get(k) for k in ('orr_pbl_amt1', 'orr_pbl_amt4', 'nxt2_dd_dca'))
+    if type(full) is int and type(d2) is int and full > 0 and d2 > 0:
+        return min(full, d2)
+    return settled
 
 
 def _request(adapter, tool, params, sleep=time.sleep):
@@ -61,6 +74,11 @@ def _pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.s
             first = dict(data)
         rows.extend(page)
         if meta.get('complete') is True:
+            if cursor is not None and block == 'Output_1' and isinstance(first.get('Output_0'), dict):
+                last = data.get('Output_0')
+                last = last if isinstance(last, dict) else {}
+                first['Output_0'] = {**{k: v for k, v in first['Output_0'].items() if k not in BALANCE_TOTALS},
+                                     **{k: last[k] for k in BALANCE_TOTALS if k in last}}
             first[block] = rows
             first['rsp_cd'], first['rsp_msg'] = code, msg
             first['_pagination_complete'] = True

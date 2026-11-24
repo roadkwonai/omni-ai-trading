@@ -80,6 +80,29 @@ def test_signal_calibration_bands_and_flag(tmp_path):
     assert result['calibrated'] is False
 
 
+def test_judgments_without_fresh_news_are_compared_with_the_rest(tmp_path):
+    import json
+    import sqlite3
+    import daily_improvement as d
+    db = sqlite3.connect(tmp_path / 'market-research.sqlite3')
+    db.execute('CREATE TABLE decision_outcomes (key TEXT PRIMARY KEY, time, engine, kind, symbol, choice, value, direction, '
+               'input_digest, price, r5, b5, r15, b15, r30, b30, r_last, b_last, status)')
+    db.execute('CREATE TABLE model_inputs (digest TEXT PRIMARY KEY, time TEXT, engine TEXT, question TEXT, inputs TEXT, response TEXT)')
+    at = '2026-11-25T10:00:00+09:00'
+    for digest, question, state in (('n', 'candidate', {'news_status': 'none_recent'}), ('u', 'candidate', {'news_status': 'unavailable'}),
+                                    ('f', 'candidate', {}), ('h', 'holding', {}), ('w', 'watchlist', {'news_status': 'none_recent'})):
+        db.execute('INSERT INTO model_inputs VALUES (?,?,?,?,?,?)', (digest, at, 'jev', question, json.dumps({'state': state}), '{}'))
+    for key, digest, move in (('1', 'n', 0.4), ('2', 'u', -0.2), ('3', 'f', 0.3)):
+        db.execute('INSERT INTO decision_outcomes VALUES (' + ','.join('?' * 19) + ')',
+                   (key, at, 'jev', 'entry', '069500', 'K200', 0.6, 1, digest, 1000, None, None, None, None, move, 0.0, None, None, 'settled'))
+    db.commit(); db.close()
+    today = d.news_gap_outcomes(tmp_path, '2026-11-25', 10)['today']
+    assert today['candidate']['no_fresh_news'] == {'answers': 2, 'settled': 2, 'hit_rate_30m': 0.5, 'avg_move_30m_pct': 0.1}
+    assert today['candidate']['fresh'] == {'answers': 1, 'settled': 1, 'hit_rate_30m': 1.0, 'avg_move_30m_pct': 0.3}
+    assert today['holding']['fresh'] == {'answers': 1, 'settled': 0}
+    assert d.news_gap_outcomes(tmp_path / 'none', '2026-11-25', 10) == {}
+
+
 def test_add_sizing_measures_each_add_to_its_exit():
     import daily_improvement as d
     row = lambda t, side, qty, price: {'time': f'2026-11-17T{t}+09:00', 'symbol': '114800', 'side': side, 'qty': qty,
@@ -151,3 +174,20 @@ def test_v2_samples_use_the_runner_settings():
     with patch.object(oversold_cases, 'load', return_value=[]), patch.object(oversold_replay, 'v2_samples', fake):
         di.oversold_section('2026-11-19', [], {'oversold_v2_index_drop_pct': 12})
     assert seen['settings'] == {'oversold_v2_index_drop_pct': 12}
+
+
+def test_direction_mass_counts_answers_half_an_hour_apart(tmp_path):  # user 2026-11-24: overlapping windows are not evidence
+    import sqlite3
+    import daily_improvement as d
+    assert d.direction_mass_summary(tmp_path, '2026-11-24') == {}
+    with sqlite3.connect(tmp_path / 'market-research.sqlite3') as db:
+        db.execute('CREATE TABLE direction_mass (key TEXT PRIMARY KEY, time, "long", inverse, top_probability, k200_30)')
+        db.executemany('INSERT INTO direction_mass VALUES (?,?,?,?,?,?)',
+                       [(f'a{m}', f'2026-11-24T10:{m:02d}:00+09:00', 0.7, 0.1, 0.2, 0.4) for m in (0, 10, 20)]
+                       + [('b', '2026-11-24T10:40:00+09:00', 0.7, 0.1, 0.6, -0.2), ('c', '2026-11-23T10:00:00+09:00', 0.1, 0.8, 0.8, -0.5),
+                          ('d', '2026-11-24T15:00:00+09:00', 0.6, 0.1, 0.2, None)])
+    out = d.direction_mass_summary(tmp_path, '2026-11-24', 10)
+    today = out['today']['long']
+    assert (today['n'], today['split'], today['settled']['n'], today['separate']) == (5, 4, 4, {'n': 2, 'avg_move_30m_pct': 0.1, 'hit_rate_30m': 0.5})
+    assert out['last_2_days']['inverse'] == {'n': 1, 'days': 1, 'split': 0, 'settled': {'n': 1, 'avg_move_30m_pct': 0.5, 'hit_rate_30m': 1.0},
+                                             'separate': {'n': 1, 'avg_move_30m_pct': 0.5, 'hit_rate_30m': 1.0}}

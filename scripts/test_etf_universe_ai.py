@@ -113,13 +113,18 @@ class EtfUniverseAITest(unittest.TestCase):
                 patch.object(ai.urllib.request, 'urlopen', side_effect=respond) as network, \
                 patch('research_store.record_input', return_value='a' * 64) as log:
             ai.jev7(self.bars, [expired, fresh])
-            with self.assertRaisesRegex(ValueError, 'expired before Jev request'):
-                ai.jev7(self.bars, [expired])
-        self.assertEqual(network.call_count, 1)
+            with patch('etf_news.no_fresh_news', return_value={'news_status': 'none_recent'}):
+                for news in ([expired], []):  # user 2026-11-24: no fresh story does not stop the judgment, Jev is told so
+                    ai.jev7(self.bars, news)
+        self.assertEqual(network.call_count, 3)
+        self.assertNotIn('news_status', sent[0])
+        self.assertTrue(all(s['recent_news_headlines'] == [] and s['news_status'] == 'none_recent' for s in sent[1:]))
+        with self.assertRaises(ValueError):
+            ai.decision7(self.bars, [])  # the OpenAI judge still needs news
         self.assertEqual(sent[0]['recent_news_headlines'], [{**fresh, 'news_role': 'priority'}])
-        self.assertEqual((sent[0]['news_priority_minutes'], sent[0]['news_max_age_minutes']), (30, 60))
+        self.assertEqual((sent[0]['news_priority_minutes'], sent[0]['news_max_age_minutes']), (30, 90))
         self.assertEqual(sent[0]['news_checked_at'], at.isoformat())
-        self.assertEqual(log.call_args.args[2]['state'], sent[0])
+        self.assertEqual(log.call_args_list[0].args[2]['state'], sent[0])
 
     def test_jev_receives_investor_flows_when_available(self):
         sent = []

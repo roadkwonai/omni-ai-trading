@@ -123,6 +123,29 @@ class ProgramIntradayTests(unittest.TestCase):
         self.assertIn('프로그램 시계열(키움): OSError', payload['errors'])
         self.assertIn('외국계창구(키움): ValueError', payload['errors'])
 
+    def test_a_failed_program_reading_reuses_the_last_one_for_minutes_only(self):
+        # 11-24 10:11: one Kiwoom 502 took the program series out of Jev's market view for five minutes
+        from unittest.mock import patch
+        import kiwoom_data
+        section = {'source': 'kiwoom:ka90005', 'markets': {'KOSPI': {'as_of': '13:02', 'rows': [['13:02', 1.0, 2.0, 3.0, 0, 0]]}}}
+
+        def collect(minutes, **extra):
+            previous = {'time': (NOW - timedelta(minutes=minutes)).isoformat(), 'program_intraday': {**section, **extra},
+                        'foreign_desks': {'net_buy': [{'name': 'x'}]}}
+            with patch.object(m, 'load', return_value=previous), patch.object(m, 'index_snapshot', side_effect=OSError), \
+                 patch.object(m, 'themes', side_effect=OSError), patch.object(m, 'global_prices', side_effect=OSError), \
+                 patch.object(m, 'global_intraday', side_effect=OSError), patch.object(kiwoom_data, 'configured', return_value=True), \
+                 patch.object(m, 'index_fallback', side_effect=OSError), \
+                 patch.object(m, 'program_intraday', side_effect=OSError), patch.object(m, 'foreign_desks', side_effect=OSError):
+                return m.collect(NOW)
+        kept = collect(5)
+        self.assertEqual(kept['program_intraday'], {**section, 'reused_from': (NOW - timedelta(minutes=5)).isoformat()})
+        self.assertIn('프로그램 시계열(키움): OSError', kept['errors'])  # the failure is still told
+        self.assertNotIn('foreign_desks', kept)  # its rows carry no time, so nothing could tell an old one
+        self.assertNotIn('program_intraday', collect(11))
+        self.assertNotIn('program_intraday', collect(5, reused_from=(NOW - timedelta(minutes=12)).isoformat()))  # never renewed
+        self.assertNotIn('program_intraday', collect(5, reused_from='broken'))
+
     def test_foreign_desks_top_rows_in_100m_krw(self):
         from unittest.mock import patch
         import kiwoom_data

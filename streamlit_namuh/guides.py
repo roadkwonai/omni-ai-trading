@@ -11,6 +11,7 @@ import streamlit as st
 
 # Live account protections (AGENTS.md, user-approved): shown on the 실계좌 tab and in its guide.
 from accounts import BUDGET_LIMITS as _B, LIVE_RULE_LIMITS as _R  # one source: the limits the live guard and mirror enforce
+import dialogs
 from settings_view import SIZING_GUIDE  # the same wording as the account form tooltips
 LIVE_LIMITS = {'capital_krw': _B['live']['capital_krw'][1], 'daily_loss_krw': _B['live']['daily_loss_krw'][1],
                'order_qty': _R['max_order_qty'][1], 'order_price_max_krw': _B['live']['order_price_max_krw'][1],
@@ -673,10 +674,9 @@ def diagram(key, v):
         GU.diagram(build(v))
 
 
-@st.dialog('가이드 센터', width='large')
+@dialogs.dialog('가이드 센터')
 def guide_dialog(key=None):
     """All guides in one place; opens on the given screen."""
-    import dialogs
     import guide_ui as GU
     dialogs.wide()
     GU.style()
@@ -717,11 +717,13 @@ def render_text(guide):
 
 def help_row(key):
     """First row of a tab: the screen's purpose on the left, its guide on the right (same place on every tab)."""
+    import ask_ai
     guide = GUIDES[key]
     left, middle, right = st.columns([6, 1.2, 1.2], vertical_alignment='center')
     left.caption(guide['purpose'])
     with middle.popover('화면 안내', icon=':material/help:', width='stretch', help='이 화면이 보여주는 것과 읽는 법'):
         render_text(guide)
+        ask_ai.guide_questions(key)
     # outside the popover: a dialog opened from inside it would sit under the still-open popover
     if right.button('가이드 센터', key=f'guide_open_{key}', icon=':material/menu_book:', width='stretch',
                     help='이 화면의 읽는 순서·용어·설명과 매수·매도 전략, 제한 규칙, 안전장치 도식을 한 팝업에서 봅니다.'):

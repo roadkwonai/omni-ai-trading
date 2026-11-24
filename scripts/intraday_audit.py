@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import api_load
 from src.config.paths import get_runtime_root  # VIBE_TRADING_HOME, else ~/.vibe-trading (one rule for every tool)
 from sqlite_ro import day_rows  # a line is the day's by its own time, not by mentioning the day
 
@@ -116,6 +117,24 @@ def repeat_blocks(events):
             runs[key] = {'first': at, 'last': at, 'count': 1}
     for key, run in runs.items():
         close(key, run)
+    return out
+
+
+def zero_totals(nhplug, now, since):
+    """{account key: count} of live balances refused since `since` (else the last hour) as impossible (live_fills.record_balance): 11-23 the
+    totals of a paged balance were read from its first page, where NH gives 0."""
+    out, start = {}, since or now - timedelta(hours=1)
+    try:
+        lines = (Path(nhplug) / 'balance-rejected.jsonl').read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            row = json.loads(line)
+            if _time(row['time']) >= start:
+                out[row['account']] = out.get(row['account'], 0) + 1
+        except (ValueError, KeyError, TypeError, AttributeError):
+            continue
     return out
 
 
@@ -278,6 +297,7 @@ def sources(root):
     return {'time': payload.get('time'), 'lag_min': lag}
 
 
+SUMMARY_FROM = '09:16'  # the first call with intraday_summary came at 09:12~09:14 on 11-20, 11-23 and 11-24
 JEV_INPUT_KEYS = ('chart', 'recent_news_headlines', 'market_regime_themes_global', 'investor_daily_net_qty',
                   'premarket_context', 'own_track_record', 'trading_journal', 'intraday_summary', 'market_playbook')
 
@@ -302,7 +322,8 @@ def jev_inputs(root, day, since=None):
     # each question's first evidence answer: a call after it without one is a regression (watchlist never asks)
     evidence_from = dict(_query(Path(root) / 'market-research.sqlite3',
                                 "SELECT question, MIN(time) FROM model_evidence WHERE engine='jev' GROUP BY question") or ())
-    present, news_age, market_age, summary_bars = Counter(), [], [], []
+    present, news_age, market_age, summary_bars, summary_calls = Counter(), [], [], [], 0
+    from session_times import shifted
     evidence, questions, answers = {}, Counter(), {}
     fixes = Counter(dict.fromkeys(('news_old_calls', 'news_old_headlines', 'stock_news_old', 'session_market_calls',
                                    'market_intraday_missing', 'figures_calls', 'figures_stale', 'evidence_calls',
@@ -321,7 +342,10 @@ def jev_inputs(root, day, since=None):
             state, at = data['state'], datetime.fromisoformat(stamp)
         except (ValueError, KeyError, TypeError):
             continue
-        present.update(k for k in JEV_INPUT_KEYS if state.get(k))
+        # the session summary needs several bars of today: not from the opening calls or the 30-minute watchlist pick
+        due = question != 'watchlist' and at.astimezone(KST).strftime('%H:%M') >= shifted(SUMMARY_FROM, at.astimezone(KST).date())
+        summary_calls += due
+        present.update(k for k in JEV_INPUT_KEYS if state.get(k) and (due or k != 'intraday_summary'))
         checked_at = _time(state.get('news_checked_at'))
         news_at = checked_at if checked_at is not None and checked_at <= at else at
         ages = [(news_at - _time(n.get('published'))).total_seconds() / 60 for n in state.get('recent_news_headlines') or []
@@ -355,7 +379,8 @@ def jev_inputs(root, day, since=None):
             pass
     calls = sum(questions.values())
     median = lambda v: round(statistics.median(v), 1) if v else None  # noqa: E731
-    return {'calls': dict(questions), 'presence_pct': {k: round(present[k] / calls * 100) for k in JEV_INPUT_KEYS} if calls else {},
+    return {'calls': dict(questions), 'presence_pct': {k: round(present[k] / n * 100) for k in JEV_INPUT_KEYS
+                                                           if (n := summary_calls if k == 'intraday_summary' else calls)},
             'news_newest_age_min': {'median': median(news_age), 'max': round(max(news_age), 1) if news_age else None},
             'market_age_min_max': round(max(market_age), 1) if market_age else None,
             'session_summary_bars_median': median(summary_bars),
@@ -451,6 +476,9 @@ def anomalies(facts, now, skipped=None):
         last = _time(row.get('last_cycle'))
         if ran(in_session, 'cycle.silent') and (last is None or (now - last).total_seconds() / 60 > CYCLE_GAP_MIN):
             found[f'cycle.silent:{name}'] = f"마지막 회차 {row.get('last_cycle')}"
+        stopped = (row.get('entry_blocks') or {}).get('jev_error', 0)
+        if stopped >= REPEAT_BLOCK_ROUNDS:  # 11-24 13:12: entry judgments failed every cycle and no key named it
+            found[f'entry.jev_stopped:{name}'] = f'Jev 진입 판단 실패 {stopped}회차(jev_error, 오류 문구는 events.jsonl detail)'
         for run in row.get('repeat_blocks') or ():
             found[f"entry.repeat_block:{run['symbol']}:{run['reason']}"] = f"{run['from']}~{run['to']} {run['count']}분 연속 같은 사유로 주문 단계 거절"
         for gap in row.get('long_gaps') or ():
@@ -517,6 +545,13 @@ def anomalies(facts, now, skipped=None):
             found[f'nh.same_query_limit:{who}'] = f"IGW42903 {hits['IGW42903']}건(같은 조회 1초 1번 제한, 재시도로 가려진 지연)"
         if ran(in_session, 'nh.app_rate_limit') and hits.get('IGW42902', 0) >= NH_APP_LIMIT_HITS:
             found[f'nh.app_rate_limit:{who}'] = f"IGW42902 {hits['IGW42902']}건(앱 키 초당 5회 제한, 같은 순간 다른 서비스 호출도 거절됨)"
+    if ran(in_session, *(f'api.{kind}' for kind in api_load.ADVICE)):
+        for row in facts.get('api_load') or ():
+            if row['key'] != 'api.refused:nh':  # nh.same_query_limit and nh.app_rate_limit say it per caller
+                found[row['key']] = f"{row['detail']} → {row['advice']}"
+    if ran(in_session, 'live.zero_total'):
+        for key, n in (facts.get('zero_totals') or {}).items():
+            found[f'live.zero_total:{key}'] = f'잘못된 잔고 {n}건을 기록하지 않음(balance-rejected.jsonl), 같은 값을 읽는 가드가 새 매수를 막을 수 있음'
     for key, on in facts['live']['live_orders'].items():
         if on is True:
             found[f'live.switch_on:{key}'] = '실계좌 실주문 스위치 켜짐'
@@ -596,7 +631,8 @@ def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=No
              'databases': database_health(nhplug),
              'learning': learning_rounds(Path(nhplug) / 'shared-etf-paper' / 'com.vibetrading.shared-etf-learning.log', day),
              'jev_inputs': jev_inputs(Path(nhplug) / 'shared-etf-paper', day, since),
-             'sources': sources(Path(nhplug) / 'shared-etf-paper'), 'nh_limits': nh_limits(nhplug, now, since)}
+             'sources': sources(Path(nhplug) / 'shared-etf-paper'), 'nh_limits': nh_limits(nhplug, now, since),
+             'zero_totals': zero_totals(nhplug, now, since), 'api_load': api_load.findings(api_load.collect(nhplug, now))}
     reviews = Path(nhplug) / 'shared-etf-paper' / 'reviews'
     facts['checks'] = checks(reviews, checks_file)
     skipped = set()

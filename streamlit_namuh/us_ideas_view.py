@@ -14,7 +14,7 @@ import vibe_longterm as L
 
 FLOW = """digraph G { rankdir=LR; bgcolor="transparent"; node [shape=box style="rounded,filled" fillcolor="#1E293B" color="#334155"
 fontcolor="#E2E8F0" fontname="Pretendard" fontsize=11]; edge [color="#94A3B8" fontcolor="#94A3B8" fontname="Pretendard" fontsize=10];
-src [label="SEC 공시·N-PORT·13F\\n(분기, 셋째 금 07:00)"]; px [label="Yahoo 시세\\n(주간, 금 07:30)"];
+src [label="SEC 공시·N-PORT·13F\\n(분기, 셋째 금 10:00)"]; px [label="Yahoo 시세\\n(주간, 금 10:30)"];
 screen [label="코드 스크린\\n버핏·린치·피셔·텐베거\\n자료 이상은 제외"]; picks [label="상위 후보\\n(이 탭 · 이름만, 주문 없음)"];
 lens [label="렌즈·공시 확인\\n주간 리포트(금 16:50)\\n반대 렌즈 포함" fillcolor="#0E1223" color="#C4B5FD" fontcolor="#C4B5FD"];
 card [label="논리 카드\\n리포트 5절 · 반증 3·레드라인"]; score [label="추천 성적표\\n1·3·6·12개월 vs QQQ·SPY" fillcolor="#0E1223" color="#93C5FD" fontcolor="#93C5FD"];
@@ -24,7 +24,7 @@ src -> screen; px -> screen; screen -> picks; picks -> lens; lens -> card [label
 def flow_spec():
     import guide_ui as GU
     return GU.workflow('아이디어가 리포트까지 가는 길', [('data', '자료'), ('code', '코드 스크린 · 이 탭'), ('report', '주간 리포트'), ('score', '성적')],
-        [('src', 'data', 0, 'SEC 공시·N-PORT·13F', '분기 · 셋째 금 07:00', 'external'), ('px', 'data', 1, 'Yahoo 시세', '주간 · 금 07:30', 'external'),
+        [('src', 'data', 0, 'SEC 공시·N-PORT·13F', '분기 · 셋째 금 10:00', 'external'), ('px', 'data', 1, 'Yahoo 시세', '주간 · 금 10:30', 'external'),
          ('screen', 'code', 1, '코드 스크린', '버핏·린치·피셔·텐베거 · 자료 이상 제외', 'security'),
          ('picks', 'code', 2, '상위 후보', '이름만 · 주문 없음', 'frontend'),
          ('lens', 'report', 3, '렌즈·공시 확인', '금 16:50 · 반대 렌즈 포함', 'cloud'), ('card', 'report', 4, '논리 카드', '리포트 5절 · 반증 3·레드라인'),

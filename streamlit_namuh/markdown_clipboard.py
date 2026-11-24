@@ -25,6 +25,11 @@ export default function ({data, parentElement}) {
     const button = parentElement.querySelector('button');
     const status = parentElement.querySelector('[role="status"]');
     const fallback = parentElement.querySelector('textarea');
+    if (data.label) {
+        button.textContent = data.label;
+        button.title = '';
+        button.removeAttribute('aria-description');
+    }
     button.onclick = async () => {
         try {
             await navigator.clipboard.writeText(data.markdown);

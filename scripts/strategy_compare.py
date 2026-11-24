@@ -46,6 +46,7 @@ def _fees(day_rows, etfs):
 
 def _snapshots(path):
     """{day: last account snapshot of the day} from the runner's account-snapshots.jsonl."""
+    from live_fills import plausible
     out = {}
     try:
         lines = Path(path).read_text().splitlines()
@@ -56,7 +57,7 @@ def _snapshots(path):
             row = json.loads(line)
         except ValueError:
             continue  # a half-written last line
-        if isinstance(row, dict) and isinstance(row.get('time'), str):
+        if plausible(row) and isinstance(row.get('time'), str):
             out[row['time'][:10]] = row
     return out
 

@@ -373,6 +373,9 @@ def account_snapshot(root, summary, now=None):
     row = {'time': now.isoformat(), **{k: summary.get(v) for k, v in fields.items()}}
     if not all(type(row[k]) in (int, float) for k in fields):
         return  # a partial page proves nothing; skip rather than record a misleading total
+    from live_fills import plausible
+    if not plausible(row):
+        return
     try:
         with path.open('a') as stream:
             stream.write(json.dumps(row) + '\n')
@@ -889,6 +892,17 @@ def watchlist_brief(code, details):
     return stock_brief({**details, 'news': fresh_stock_news(code, details.get('name'), datetime.now(KST)) or details.get('news')})
 
 
+def news_error_type(exc):
+    return ('TimeoutError' if isinstance(exc, TimeoutError) else 'OSError' if isinstance(exc, OSError) else
+            'ValueError' if isinstance(exc, ValueError) else 'ParseError')
+
+
+def internal_detail(exc):
+    """{'detail': message} for this code's own plain messages; anything with digits, symbols or Korean (broker text) stays out."""
+    text = str(exc).lower()
+    return {'detail': text} if re.fullmatch(r'[a-z ]{3,60}', text) else {}
+
+
 def recent_stock_headlines(news, now=None, limit=2):
     """The stock's own headlines from the last etf_news.RECENT (90 min) with their age, newest first (user 2026-11-18:
     old news must not reach Jev; the watchlist keeps up to a day of them without a time, so Jev could not tell)."""
@@ -1216,25 +1230,57 @@ def entry_timing_context(quote, ask, bars, decided_at):
     return out
 
 
+KIWOOM_BARS = 'pytest' not in sys.modules  # tests never read the live Kiwoom API unless one opts in
+NH_BARS_REST_S = 60.0
+_NH_BARS_REST = [0.0]  # monotonic time until which charts are read from Kiwoom first
+
+
+def kiwoom_bars(code, prior):
+    """The chart from Kiwoom in the shape of NH's answer, or None (no key, a failed call, no rows)."""
+    try:
+        import kiwoom_data
+        if not KIWOOM_BARS or not kiwoom_data.configured():
+            return None
+        rows = kiwoom_data.krx_minute_rows(code, prior=prior)
+    except Exception:  # noqa: BLE001 - a fallback that fails leaves the NH failure as it was
+        return None
+    return {'status': 'ok', 'source': 'kiwoom', 'data': {'rsp_cd': '00000', 'Output_0': {'iem_cd': code}, 'Output_1': rows}} if rows else None
+
+
+def bars_source(cache):
+    """market_source of the journal: which of the cycle's charts came from Kiwoom because NH did not answer."""
+    codes = sorted({key if isinstance(key, str) else key[0] for key, got in (cache or {}).items() if got.get('source') == 'kiwoom'})
+    return 'NH KRX 1-minute completed bars' + (f" (Kiwoom KRX: {', '.join(codes)})" if codes else '')
+
+
 def minute_bars(read, code, cache=None, prior=False):
     """1-minute bar read, retried once after a failed call (read-only; the API fails now and then under load). `cache`:
     one cycle's successful reads by code, so holding reviews and the entry read each chart once (r3 X3). `prior`: NH's
-    today_cls_code 0 also returns the previous session's last bars (the opening review, user 2026-11-19)."""
+    today_cls_code 0 also returns the previous session's last bars (the opening review, user 2026-11-19). A chart NH does
+    not give comes from Kiwoom (user 2026-11-24), and for the next minute the other charts do too: each stalled NH start
+    costs seconds. Orders still need an NH quote (fresh_quote)."""
     key = (code, 'prior') if prior else code
     if cache is not None and key in cache:
         return cache[key]
     if cache is not None and not prior and (code, 'prior') in cache:
         return cache[(code, 'prior')]  # the opening read holds today's bars too (valid_bars keeps only today's)
-    for attempt in range(2):
-        response = read.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {'market_cd': 'KRX',
-            'iem_cd': code, 'gubun': '5', 'xtick': '1', 'today_cls_code': '0' if prior else '1', 'view_main_yn': 'Y',
-            'array_cnt': '30'}})
-        if response.get('status') == 'ok':
-            if cache is not None:
-                cache[key] = response
-            return response
-        if attempt == 0:
-            time.sleep(0.5)
+    resting = time.monotonic() < _NH_BARS_REST[0]
+    response = kiwoom_bars(code, prior) if resting else None
+    if response is None:
+        for attempt in range(2):
+            response = read.call_tool('call_api', {'operationId': 'krstockQuotePeriod', 'input': {'market_cd': 'KRX',
+                'iem_cd': code, 'gubun': '5', 'xtick': '1', 'today_cls_code': '0' if prior else '1', 'view_main_yn': 'Y',
+                'array_cnt': '30'}})
+            if response.get('status') == 'ok':
+                break
+            if attempt == 0:
+                time.sleep(0.5)
+        else:
+            if not resting and (other := kiwoom_bars(code, prior)):
+                _NH_BARS_REST[0] = time.monotonic() + NH_BARS_REST_S
+                response = other
+    if response.get('status') == 'ok' and cache is not None:
+        cache[key] = response
     return response
 
 
@@ -2114,6 +2160,23 @@ def inverse_exit(plan, avg, bid, view, index):
     return None
 
 
+def holding_quote_record(quote, avg, plan):
+    """The quote one look at a holding was judged on (user 2026-11-24: the bid at the 09:34 삼성전자 exit was not recorded)."""
+    fields = {'bid': quote.get('bidp'), 'ask': quote.get('askp'), 'quote_time': quote.get('hoga_bsop_hour'),
+              'avg': avg, 'peak': (plan or {}).get('peak')}
+    return {k: v for k, v in fields.items() if v is not None}
+
+
+def v2_trail_exit(plan, avg, bid):
+    """'trailing_stop' when a 선별 v2 position that had gained oversold_v2_trail_at_pct % (0 = off) at its best bid is
+    oversold_v2_trail_pct % under that high (user 2026-11-24: judge the sale by the day, do not give the gain back)."""
+    at, peak = OVERSOLD.get('oversold_v2_trail_at_pct') or 0, (plan or {}).get('peak')
+    if not at or not is_v2(plan) or type(peak) not in (int, float) or type(avg) not in (int, float) or avg <= 0:
+        return None
+    return ('trailing_stop' if peak >= avg * (1 + at / 100)
+            and bid <= peak * (1 - OVERSOLD.get('oversold_v2_trail_pct', 2.0) / 100) else None)
+
+
 def exit_reason(avg, bid, levels, protected, peak=None):
     """Why a holding must exit now, or None: final take-profit, stop, back to breakeven after a partial sale, or
     (trend plans) a fall of the trailing distance from the highest bid once the first take-profit level was reached."""
@@ -2940,7 +3003,7 @@ def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, s
     if etf7 and not modes['decision'] and not modes['jev']:
         return False
     try:
-        bars = {}
+        bars, bar_cache = {}, {} if bar_cache is None else bar_cache
         series = dict(ETF7_SYMBOLS if etf7 else SYMBOLS)
         if etf7 and symbol not in series.values():
             series[symbol] = symbol  # a held scanner stock is charted under its own code
@@ -2961,13 +3024,19 @@ def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, s
             raise ValueError('stale holding bars')
         if etf7:
             from etf_news import headlines7
-            news = headlines7(datetime.now(KST))
+            try:
+                news = headlines7(datetime.now(KST))
+            except (OSError, ValueError, ParseError) as exc:
+                if modes['decision']:
+                    raise  # the OpenAI judge needs news; Jev judges without it (user 2026-11-24)
+                journal_event(root, 'v2_news_error', error_type=news_error_type(exc), cycle_id=cycle_id)
+                news = []
         else:
             news = headlines(datetime.now(KST))
         response_time = jev_time = None
         choice, confidence = None, None
         review_type = 'preclose' if datetime.now(KST).strftime('%H:%M') >= preclose_from() else 'regular'
-        extra = {'market_bars': bars, 'market_source': 'NH KRX 1-minute completed bars', 'universe': 'etf7'} if etf7 else {}
+        extra = {'market_bars': bars, 'market_source': bars_source(bar_cache), 'universe': 'etf7'} if etf7 else {}
         if opening_used:
             today_rows, prior_rows = opening_split(bars, datetime.now(KST))
             extra.pop('market_bars')
@@ -3037,8 +3106,7 @@ def holding_action(read, root, symbol, avg, bid, *, cycle_id=None, etf7=False, s
             journal_event(root, 'jev_error', error_type=type(exc).__name__, cycle_id=cycle_id)
         return choice == 'SELL' and confidence >= 0.8
     except Exception as exc:
-        detail = {'detail': str(exc)} if re.fullmatch(r'[a-z ]{3,60}', str(exc)) else {}  # internal messages only
-        journal_event(root, 'v2_holding_decision_error', symbol=symbol, error_type=type(exc).__name__, cycle_id=cycle_id, **detail)
+        journal_event(root, 'v2_holding_decision_error', symbol=symbol, error_type=type(exc).__name__, cycle_id=cycle_id, **internal_detail(exc))
         return False
 
 
@@ -3359,7 +3427,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             return True
         return (exit_reason(avg, bid, regime_stop_levels(plans.get(symbol), view, stop_symbol_index(root, symbol), symbol), symbol in protected, plan.get('peak')) is not None
                 or ipo_time_stop(plan, datetime.now(KST)) is not None
-                or inverse_exit(plan, avg, bid, view, stop_symbol_index(root, symbol) or '코스피') is not None)
+                or inverse_exit(plan, avg, bid, view, stop_symbol_index(root, symbol) or '코스피') is not None
+                or v2_trail_exit(plan, avg, bid) is not None)
 
     from etf_universe import SHORT as _SHORT
     short_codes = {ETF7_SYMBOLS[n] for n in _SHORT}
@@ -3449,6 +3518,11 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         switched = manual and requested[symbol] is None and (datetime.now(KST).date(), symbol) in _SWITCH_EXITS
         if etf7:
             track(symbol, bid, cycle_id, avg)
+            try:
+                journal_event(root, 'holding_quote', symbol=symbol, qty=quantity, cycle_id=cycle_id,
+                              **holding_quote_record(quote, avg, plans.get(symbol)))
+            except Exception:
+                pass  # a failed diagnostic write must not delay an exit
         # Before the runner stops at 15:00 a holding leaves unless its trend plan, a rising market, a profit, the
         # overnight limit and an open next session all allow carrying it.
         flatten = etf7 and datetime.now(KST).strftime('%H:%M') >= FLATTEN_AT
@@ -3484,7 +3558,8 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             if held_reason is None:
                 flatten = False
                 overnight_left -= cost
-        v2_hold = is_v2(plans.get(symbol))  # 선별 v2 tests its own rule: stop, cap or sessions only (engines still record views)
+        v2_hold = is_v2(plans.get(symbol))  # 선별 v2 tests its own rule: stop, cap or sessions (engines still record views) ...
+        v2_jev_sell = v2_hold and OVERSOLD.get('oversold_v2_jev_sell_on') and bid > avg  # ... or, switched on, Jev's SELL in profit
         # A user exit request or the pre-close exit uses the protective (quote-deadline) path.
         full_exit = manual or flatten or exit_now(symbol, avg, bid)
         risk_exit = full_exit
@@ -3493,7 +3568,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                                         signal_context=signal_context, modes=modes, stop_hit=exit_now(symbol, avg, bid),
                                                         bar_cache=bar_cache, position_quote=quote,
                                                         position_extra=position_context(symbol, avg, bid, quantity) if etf7 else None)
-                                         and (not v2_hold or exit_now(symbol, avg, bid)))
+                                         and (not v2_hold or v2_jev_sell or exit_now(symbol, avg, bid)))
         should_sell = jev_sell
         partial_qty = 0
         if etf7 and not should_sell and not v2_hold and not modes['decision']:
@@ -3615,6 +3690,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                or exit_reason(avg, price, regime_stop_levels(plans.get(symbol), view, stop_symbol_index(root, symbol), symbol), symbol in protected, (plans.get(symbol) or {}).get('peak'))
                                or ipo_time_stop(plans.get(symbol), datetime.now(KST))
                                or inverse_exit(plans.get(symbol), avg, price, view, stop_symbol_index(root, symbol) or '코스피')
+                               or v2_trail_exit(plans.get(symbol), avg, price)
                                or ('direction_switch' if switched else 'session_flatten' if flatten else None)) if etf7 else None)
                     if etf7 and reason and not take_profit and symbol in plans and not plans[symbol].get('exiting'):
                         plans[symbol] = {**plans[symbol], 'exiting': reason}
@@ -3627,8 +3703,12 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                                qty=quantity, reentries=int(basis.get('reentries') or 0),
                                                limit=OVERSOLD.get('oversold_v2_reentry_max', 0),
                                                facts={k: basis.get(k) for k in ('drop_pct', 'market', 'market_low_pct', 'rel_drop')})
+                    try:
+                        judged = {**holding_quote_record(quote, avg, plans.get(symbol)), 'first_bid': bid}
+                    except Exception:
+                        judged = {}
                     journal_event(root, 'manual_exit' if manual and not switched else 'split_take_profit' if take_profit else 'v2_risk_exit',
-                                  symbol=symbol, cycle_id=cycle_id, **({'reason': reason} if reason else {}))
+                                  symbol=symbol, cycle_id=cycle_id, **({'reason': reason} if reason else {}), **judged)
                 except Exception:
                     # A failed diagnostic write must not prevent a protective exit.
                     pass
@@ -3689,16 +3769,16 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                         or v2_reentry_due(root, owned))  # a stopped v2 code waiting for its low (user 2026-11-17)
     if late and not v2_open:
         cycle_id = uuid.uuid4().hex
-        late = {}
+        late, late_cache = {}, {}
         for name, code in ETF7_SYMBOLS.items():  # prices only: settlements and post-exit paths need them until 15:00
             try:
-                response = minute_bars(read, code)
+                response = minute_bars(read, code, late_cache)
                 if response.get('status') == 'ok':
                     late[name] = valid_bars(response.get('data', {}), code, datetime.now(KST))
             except (ValueError, TypeError, KeyError):
                 continue
         if late:
-            journal_event(root, 'market_context', market_bars=late, market_source='NH KRX 1-minute completed bars',
+            journal_event(root, 'market_context', market_bars=late, market_source=bars_source(late_cache),
                           universe='etf7', context='late_session', cycle_id=cycle_id)
         journal_event(root, 'v2_entry_gate', choice='WAIT', permitted=False, reason='entry_window_closed', cycle_id=cycle_id)
         return 'wait'
@@ -3762,11 +3842,10 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         else:
             news = headlines(now)
     except (OSError, ValueError, ParseError) as exc:
-        error_type = ('TimeoutError' if isinstance(exc, TimeoutError) else
-                      'OSError' if isinstance(exc, OSError) else
-                      'ValueError' if isinstance(exc, ValueError) else 'ParseError')
-        journal_event(root, 'v2_news_error', error_type=error_type, cycle_id=cycle_id)
-        return 'wait'
+        journal_event(root, 'v2_news_error', error_type=news_error_type(exc), cycle_id=cycle_id)
+        if not etf7 or modes['decision']:
+            return 'wait'
+        news = []  # user 2026-11-24: Jev judges without it and is told so; the other entry paths are looked at as usual
     choice, confidence, usage = None, None, {}
     investor = investor_flows(read, datetime.now(KST)) if etf7 and modes['jev'] else None
     logged = {'market_bars': bars}  # only today's rows go to market_bars (the ledger keeps bsop_time only)
@@ -3778,10 +3857,10 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         choice, confidence, usage = (decision7 if etf7 else decision)(bars, news)
         extra = {'universe':'etf7', 'model_response_time':usage.get('response_time')} if etf7 else {}
         journal_event(root, 'decision', choice=choice, confidence=confidence, **logged,
-                      market_source='NH KRX 1-minute completed bars', model='gpt-6-luna', news=news,
+                      market_source=bars_source(bar_cache), model='gpt-6-luna', news=news,
                       recent_range_pct={k:volatility(v) for k,v in bars.items()}, usage=usage, cycle_id=cycle_id, **extra)
     else:
-        journal_event(root, 'market_context', **logged, market_source='NH KRX 1-minute completed bars',
+        journal_event(root, 'market_context', **logged, market_source=bars_source(bar_cache),
                       universe='etf7', context='entry', news=news, investor_flows=investor,
                       candidates={c: {k: d.get(k) for k in ('name', 'reasons', 'change_pct', 'value_mil', 'index')}
                                   for c, d in movers.items()}, track_record=track_record(root), cycle_id=cycle_id)
@@ -3806,7 +3885,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             journal_event(root, 'jev_shadow', jev=comparison, cycle_id=cycle_id, **kwargs)
         except Exception as exc:
             comparison = None
-            journal_event(root, 'jev_error', error_type=type(exc).__name__, cycle_id=cycle_id)
+            journal_event(root, 'jev_error', error_type=type(exc).__name__, cycle_id=cycle_id, **internal_detail(exc))
     if observing_open:
         journal_event(root, 'v2_entry_gate', choice='WAIT', permitted=False, reason='opening_observation_only', cycle_id=cycle_id)
         return 'opening_observation'

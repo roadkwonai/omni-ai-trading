@@ -23,6 +23,7 @@ import streamlit as st
 
 from report_figures import for_streamlit  # report callouts/highlights in st.markdown
 from automation_status import processes, learning, recent_events, stop_shared_paper, stop_live
+import dialogs
 import prefs as PREFS
 import theme as THEME
 from guides import help_row, guide_dialog, LIVE_LIMITS, live_dot, values as guide_values
@@ -36,7 +37,7 @@ from paper_ai_modes import read_modes, read_pending_modes, write_modes
 from engine_compare import apply_fill, read_events, signed
 from strategy_settings import read_settings, write_settings, DEFAULTS as STRATEGY_DEFAULTS, LIMITS as STRATEGY_LIMITS, LABELS as STRATEGY_LABELS
 from nh_live_broker import BALANCE_FIELDS as BALANCE
-from nh_live_broker import _pages as read_live_pages, read_balance
+from nh_live_broker import _pages as read_live_pages, orderable_cash, read_balance
 from src.live.halt import halt_flag_set
 from src.config.loader import load_agent_config
 from src.config.paths import get_runtime_root
@@ -103,9 +104,12 @@ def rerun_when_read_completes(start):
             return
         if future is None:
             future = start()
-        if future.done():
+        if future.done() and dialogs.OPEN not in st.session_state:  # closing a pop-up redraws the app
             st.rerun()
     check()
+
+
+STATE_POPUPS = ('side_d_services', 'side_d_alerts', 'ov_d_alerts', 'ops_d_services')  # buttons of pop-ups that show the states
 
 
 def display_process_states():
@@ -115,6 +119,8 @@ def display_process_states():
     states = peek_processes()
     if states is not None:
         return states
+    if any(st.session_state.get(key) for key in STATE_POPUPS):
+        return processes()  # an open pop-up is not drawn again when the read completes
     rerun_when_read_completes(lambda: start_dashboard_read('process-states', processes))
     return dict.fromkeys(LABELS, '확인 중')
 
@@ -330,7 +336,7 @@ def broker_snapshot(balance, history, now):
                     ('orr_rjt_rsn_cd_nm', '거부 사유'), ('orr_tmd', '주문 시각'), ('itg_orr_no', '주문번호')]
     if any(not isinstance(row, dict) for row in history['Output_0']):
         raise ValueError('주문 내역 형식이 올바르지 않습니다.')
-    summary = balance['Output_0']
+    summary = {**balance['Output_0'], 'orr_pbl_amt1': orderable_cash(balance['Output_0'])}  # a sale that settles in two days counted
     values = [summary.get(key) for key in ('tot_eal_amt', 'tot_eal_pls', 'pft_rt')]
     def valid_number(value):
         return type(value) in (int, float) and math.isfinite(value)
@@ -1852,7 +1858,7 @@ def orders_view(snapshot, books=None, day=None):
     cards.append({'label': '보유', 'value': f'{len(holdings)}종', 'tone': 'up' if holdings else 'off', 'icon': 'inventory_2',
                   'sub': ', '.join(f"{h.get('종목') or h.get('종목코드')} {h.get('보유수량'):,}주" for h in holdings) or None,
                   'help': '증권사 잔고 기준 보유 종목입니다.'})
-    sc.row(cards)
+    sc.row(cards, ask='live')
     if not orders:
         st.caption('증권사에 조회된 당일 주문이 없습니다.')
         return
@@ -2303,7 +2309,9 @@ def match_live_panel(record, records, prefix=''):
                      hide_index=True, width='stretch')
         st.caption('분할 1회·종목당 최대는 모의계좌에만 있는 값이라 실계좌 설정에는 없습니다. 실계좌 운용금(실계좌 탭)이나 위 동시 보유 종목 수를 '
                    '바꾸면 다시 계산됩니다. 실계좌는 모의가 산 수량을 금액 비율대로 따라 삽니다(실계좌 탭 → 금액·한도·미러 규칙).')
-        st.caption(f"하락장·횡보장에는 분할 1회가 절반 안팎으로 줄어 1주가 그보다 비싼 종목(약 {krw_words(after['budget']['first_buy_krw'] // 2)} 넘는 종목)은 "
+        sizing = strategy_settings()[0]
+        share = sizing['size_market_against_pct'] if sizing['size_market_on'] else 100
+        st.caption(f"하락장에는 분할 1회의 {share:g}%만 사므로(시황 축소, 매매 기준 → 비중 조절) 1주가 그보다 비싼 종목(계산값 기준 약 {krw_words(int(after['budget']['first_buy_krw'] * share / 100))} 넘는 종목)은 "
                    '첫 매수를 못 할 수 있습니다. 모의 하루 손실 한도도 실계좌와 같아져, 그만큼 잃으면 그날 새 매수를 멈춥니다.')
         confirm = st.checkbox('모의계좌 매수 크기와 한도가 바뀌는 것을 확인했습니다', key=f'{prefix}match_confirm')
         b1, b2 = st.columns(2)
@@ -2972,6 +2980,9 @@ STRATEGY_HELP = {
     'oversold_v2_rel_max_pct': ('종목이 시장보다 이만큼(%p) 넘게 더 빠졌으면 종목 고유 악재로 보고 사지 않습니다.', '2배 ETF는 시장 낙폭의 2배와 비교합니다.'),
     'oversold_market_drop_pct': ('폭락일에만 매수: 그 종목의 시장(코스피는 KODEX 200, 코스닥은 KODEX 코스닥150)의 오늘 저가가 전일 종가보다 이만큼 이상 빠진 날에만 장중 반등을 삽니다. 시장은 멀쩡한데 종목만 빠진 날은 엔진에 묻지 않고 사지 않으며 기록(market_not_falling)만 남깁니다. 0이면 이 조건 없이 종목 낙폭만 봅니다.',
                                  '재현(최근 6개월): 지금 규칙은 모든 낙폭에서 하루 평균 −0.34%(오른 날 40%), 시장 폭락일에만 +0.53%(62%)였습니다. 종목 혼자 빠진 날은 어떤 방식도 +0.2%를 넘지 못했습니다. 사례집 제안값 3%.'),
+    'oversold_v2_jev_sell_on': ('켜면 수익 중인 선별 v2를 Jev 보유 판단 매도(Jev 매도 신뢰도 이상)로 팝니다. 손실 중에는 손절 규칙만 따릅니다.', '끄면 Jev 판단은 기록만 하고 손절·익절·보유일로만 팝니다(2026-11-13 규칙).'),
+    'oversold_v2_trail_at_pct': ('평균가보다 이만큼 오른 적이 있으면 고점 되밀림 매도를 시작합니다.', '0이면 쓰지 않습니다. 낮추면 작은 수익도 지키지만 일찍 팔릴 수 있습니다.'),
+    'oversold_v2_trail_pct': ('최고 매수호가에서 이만큼 내려오면 전량 팝니다.', '좁히면 흔들림에 일찍 팔리고, 넓히면 수익을 더 돌려줍니다.'),
     'oversold_v2_stop_pct': ('평균 매입가보다 이만큼 빠지면 전량 손절하고, 저점이 확인되면 다시 삽니다(사용자 결정 2026-11-17).', '재현(일봉·5분봉)에서는 넓은 손절보다 평균이 낮았습니다. 운용 결과로 다시 봅니다.'),
     'oversold_v2_reentry_max': ('손절 뒤 저점에서 다시 사는 횟수(포지션당)입니다. 0이면 다시 사지 않습니다.', '재매수마다 Jev가 다시 판단해 거부하면 사지 않습니다.'),
     'oversold_v2_reentry_hold_min': ('손절 뒤 새 저점이 이 시간 동안 깨지지 않아야 다시 삽니다.', ''),
@@ -2983,9 +2994,8 @@ STRATEGY_HELP = {
 }
 
 
-@st.dialog('매매 기준 쉽게 보기', width='large')
+@dialogs.dialog('매매 기준 쉽게 보기')
 def strategy_guide():
-    import dialogs
     import guide_ui as GU
     dialogs.wide()
     GU.style()
@@ -3452,7 +3462,7 @@ def ipo_presets(settings, prefix=''):
 
 SIZING_SETTINGS = (  # position_sizing (user 2026-11-17)
     ('size_holding_on', '보유 비중이 크면 덜 사기', '한 종목 보유가 종목당 한도의 절반을 넘으면 매수 크기를 (1 − 보유 비율)로 줄입니다(최소 25%). 한 종목 쏠림을 막습니다.'),
-    ('size_market_on', '시황 방향에 맞춰 크기 조절', '지수 국면이 매수 방향과 같으면 100%, 횡보장 75%, 반대(하락장 일반 매수·상승장 인버스)면 50%를 삽니다.'),
+    ('size_market_on', '시황 방향에 맞춰 크기 조절', '지수 국면이 매수 방향과 같으면 100%, 횡보장이거나 반대 방향(하락장 일반 매수·상승장 인버스)이면 아래에서 정한 비율만 삽니다. 끄면 늘 100%입니다.'),
     ('regime_trim_on', '시황 역전 시 절반 매도', '산 뒤 지수 국면이 보유 방향과 반대로 바뀌면 포지션당 한 번 절반을 팝니다. 익절·손절·Jev 매도는 그대로입니다.'),
 )
 SCALE_SETTINGS = (
@@ -3460,6 +3470,18 @@ SCALE_SETTINGS = (
     ('scale_step_add_on', '가격 단계 추가 매수', '가격 단계와 엔진 확인 조건을 만족할 때 추가 매수합니다. Jev의 새 판단이 필요합니다.'),
     ('scale_profit_rebuy_on', '일부 익절 후 재매수', '익절 이력이 확인된 보유 종목의 추가 매수를 허용합니다. 끄면 익절 후 두 추가 매수 경로가 모두 중단됩니다.'),
 )
+
+
+def market_size_line(values, tranche=None):
+    """What one ordinary first buy comes to in each regime with these 시황 축소 values and the saved 분할 1회 금액."""
+    if tranche is None:
+        import accounts
+        tranche = (accounts.load().get('paper-shared') or {}).get('budget', {}).get('first_buy_krw') or 0
+    if not values.get('size_market_on'):
+        return f'시황 축소가 꺼져 있어 국면과 관계없이 분할 1회 {tranche:,}원을 삽니다(수량은 내림).'
+    flat, against = values['size_market_flat_pct'], values['size_market_against_pct']
+    return (f'분할 1회 {tranche:,}원 기준 일반 종목 첫 매수: 상승장 {tranche:,}원 · 횡보장 {int(tranche * flat / 100):,}원 · '
+            f'하락장 {int(tranche * against / 100):,}원까지(수량은 내림). 인버스는 하락장이 100%이고 인버스 전용 축소가 더해집니다.')
 
 
 def scale_settings_status(settings, jev_applied):
@@ -3508,6 +3530,7 @@ def strategy_form(events, prefix=''):
              'weak_half_pct': 0.1, 'weak_all_pct': 0.1, 'direction_switch': 1.0, 'entry_volume_ratio': 0.1,
              'oversold_v2_on': 1.0, 'oversold_v2_from_hhmm': 5.0, 'oversold_v2_hold_days': 1.0, 'oversold_v2_size_pct': 10.0,
              'oversold_v2_max_new': 1.0, 'oversold_v2_stop_pct': 0.5, 'oversold_v2_tp_pct': 1.0, 'oversold_v2_until_hhmm': 5.0,
+             'oversold_v2_jev_sell_on': 1.0, 'oversold_v2_trail_at_pct': 0.5, 'oversold_v2_trail_pct': 0.5,
              'oversold_v2_add_on': 1.0, 'oversold_v2_half_tp_pct': 0.5, 'oversold_v2_veto_conf': 0.05, 'oversold_v2_vibe_veto': 0.05,
              'oversold_v2_boost_pct': 10.0, 'oversold_v2_reentry_max': 1.0, 'oversold_v2_reentry_hold_min': 5.0,
              'oversold_v2_reentry_bounce_pct': 0.1}
@@ -3527,11 +3550,12 @@ def strategy_form(events, prefix=''):
                ['oversold_v2_on', 'oversold_v2_from_hhmm', 'oversold_v2_until_hhmm', 'oversold_v2_index_drop_pct',
                 'oversold_v2_capit_drop_pct', 'oversold_v2_prior5_pct', 'oversold_v2_rel_max_pct', 'oversold_v2_add_on',
                 'oversold_v2_half_tp_pct', 'oversold_v2_tp_pct', 'oversold_v2_hold_days', 'oversold_v2_stop_pct',
+                'oversold_v2_jev_sell_on', 'oversold_v2_trail_at_pct', 'oversold_v2_trail_pct',
                 'oversold_v2_reentry_max', 'oversold_v2_reentry_hold_min', 'oversold_v2_reentry_bounce_pct',
                 'oversold_v2_size_pct', 'oversold_v2_max_new', 'oversold_v2_veto_conf', 'oversold_v2_boost_pct'])]
     from restrictions import EDITABLE
     scale_keys = {key for key, _, _ in SCALE_SETTINGS} | {'scale_interval_min', 'scale_max_adds', 'add_conf_sizing_on', 'add_size_pct', 'partial_sell_conf', 'partial_sell_pct'}
-    scale_keys |= {key for key, _, _ in SIZING_SETTINGS}
+    scale_keys |= {key for key, _, _ in SIZING_SETTINGS} | {'size_market_flat_pct', 'size_market_against_pct'}
     covered = {k for *_, keys in groups for k in keys} | set(EDITABLE) | {'oversold_on', 'oversold_lev_on'} | scale_keys | RETIRED_SETTINGS
     leftover = [k for k in STRATEGY_DEFAULTS if k not in covered]
     if leftover:
@@ -3584,6 +3608,13 @@ def strategy_form(events, prefix=''):
             st.markdown('**비중 조절** · 한 번에 사는 크기를 보유 비중과 시황에 맞춰 분할 1회의 25~100%로 줄이고, 시황이 거꾸로 돌면 절반을 팝니다.')
             for col, (key, label, help_text) in zip(st.columns(len(SIZING_SETTINGS)), SIZING_SETTINGS):
                 values[key] = float(col.toggle(label, value=bool(settings.get(key, 1)), key=f'{prefix}strategy_{key}_{stamp}', help=help_text))
+            for col, key, label, text in zip(st.columns(2), ('size_market_flat_pct', 'size_market_against_pct'),
+                                             ('횡보장 매수 크기 (분할 1회 대비 %)', '반대 방향 매수 크기 (분할 1회 대비 %)'),
+                                             ('지수 국면이 횡보장일 때 일반 매수와 인버스 매수의 크기입니다.',
+                                              '하락장에서 일반 종목을 살 때와 상승장에서 인버스를 살 때의 크기입니다. 키우면 하락장의 손절 손실도 같은 비율로 커집니다.')):
+                values[key] = float(num_input(col, label, 25, 100, int(settings[key]), f'{prefix}strategy_{key}_{stamp}', step=5, slider=True,
+                                              help=f'{text} 100이면 줄이지 않습니다(기본 {STRATEGY_DEFAULTS[key]:g}, 허용 25~100). 낙폭과대·선별 v2·신규주에는 적용하지 않습니다.'))
+            st.caption(market_size_line(values))
             st.caption('저장 후 다음 거래 회차부터 반영됩니다. 실행 중인 매수 판단에서 설정이 바뀌면 주문 전 확인에 따라 다시 판단합니다. 이미 접수된 주문은 변경되지 않습니다.')
     else:
         st.warning('분할 매수 설정 모듈이 이전 버전입니다. 새 설정을 안전하게 저장하려면 대시보드를 다시 시작해야 합니다.')
@@ -3713,7 +3744,7 @@ def portfolio_overview(snapshot, events, fills, now, books=None, live_stop_pct=N
                       'help': 'Jev의 가장 최근 의견입니다. 신뢰도는 수익 확률이 아니며, 매수는 진입 조건을 모두 통과해야 실행됩니다.'})
     else:
         cards.append({'label': '최근 Jev 의견', 'value': '기록 없음', 'tone': 'off', 'icon': 'psychology'})
-    sc.row(cards)
+    sc.row(cards, ask='etf')
 
     if books is None and live_stop_pct is None:
         st.warning('로컬 체결 원장을 읽지 못해 실현손익을 확인할 수 없습니다. 표의 실현손익 0은 미확인입니다.')
@@ -5392,11 +5423,13 @@ def prefs_form():
         refresh = st.segmented_control('자동 갱신 간격(초)', PREFS.REFRESH, default=current['refresh_s'],
                                        help='시세·트레이딩 현황·운영 상태의 자동 갱신 간격입니다. 짧을수록 증권사 조회가 늘어납니다.')
         quotes = st.toggle('자동 갱신 기본 켜기 (전체 화면)', value=current['quotes_auto'])
+        selection = st.toggle('글자를 드래그해 AI에게 묻기', value=current['ask_selection'],
+                              help='화면의 글자를 선택하면 옆에 AI에게 묻기 버튼이 뜹니다. 질문은 채팅창에 채우기만 하고, 보내기를 눌러야 전송됩니다.')
         unit = st.segmented_control('기본 금액 단위', PREFS.UNITS, default=current['money_unit'],
                                     help='계좌·자동매매 금액 칸이 처음 열릴 때의 단위입니다.')
         if st.form_submit_button('저장', type='primary', icon=':material/save:', width='stretch'):
             st.session_state.prefs = PREFS.save(prefs_path(), {**current, 'status_blink': blink, 'start_tab': start, 'refresh_s': refresh or current['refresh_s'],
-                                                                'quotes_auto': quotes, 'money_unit': unit or current['money_unit'],
+                                                                'quotes_auto': quotes, 'ask_selection': selection, 'money_unit': unit or current['money_unit'],
                                                                 'font_scale': font_scale})
             st.session_state.pop('quotes_auto', None)
             st.session_state.pop('auto_all', None)
@@ -5430,9 +5463,13 @@ def main():
         if controls.button('AI 검색', icon=':material/search:', key='quick_liner',
                            help='종목·시장 이슈를 찾고 투자 용어나 서비스 사용법을 질문하는 창을 엽니다. 창 안에서 사용 가이드를 볼 수 있습니다.'):
             st.session_state.pop('quick_liner_suggestions', None)
+            st.session_state.pop('ai_float_open', None)
             st.session_state['quick_liner_open'] = True
         if st.session_state.get('quick_liner_open'):
             api_status_view.open_liner_search()
+        import ai_float
+        ai_float.render()  # 'AI에게 묻기', bottom right of every screen
+    dialogs.keep_open()
     with controls.popover('화면 설정', icon=':material/settings:'):
         prefs_form()
     st.caption('모의·실계좌 구분 · 한국시간 · 자동매매는 별도 실행기가 하며 이 화면은 실주문을 내지 않습니다')

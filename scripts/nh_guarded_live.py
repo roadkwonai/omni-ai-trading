@@ -82,6 +82,24 @@ def _token(opener,key,secret):
         raise LiveOrderBlocked('broker authentication failed; intent requires reconciliation') from None
 
 
+def _buyable(adapter, account, symbol, fields, balance):
+    """NH's cash (no unpaid balance) for this very order, asked only when the settled cash is short of it; None otherwise or on
+    any failure, and the guard then judges by the settled cash."""
+    try:
+        price, qty = fields['orr_pr'], fields['orr_qty']
+        if balance['Output_0']['orr_pbl_amt1'] >= price * qty:
+            return None
+        data = adapter.call_tool('call_api', {'operationId': 'krstockInquiryBuyableQuantity', 'input': {
+            'ost_dit_cd': '1', 'act_no': account, 'iem_cd': symbol, 'nmn_pr_tp_cd': '01', 'orr_pr': price}})
+        if data.get('status') != 'ok':
+            return None
+        data = data['data']
+        return {'csh_orr_pbl_amt': data['Output_0'].get('csh_orr_pbl_amt'), 'rsp_cd': data.get('rsp_cd'),
+                '_account': account, '_symbol': symbol, '_price': price}
+    except Exception:  # noqa: BLE001 - never opens a buy; the guard refuses on the settled cash
+        return None
+
+
 def execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None):
     if op == 'krstockOrderCashBuy':
         with buy_lock(guard.root):
@@ -110,6 +128,8 @@ def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pr
         res=adapter.call_tool('call_api', {'operationId':'krstockInquirySellableQuantity','input':{'act_no':guard.account,'iem_cd':symbol,'cfd_lon_cd':'00'}})
         if res.get('status')!='ok' or not isinstance(res.get('data'),dict): raise LiveOrderBlocked('sellable unavailable')
         data=res['data']; snapshots['sellable']={**data.get('Output_0',{}),'rsp_cd':data.get('rsp_cd'),'_account':guard.account,'_symbol':symbol}
+    if op == 'krstockOrderCashBuy':
+        snapshots['buyable'] = _buyable(adapter, guard.account, symbol, fields, snapshots['balance'])
     if pre_reserve_check is not None and pre_reserve_check() is not True:
         raise LiveOrderBlocked('AI signal expired or changed before reservation')
     limits=live_limits(record=record)  # the account's own capital (set within the account's money) bounds price x quantity

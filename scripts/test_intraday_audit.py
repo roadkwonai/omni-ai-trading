@@ -109,6 +109,27 @@ def test_the_retired_jev_virtual_runner_is_not_audited():
     assert 'jev-virtual' not in (*audit.SERVICES, *audit.SESSION_SERVICES, *audit.LEDGERS)
 
 
+def test_the_session_summary_is_not_expected_at_the_open_or_from_the_watchlist(tmp_path):
+    """11-19~11-24 each 09:20 round: the opening calls (too few bars of today) and the watchlist pick never carry it."""
+    nhplug = _nhplug(tmp_path)
+    with sqlite3.connect(nhplug / 'shared-etf-paper' / 'market-research.sqlite3') as db:
+        db.execute('CREATE TABLE model_inputs (digest TEXT PRIMARY KEY, time TEXT, engine TEXT, question TEXT, inputs TEXT, response TEXT)')
+        db.execute('CREATE TABLE model_evidence (digest TEXT PRIMARY KEY, time TEXT, engine TEXT, question TEXT, evidence TEXT)')
+        def put(n, at, question, **state):
+            db.execute('INSERT INTO model_inputs VALUES (?,?,?,?,?,?)', (str(n), f'2026-11-17T{at}:00+09:00', 'jev', question,
+                                                                  json.dumps({'state': {'chart': 'c', **state}}), json.dumps({'choice': 'WAIT'})))
+        for n in range(15):
+            put(n, f'09:{n:02d}', 'candidate')
+        put(50, '09:40', 'watchlist')
+        rows = lambda: audit.jev_inputs(nhplug / 'shared-etf-paper', '2026-11-17')['presence_pct']  # noqa: E731
+        db.commit()
+        assert 'intraday_summary' not in rows() and rows()['chart'] == 100
+        put(60, '09:30', 'candidate', intraday_summary={'K200': {'bars': 20}})
+        put(61, '09:31', 'holding')
+        db.commit()
+        assert rows()['intraday_summary'] == 50
+
+
 def test_jev_inputs_report_presence_freshness_and_evidence(tmp_path):
     nhplug = _nhplug(tmp_path)
     research = nhplug / 'shared-etf-paper' / 'market-research.sqlite3'
@@ -215,14 +236,14 @@ def test_market_news_age_uses_dispatch_time_instead_of_response_record_time(tmp_
     assert 'jev.news_old' not in _keys(nhplug)
 
 
-def test_market_news_audit_uses_the_new_60_minute_policy_for_versioned_inputs(tmp_path):
-    articles = [{'published': f'{DAY}08:50:00+09:00', 'title': '70분 전 기사'}]
-    legacy, current = _nhplug(tmp_path / 'legacy'), _nhplug(tmp_path / 'current')
-    _jev_calls(legacy, [('10:00', 'candidate', _good_call('10:00', recent_news_headlines=articles))])
-    _jev_calls(current, [('10:00', 'candidate', _good_call('10:00', news_max_age_minutes=60,
-                                                         recent_news_headlines=articles))])
-    assert 'jev.news_old' not in _keys(legacy)
-    assert 'jev.news_old' in _keys(current)
+def test_market_news_audit_uses_the_90_minute_policy_for_versioned_inputs(tmp_path):
+    within, over = ([{'published': f'{DAY}{at}:00+09:00', 'title': '기사'}] for at in ('08:50', '08:25'))
+    kept, old = _nhplug(tmp_path / 'kept'), _nhplug(tmp_path / 'old')
+    for folder, articles in ((kept, within), (old, over)):
+        _jev_calls(folder, [('10:00', 'candidate', _good_call('10:00', news_max_age_minutes=90,
+                                                              recent_news_headlines=articles))])
+    assert 'jev.news_old' not in _keys(kept)
+    assert 'jev.news_old' in _keys(old)
 
 
 def test_candidate_figures_older_than_the_ranking_window_fire(tmp_path):
@@ -487,6 +508,20 @@ def test_a_corrupted_database_fires_even_when_quick_check_would_pass(tmp_path):
     assert 'db.corrupt:live-orders.sqlite3' in _keys(nhplug)
 
 
+def test_jev_entry_calls_failing_several_cycles_fires(tmp_path):
+    """11-24 13:12~13:19: seven cycles in a row had no Jev answer (no market story within 60 minutes) and no audit key named it."""
+    nhplug = _nhplug(tmp_path)
+    gate = lambda hhmm: json.dumps({'time': f'{DAY}{hhmm}:12+09:00', 'event': 'v2_entry_gate', 'permitted': False,
+                                    'choice': 'WAIT', 'reason': 'jev_error'})
+    events = nhplug / 'shared-etf-paper' / 'events.jsonl'
+    with events.open('a') as f:
+        f.write('\n'.join([gate('10:05'), gate('10:06')]) + '\n')
+    assert not {k for k in _keys(nhplug) if k.startswith('entry.jev_stopped')}
+    with events.open('a') as f:
+        f.write(gate('10:07') + '\n')
+    assert '3회차' in next(v for k, v in _keys(nhplug).items() if k.startswith('entry.jev_stopped'))
+
+
 def test_the_same_pick_refused_minutes_in_a_row_fires(tmp_path):
     """11-19 13:44~14:46: 009150 was picked and refused (single_order_limit) every minute; the user called a per-minute
     stall fatal. Three refusals of the same symbol and reason in consecutive minutes is a finding; a gap breaks the run."""
@@ -522,6 +557,13 @@ def test_nh_same_query_limit_hits_in_the_window_fire(tmp_path):
     assert 'nh.same_query_limit:nh_live_follow' not in found
 
 
+def test_a_rejected_live_balance_fires(tmp_path):
+    nhplug = _nhplug(tmp_path)
+    assert not {k for k in _keys(nhplug) if k.startswith('live.zero_total')}
+    (nhplug / 'balance-rejected.jsonl').write_text(json.dumps({'time': f'{DAY}10:20:00+09:00', 'account': 'live-1', 'reason': '총자산 0원'}) + '\n')
+    assert _keys(nhplug)['live.zero_total:live-1'].startswith('잘못된 잔고 1건')
+
+
 def test_nh_app_rate_limit_hits_in_the_window_fire(tmp_path):
     """11-19: the movers scan's 60-stock burst every five minutes ran past NH's 5 calls a second per app key: 157 of its
     own quotes (~26 an hour) and 110 runner, mirror and dashboard calls within 3 s of it were refused (IGW42902)."""
@@ -537,3 +579,14 @@ def test_nh_app_rate_limit_hits_in_the_window_fire(tmp_path):
     found = _keys(nhplug)
     assert found['nh.app_rate_limit:market_movers'].startswith('IGW42902 20건')
     assert 'nh.app_rate_limit:dashboard' not in found and not {k for k in found if k.startswith('nh.same_query_limit')}
+
+
+def test_api_load_findings_join_the_hourly_audit_without_repeating_the_nh_refusals(tmp_path):
+    nhplug = _nhplug(tmp_path)
+    with sqlite3.connect(nhplug / 'api-calls.sqlite3') as db:
+        db.execute('CREATE TABLE failures (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, kind TEXT, status INTEGER, detail TEXT)')
+        db.executemany('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', [
+            *[(f'{DAY}10:15:0{s}+09:00', 'nh', 'mcp:x', 'dashboard', 'network', None, 'RuntimeError') for s in range(3)],
+            *[(f'{DAY}10:15:0{s}+09:00', 'nh', 'mcp:x', 'dashboard', 'response', None, 'tool error: rate_limit IGW42903') for s in range(4)]])
+    found = _keys(nhplug)
+    assert '→' in found['api.local_start:nh'] and 'api.refused:nh' not in found

@@ -199,7 +199,7 @@ def minute_agreement(read, codes, sleep=time.sleep):
             kw = None
             out[code] = {'kiwoom_error': type(exc).__name__}
         kw_s.append(time.monotonic() - started)
-        rows = ((response.get('data') or {}).get('Output_1') if response.get('status') == 'ok' else None)
+        rows = ((response.get('data') or {}).get('Output_1') if response.get('status') == 'ok' and response.get('source') != 'kiwoom' else None)
         if kw is not None:
             out[code] = {**bar_agreement(rows, kw, f'{now:%Y%m%d}'), 'kiwoom_bars_today': len(kw),
                          'nh_rows': len(rows or [])}

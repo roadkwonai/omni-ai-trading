@@ -104,7 +104,7 @@ Jev는 외부 이미지·선택형 모델입니다. 실행기가 매분 차트�
 | --- | --- | --- |
 | 1분봉 차트 | ETF 7종과 관심종목의 최근 60분 차트 | `scripts/jev_context.py` |
 | 당일 요약 `intraday_summary` | 시가·고가·저가, 범위 안 위치(0=저가, 100=고가), VWAP, 30·60분 변화 | `jev_context.summary` |
-| 시장 뉴스 | **최근 90분 안** 헤드라인만. 새 기사가 없는 주제는 빼고, 하나도 없으면 대기. Google News·네이버가 번갈아 맡고 Bing은 빈 주제만 채움, 3분 공유 캐시 | `scripts/etf_news.py` `headlines7`, `RECENT` |
+| 시장 뉴스 | **최근 90분 안** 헤드라인만(30분 안 기사를 먼저 쓰고 빠진 주제만 90분까지 보충, 2026-11-24). 새 기사가 없는 주제는 빼고, 하나도 없거나 조회가 실패하면 빈 칸과 안내(`news_status`)로 판단을 계속하고, 당일 3시간 안 이전 기사는 몇 분 전인지 적어 배경 참고로만 보냄(2026-11-24). Google News·네이버가 번갈아 맡고 Bing은 빈 주제만 채움, 3분 공유 캐시 | `scripts/etf_news.py` `headlines7`, `RECENT` |
 | 관심종목 정보 | 오늘 Jev가 고른 관심종목 3개의 재무·수급·최근 90분 종목 뉴스(몇 분 전 기사인지 포함) | `scripts/watchlist.py`, `recent_stock_headlines` |
 | 시황 `market_regime_themes_global` | 코스피·코스닥 국면(20·60일선 규칙), 오늘 흐름, 투자자·프로그램 순매수, 상승·하락 종목 수, 테마, 테마 대장 `theme_leaders`, 해외 일봉, 장중 해외 선물·원자재 `global_intraday`(나스닥100·S&P500 선물, 금, WTI, 달러인덱스, 원/달러, 30분 한도) | `scripts/market_context.py` |
 | 투자자 수급 | ETF별 투자자 일별 순매수 | `investor_flows` |
@@ -254,7 +254,7 @@ flowchart LR
 | 배율 | 값 | 스위치 |
 | --- | --- | --- |
 | 보유 | 그 종목 보유 원가가 종목당 최대의 절반 미만이면 1.0, 넘으면 1 − 보유 비율 | `size_holding_on` |
-| 시황 | 지수 국면이 매수 방향과 같으면 1.0, 횡보장 0.75, 반대(롱은 하락장, 인버스는 상승장) 0.5, 모르면 1.0 | `size_market_on` |
+| 시황 | 지수 국면이 매수 방향과 같으면 1.0, 횡보장 `size_market_flat_pct`(기본 75%), 반대(롱은 하락장, 인버스는 상승장) `size_market_against_pct`(기본 50%), 모르면 1.0 | `size_market_on` |
 
 두 배율을 곱해 25\~100%로 묶습니다. 매수 기록 `submitted`의 `sizing`에 배율이 남습니다.
 

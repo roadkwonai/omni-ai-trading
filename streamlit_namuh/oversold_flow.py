@@ -61,7 +61,9 @@ def stages(v):
          'what': f"평균가 +{half:g}% 절반 → +{tp:g}% 나머지 · 매분 매수호가로 확인해 닿는 즉시 매도",
          'data': '매수호가', 'keys': 'oversold_v2_half_tp_pct · tp_pct', 'code': 'plan_levels · split_step · exit_reason'},
         {'phase': '④ 관리', 'name': '보유 유지',
-         'what': f"{int(v['oversold_v2_hold_days'])}거래일까지 장 마감 정리에서 빠짐(주말·휴장일은 세지 않음) · Jev 보유 SELL로는 팔지 않고 기록",
+         'what': f"{int(v['oversold_v2_hold_days'])}거래일까지 장 마감 정리에서 빠짐(주말·휴장일은 세지 않음) · "
+                 + ('수익 중이면 Jev 보유 SELL(매도 신뢰도 이상)로 매도' if v.get('oversold_v2_jev_sell_on') else 'Jev 보유 SELL로는 팔지 않고 기록')
+                 + (f" · 평균가 +{v['oversold_v2_trail_at_pct']:g}% 이상 오른 뒤 고점 −{v['oversold_v2_trail_pct']:g}%면 전량 매도" if v.get('oversold_v2_trail_at_pct') else ''),
          'data': 'KRX 휴장일', 'keys': 'oversold_v2_hold_days', 'code': 'oversold_may_carry · is_v2'},
         {'phase': '⑤ 청산', 'name': '시간 청산 · 재난 손절',
          'what': f"{int(v['oversold_v2_hold_days'])}거래일째 장 마감 정리에서 남은 물량 매도 · 평균가 −{v['oversold_v2_stop_pct']:g}%면 전량 손절 → 저점 {int(v['oversold_v2_reentry_hold_min'])}분 유지·+{v['oversold_v2_reentry_bounce_pct']:g}% 반등 시 재판단 후 재매수(최대 {int(v['oversold_v2_reentry_max'])}번)",

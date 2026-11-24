@@ -11,9 +11,9 @@ Numbers come from code (SEC filings and prices); the weekly report's lens step (
   --weekly    Friday     prices (Yahoo) for the names that pass the fundamentals, the four screens, the picks and the
                          follow-up of past picks against QQQ and SPY (추천 성적표)
   --status               what the dashboard tab reads, as JSON
-  --scheduled            launchd us-ideas (Fridays 07:00 and 07:30): the universe then the screen on the third Friday of
-                         February, May, August and November at 07:00 (13F due 45 days after the quarter), the screen at
-                         07:30 unless it already ran that day
+  --scheduled            launchd us-ideas (Fridays 10:00 and 10:30; the Mac is often off at 07:00, 2026-11-24): the universe then the screen on the third Friday of
+                         February, May, August and November at 10:00 (13F due 45 days after the quarter), the screen at
+                         10:30 unless it already ran that day
 
 The screens are hypotheses (docs 4-3·4-4) checked by the follow-up and S5. Market cap is price x the latest diluted shares
 (a split after the last filing makes it wrong by the split factor). SPY and QQQ are unit trusts without N-PORT, so IVV and
@@ -539,7 +539,7 @@ def third_friday(day):
 def scheduled(root, now):
     """One launchd firing: what it ran ('universe+weekly', 'weekly', 'already' or 'not_due')."""
     today = now.date()
-    if now.strftime('%H:%M') < '07:20':
+    if now.strftime('%H:%M') < '10:20':
         if not third_friday(today):
             return 'not_due'
         run_universe(root, today)

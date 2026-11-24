@@ -161,7 +161,7 @@ def yeo_accounts(root, plan, state):
 
 
 def news_rows(root, day):
-    """The long-term news headlines the engine read that morning (decisions kind 'news'), up to 12; [] when none."""
+    """The long-term news headlines the engine read that morning (decisions kind 'news'), up to 18; [] when none."""
     path = Path(root) / 'longterm.sqlite3'
     if not day or not path.exists():
         return []
@@ -172,7 +172,19 @@ def news_rows(root, day):
         rows = (json.loads(row[0]) or {}).get('rows') or [] if row and row[0] else []
     except ValueError:
         return []
-    return [{k: r.get(k) for k in ('topic', 'title', 'publisher', 'url', 'time')} for r in rows[:12] if isinstance(r, dict)]
+    def at(text):
+        try:
+            return datetime.fromisoformat(text).astimezone(L.KST).strftime('%Y-%m-%d %H:%M')
+        except (TypeError, ValueError):
+            return None
+    return [{'topic': r.get('topic'), 'title': r.get('title'), 'publisher': r.get('publisher'), 'url': r.get('link'), 'time': at(r.get('published'))}
+            for r in rows[:18] if isinstance(r, dict)]  # longterm_news: six topics, three each
+
+
+def held_now(root):
+    """{code: shares} the virtual account holds."""
+    last = {r['symbol']: r['after'] for r in L.journal_rows(root)}
+    return {c: q for c, q in last.items() if q > 0}
 
 
 def data(day, root=L.ROOT, reports=REPORTS, fetch=None, context=True):
@@ -190,18 +202,31 @@ def data(day, root=L.ROOT, reports=REPORTS, fetch=None, context=True):
         where = {'error': f'{type(exc).__name__}'}
     last = state.get('last_plan') or {}
     book = state.get('book:actual') or {}
+    outside = L.book_holdings(root, sleeve=True)  # held outside the engine's six: a 여운봉 book's own ETFs, the 관심목록 sleeve
+    res = next((r['symbol'] for r in reversed(L.journal_rows(root)) if r['symbol'] in L.RESERVOIRS and r['after'] > 0
+                and r['symbol'] in held_now(root)), L.KOFR)
+    yeo_book = L.yeo_settings(L.load_settings(root), 'actual') is not None
+    if yeo_book:  # the 여운봉 저수지 매매법 runs this book: no master module acts on its levels
+        levels = [{**x, 'active': False} if x['kind'] == 'rule' else x for x in levels]
     facts = {'day': day, 'plan_day': plan.get('day'), 'plan_is_today': plan.get('day') == day,
              'regime': {'now': plan.get('regime'), 'raw': plan.get('raw'), **(state.get('regime') or {})},
              'indicators': plan.get('indicators') or {}, 'macro': plan.get('macro') or {}, 'mode': plan.get('mode'), 'active': plan.get('active') or [],
              'recommended': plan.get('recommended') or [], 'impacts': plan.get('impacts') or {}, 'weights': plan.get('weights') or {},
              'levels': levels, 'positions': where, 'stories': state.get('story') or {},
              'account': {'holdings': {k: list(v) for k, v in L.book_holdings(root).items()}, 'nav': state.get('nav_latest') or {},
-                         'sleeve': {c: list(v) for c, v in L.book_holdings(root, sleeve=True).items()},
+                         'sleeve': {c: list(v) for c, v in outside.items() if c not in L.YEO_CODE_KEY}, 'reservoir': res, 'yeo_book': yeo_book,
+                         'yeo': {L.YEO_CODE_KEY[c]: list(v) for c, v in outside.items() if c in L.YEO_CODE_KEY},
                          'sleeve_names': longterm_watchlist.load(root),
                          'last_plan': {k: last.get(k) for k in ('day', 'why', 'want', 'weights', 'orders', 'notes', 'execute')},
                          'pending': book.get('pending') or [], 'sold_this_month': book.get('sold') or {}},
              'previous_report': previous_report(day, reports)}
     close = {k: v['close'] for k, v in where.items() if isinstance(v, dict)}
+    if res != L.KOFR:  # the reservoir ETF the book holds, not KOFR
+        try:
+            series = (fetch or L.yahoo)(f'{res}.KS')
+            close['RES'] = series[max(series)]
+        except Exception:  # noqa: BLE001 - no close: no gain is shown rather than a wrong one
+            close.pop('RES', None)
     target = last.get('want') if last.get('day') == day and last.get('want') else plan.get('weights') or L.DEFAULT_SETTINGS['weights']
     nav = state.get('nav_latest') or {}  # the engine's ETFs weigh against the NAV without the 관심목록 sleeve
     facts['tp_rebalance'] = tp_rebalance(L.book_holdings(root), close, (nav.get('actual') or L.CAPITAL) - nav.get(L.SLEEVE, 0),
@@ -243,7 +268,8 @@ def report_md(facts, doc=None):
     doc = doc or {}
     p, ind = T.PLACEHOLDER, facts['indicators']
     text = lambda section: (doc.get('sections') or {}).get(section) or p
-    name = lambda k: L.ASSETS[k][1] if k in L.ASSETS else k
+    res = facts['account'].get('reservoir')
+    name, own = L.asset_name, lambda k: L.asset_name(k, res)  # the chart tables are KOFR's; what the book holds is its own reservoir ETF
     regime = L.REGIMES.get(facts['regime'].get('now'), ('판정 전',))[0]
     last = facts['account']['last_plan']
     # last_plan is written at 09:40; a morning report must not present the previous day's plan as today's
@@ -280,7 +306,7 @@ def report_md(facts, doc=None):
     out += ['## 6. 타점 지도', '', '규칙 = 엔진이 실제로 집행하는 선 · 제안 = 리포트 제안(주문 안 함). 크기는 계좌 한도에서 계산.', '',
             _table(['종목', '시간축', '거장', '구분', '가격', '현재가 대비', '크기', '조건', '규칙/제안', '상태', '과거 사례'], [
                 [name(x['asset']), x['horizon'], L.MODULES[x['master']][0], SIDE[x['side']], f"{x['price']:,.0f}", _pct(x.get('distance')),
-                 f"{x['size']['krw']:,}원", x['condition'], ('규칙' if x.get('active', True) else '규칙(꺼짐)') if x['kind'] == 'rule' else '제안',
+                 f"{x['size']['krw']:,}원", x['condition'], ('규칙' if x.get('active', True) else '규칙(이 장부 미적용)' if facts['account'].get('yeo_book') else '규칙(꺼짐)') if x['kind'] == 'rule' else '제안',
                  STATUS.get(x['status'], x['status']),
                  x['evidence']] for x in facts['levels']]), '', text('타점 지도'), '']
     if doc.get('advice_levels'):
@@ -294,15 +320,16 @@ def report_md(facts, doc=None):
                     sum(q for q, _ in held.values()), '—', '—', '—',
                     _pct(sleeve / acc['nav']['actual'], False) if acc['nav'].get('actual') else '—']] if held else []
     out += ['## 7. 계좌 계획', '', _table(['종목', '보유 수량', '평균가', '설정 비중', '엔진 목표', '현재 비중'], [
-        [name(k), (acc['holdings'].get(k) or [0])[0], f"{(acc['holdings'].get(k) or [0, 0])[1]:,.0f}", _pct(facts['weights'].get(k), False),
-         _pct(want.get(k), False) if want else '09:40 계획 뒤', _pct((last.get('weights') or {}).get(k), False)] for k in L.ASSETS] + sleeve_rows), '',
+        [own(k), (acc['holdings'].get(k) or [0])[0], f"{(acc['holdings'].get(k) or [0, 0])[1]:,.0f}", _pct(facts['weights'].get(k), False),
+         _pct(want.get(k), False) if want else '09:40 계획 뒤', _pct((last.get('weights') or {}).get(k), False)] for k in L.ASSETS] + [[own(k), q, f'{avg:,.0f}', '—', _pct(want.get(k), False) if want else '09:40 계획 뒤', _pct((last.get('weights') or {}).get(k), False)]
+                                     for k, (q, avg) in (acc.get('yeo') or {}).items()] + sleeve_rows), '',
         *([f"- 관심목록 슬리브 평가 {sleeve:,.0f}원: 순자산에 포함 · 엔진이 리밸런싱·매도하지 않음(적립식만 삼)"] if held else []),
         f"- 순자산 {acc['nav'].get('actual', L.CAPITAL):,.0f}원 · 대기 목표 {', '.join(name(k) for k in acc['pending']) or '없음'} · "
         f"이번 달 저수지 뺀 매도 {(acc['sold_this_month'] or {}).get('krw', 0):,.0f}원",
         f"- {planned} 주문: {len(last.get('orders') or [])}건 ({'가상 체결' if last.get('execute') else 'dry-run'})",
         '- 슬리브 예산: ' + ' · '.join(f"{label} {share * 100:.0f}%({share * acc['nav'].get('actual', L.CAPITAL):,.0f}원)"
                                    for label, share in sleeves(facts['weights'])), '', text('계좌 계획'), '']
-    out += tp_md(facts.get('tp_rebalance') or {'assets': {}, 'sell_room': 0}, facts['active'], text('익절·리밸런싱 의견'))
+    out += tp_md(facts.get('tp_rebalance') or {'assets': {}, 'sell_room': 0}, facts['active'], text('익절·리밸런싱 의견'), res, facts['account'].get('yeo_book', False))
     near = sorted(facts['levels'], key=lambda x: abs(x.get('distance') or 9))[:6]
     out += ['## 9. 시나리오 대응', '', '가까운 타점(현재가 대비): ' + '; '.join(
         f"{name(x['asset'])} {SIDE[x['side']]} {x['price']:,.0f}({_pct(x.get('distance'))})" for x in near), '',
@@ -400,9 +427,9 @@ def ideas_md(ideas, cards, analysis):
     return out + [analysis, '']
 
 
-def tp_md(tp, active, analysis):
+def tp_md(tp, active, analysis, res=None, yeo_book=False):
     """8절: the facts the take-profit/rebalancing opinion stands on; the engine's modules do the selling."""
-    name = lambda k: L.ASSETS[k][1]
+    name = lambda k: L.asset_name(k, res)
     rows = [[name(k), f"{a['qty']:,}", f"{a['avg']:,.0f}" if a['qty'] else '—', f"{a['close']:,.0f}" if a['close'] else '—',
              _pct(a['gain']), _pct(a['weight'], False), _pct(a['target'], False), f"{a['band'][0] * 100:.0f}~{a['band'][1] * 100:.0f}%",
              '밖' if a['outside'] else '안', f"{a['tax_if_sold']:,}원"] for k, a in tp['assets'].items()]
@@ -410,7 +437,8 @@ def tp_md(tp, active, analysis):
                if m in active]
     return ['## 8. 익절·리밸런싱 의견', '', _table(['종목', '보유', '평균가', '종가', '평가익', '현재 비중', '목표', '밴드', '밴드 안/밖', '전량 매도 시 세금(추정)'], rows), '',
             f"- 이번 달 남은 매도 한도(저수지 제외): {tp['sell_room']:,}원 · 파는 쪽 엔진 모듈(켜짐): {', '.join(sellers) or '없음'} · "
-            '적립식은 팔지 않는다 · 세금은 국내 상장 해외 ETF 매매차익 15.4% 추정', '', analysis, '']
+            '적립식은 팔지 않는다 · 세금은 국내 상장 해외 ETF 매매차익 15.4% 추정',
+            *(['- 가상 계좌는 여운봉 저수지 매매법이라 위 밴드와 파는 모듈을 쓰지 않는다. 저수지 목표는 현금을 포함한 비중이라 저수지 ETF만의 비중과 다르다.'] if yeo_book else []), '', analysis, '']
 
 
 def fill(day, doc, root=L.ROOT, reports=REPORTS, fetch=None):

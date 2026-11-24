@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from etf_universe import SYMBOLS
+from etf_universe import SHORT, SYMBOLS
 from sqlite_ro import ro_connect
 
 KST = ZoneInfo('Asia/Seoul')
@@ -193,6 +193,59 @@ def outcome_rows(views, bars):
     return rows
 
 
+MASS_INDEX = {'k200': BENCHMARK, 'kq150': '229200'}
+
+
+def direction_mass(probabilities):
+    """Jev's entry probabilities by direction: {long, inverse, wait, top, top_probability, choices}. Every choice but WAIT and
+    the inverse ETFs (stocks too) counts as long. `top` is the largest choice other than WAIT."""
+    picks = {k: v for k, v in probabilities.items() if type(v) in (int, float)}
+    total = lambda keep: round(sum(v for k, v in picks.items() if keep(k)), 3)  # noqa: E731
+    others = {k: v for k, v in picks.items() if k != 'WAIT'}
+    top = max(others, key=others.get) if others else None
+    return {'long': total(lambda k: k != 'WAIT' and k not in SHORT), 'inverse': total(lambda k: k in SHORT),
+            'wait': picks.get('WAIT', 0), 'top': top, 'top_probability': others.get(top), 'choices': len(picks)}
+
+
+def mass_rows(ledger, day, bars):
+    """One row per Jev entry answer of `day`: its direction mass and KODEX 200 / KODEX 코스닥150 5, 15 and 30 minutes later.
+    Observation only (user 2026-11-24 '기록부터'): its own table, because decision_outcomes is Jev's own track record input."""
+    rows = []
+    with ro_connect(Path(ledger)) as db:
+        found = db.execute("SELECT time, data FROM events_v2 WHERE time >= ? AND time < ? AND event = 'jev_shadow' ORDER BY time",
+                           (day, (datetime.fromisoformat(day) + timedelta(days=1)).strftime('%Y-%m-%d'))).fetchall()
+    for at, data in found:
+        probabilities = json.loads(data).get('jev_probabilities')
+        if not isinstance(probabilities, dict) or not probabilities:
+            continue
+        when, row = datetime.fromisoformat(at), {'key': f'jev:{at}', 'time': at, **direction_mass(probabilities)}
+        for name, code in MASS_INDEX.items():
+            series = bars.get(code) or []
+            base = close_at(series, when, max_age=timedelta(minutes=5))
+            for h in HORIZONS:
+                row[f'{name}_{h}'] = pct(close_after(series, when + timedelta(minutes=h)), base)
+        rows.append(row)
+    return rows
+
+
+def store(db, table, rows):
+    if rows:
+        columns = list(rows[0])
+        db.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(c + (' TEXT PRIMARY KEY' if c == 'key' else '') for c in columns)})")
+        db.executemany(f"INSERT OR REPLACE INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+                       [tuple(r[c] for c in columns) for r in rows])
+
+
+def update_mass(root=ROOT, day=None, research=None, bars=None):
+    """Recompute the direction_mass rows of `day`; returns how many."""
+    root, day = Path(root), day or datetime.now(KST).strftime('%Y-%m-%d')
+    research, ledger = Path(research or root / 'market-research.sqlite3'), root / 'trading-ledger.sqlite3'
+    rows = mass_rows(ledger, day, day_bars(ledger, day) if bars is None else bars)
+    with sqlite3.connect(research, timeout=5) as db:
+        store(db, 'direction_mass', rows)
+    return len(rows)
+
+
 def update(root=ROOT, day=None, research=None, today=None):
     """Recompute the day's rows from the ledger, journal fills and stored vibe advice; returns row counts."""
     root = Path(root)
@@ -217,18 +270,13 @@ def update(root=ROOT, day=None, research=None, today=None):
     outcomes = outcome_rows(decisions(root / 'trading-ledger.sqlite3', day, advice), bars)
     with sqlite3.connect(research, timeout=5) as db:
         for table, rows in (('position_paths', paths), ('decision_outcomes', outcomes)):
-            if not rows:
-                continue
-            columns = list(rows[0])
-            db.execute(f"CREATE TABLE IF NOT EXISTS {table} ({', '.join(c + (' TEXT PRIMARY KEY' if c == 'key' else '') for c in columns)})")
-            db.executemany(f"INSERT OR REPLACE INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
-                           [tuple(r[c] for c in columns) for r in rows])
+            store(db, table, rows)
         try:  # an earlier day gets no more bars, and the watch only recomputes today: its pending outcomes are final
             db.execute("UPDATE decision_outcomes SET status = 'insufficient' WHERE status = 'pending' AND time < ?", (today,))
         except sqlite3.OperationalError:  # no table yet
             pass
     research.chmod(0o600)
-    return {'day': day, 'positions': len(paths), 'decisions': len(outcomes),
+    return {'day': day, 'positions': len(paths), 'decisions': len(outcomes), 'direction_mass': update_mass(root, day, research, bars),
             'settled': sum(r['status'] == 'settled' for r in outcomes)}
 
 

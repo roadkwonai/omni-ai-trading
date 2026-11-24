@@ -134,7 +134,7 @@ class PositionPathTests(unittest.TestCase):
                 db.execute('CREATE TABLE fills (order_id TEXT, symbol TEXT, side TEXT, quantity INTEGER, price REAL, time TEXT)')
             for _ in range(2):
                 result = pp.update(root, '2026-11-12')
-            self.assertEqual(result, {'day': '2026-11-12', 'positions': 0, 'decisions': 1, 'settled': 1})
+            self.assertEqual(result, {'day': '2026-11-12', 'positions': 0, 'decisions': 1, 'direction_mass': 0, 'settled': 1})
             with sqlite3.connect(root / 'trading-ledger.sqlite3') as db:  # a decision near the end of a past day
                 db.execute('INSERT INTO events_v2 VALUES (?,?,?,?,?,?,2)', ('s', 3, 'z', T(10, 35).isoformat(), 'jev_shadow',
                                                                           json.dumps({'jev_choice': 'KQ150', 'jev_confidence': 0.7})))
@@ -195,6 +195,26 @@ class GapTests(unittest.TestCase):
         series = bars('x', T(10, 0), [100, 101]) + [(T(10, 20), 120, 120, 120, 120)]
         self.assertEqual(pp.close_after(series, T(10, 2)), 101)
         self.assertIsNone(pp.close_after(series, T(10, 5)))   # next bar is 15 minutes late
+
+
+class DirectionMassTests(unittest.TestCase):  # user 2026-11-24: 31 answers, long sum 0.75, no choice near 0.5
+    def test_an_answer_is_summed_by_direction_and_settled_on_the_indices(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            answer = {'WAIT': 0.14, 'KQ150LEV': 0.3, 'SEMILEV': 0.2, '005930': 0.2, 'INV': 0.1, 'KQ150INV': 0.06}
+            bar = lambda minute, price: {'bsop_time': f'10{minute:02d}00', **{k: str(price) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr')}}  # noqa: E731
+            with sqlite3.connect(root / 'trading-ledger.sqlite3') as db:
+                db.execute('CREATE TABLE events_v2 (time TEXT, event TEXT, data TEXT)')
+                db.executemany('INSERT INTO events_v2 VALUES (?,?,?)', [
+                    (T(10, 1).isoformat(), 'jev_shadow', json.dumps({'jev_probabilities': answer, 'jev_choice': 'KQ150LEV'})),
+                    (T(10, 2).isoformat(), 'jev_shadow', json.dumps({'jev_choice': 'WAIT'})),  # no probabilities: nothing to sum
+                    (T(10, 40).isoformat(), 'market_context', json.dumps({'market_bars': {'K200': [bar(0, 100), bar(30, 102)]}}))])
+            self.assertEqual((pp.update_mass(root, '2026-11-12'), pp.update_mass(root, '2026-11-12')), (1, 1))
+            with sqlite3.connect(root / 'market-research.sqlite3') as db:
+                rows = db.execute('SELECT "long", inverse, wait, top, top_probability, choices, k200_5, k200_30, kq150_30 FROM direction_mass').fetchall()
+                tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            self.assertEqual(rows, [(0.7, 0.16, 0.14, 'KQ150LEV', 0.3, 6, None, 2.0, None)])
+            self.assertEqual(tables, {'direction_mass'})  # never decision_outcomes: Jev reads that as its own record
 
 
 if __name__ == '__main__':

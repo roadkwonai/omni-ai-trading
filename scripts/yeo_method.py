@@ -9,6 +9,7 @@ markets / indices other than the US Nasdaq-100 are choices kept off for now (KOS
 plan() is pure: the engine (virtual book) and longterm_live (a live account) send its orders through their usual paths."""
 from __future__ import annotations
 
+import math
 from datetime import date
 
 # asset keys outside the engine's six ETFs (vibe_longterm.ASSETS): key -> (KRX code, name)
@@ -20,7 +21,8 @@ MARKETS = {'us': '미국 지수만', 'kospi': '코스피만', 'mix': '혼합'}
 US_INDEX = {'ndx': '나스닥100만', 'spx': 'S&P500만', 'both': '둘 다'}
 RESERVOIR = 'RES'
 DEFAULT = {'market': 'us', 'us_index': 'ndx', 'mix_us': 0.70, 'mix_ndx': 0.50, 'risk': 0.70, 'band': 0.05,
-           'steps': [[-0.20, 0.40], [-0.30, 0.40], [-0.40, 0.20]], 'kospi_steps': [[-0.30, 0.30], [-0.45, 0.40], [-0.55, 0.30]]}
+           'steps': [[-0.20, 0.40], [-0.30, 0.40], [-0.40, 0.20]], 'kospi_steps': [[-0.30, 0.30], [-0.45, 0.40], [-0.55, 0.30]],
+           'park': False}  # park: the cash the next step does not need waits in the reservoir ETF (user 2026-11-24)
 RANGES = {'mix_us': (0.0, 1.0), 'mix_ndx': (0.0, 1.0), 'risk': (0.50, 0.90), 'band': (0.02, 0.10)}
 STEP_DD, STEP_MAX, MIN_REBALANCE = (-0.60, -0.05), 3, 0.005
 # scripts/yeo_method_replay.py (2026-11-18): the rule from all cash vs 70 : 30 bought on day one vs the index held (연수익 · MDD).
@@ -42,6 +44,8 @@ def clean(cfg):
     for key, (lo, hi) in RANGES.items():
         if num(cfg.get(key)):
             out[key] = round(min(hi, max(lo, float(cfg[key]))), 4)
+    if type(cfg.get('park')) is bool:
+        out['park'] = cfg['park']
     for key in ('steps', 'kospi_steps'):
         if isinstance(cfg.get(key), list):
             rows = {}
@@ -110,13 +114,27 @@ def switch_note(cfg):
             '이 방법이 다루지 않는 다른 ETF는 팔지 않고 그대로 둡니다.')
 
 
-def plan(cfg, state, ath, values, cash, day, owed=None):
+def next_step_money(cfg, state, ath, reservoir):
+    """KRW the next unused step of each index will spend, kept as cash; None while a drawdown is unknown."""
+    need = 0.0
+    for index, _, _, _, steps, share in pairs(cfg):
+        if type(((ath or {}).get(index) or {}).get('dd')) not in (int, float):
+            return None
+        s = (state or {}).get(index) or {}
+        base = s['base'] if s.get('base') is not None else reservoir * share
+        need += base * next((use for level, use in steps if level not in (s.get('used') or [])), 0.0)
+    return min(need, reservoir)
+
+
+def plan(cfg, state, ath, values, cash, day, owed=None, res_price=None):
     """(planned {asset key: signed KRW}, new state, Korean notes) for one book on one day.
     ath: {index: {'dd': drawdown from the all-time high, 'peak'}}; values: KRW held per asset key (the reservoir RES too);
     cash: money the book may spend. State per index: used steps, the step-1 reservoir (base), the last rebalance period.
-    owed: {asset key: KRW} an earlier step did not buy (unbought()), bought first from the reservoir and counted as held."""
+    owed: {asset key: KRW} an earlier step did not buy (unbought()), bought first from the reservoir and counted as held.
+    res_price: a share of the reservoir ETF; with park on, the cash beyond the next step's money is put into it and that
+    money is made cash again ahead of the step, because the guard's cash does not count a same-day sale (2026-11-24)."""
     cfg = clean(cfg)
-    state = {i: dict(v) for i, v in (state or {}).items() if isinstance(v, dict)}
+    state = {i: {k: list(x) if isinstance(x, list) else x for k, x in v.items()} for i, v in (state or {}).items() if isinstance(v, dict)}  # never the caller's lists
     planned, notes = {}, []
     add = lambda k, v: planned.__setitem__(k, planned.get(k, 0) + v)  # noqa: E731
     reservoir = max(0.0, cash) + values.get(RESERVOIR, 0)
@@ -151,7 +169,7 @@ def plan(cfg, state, ath, values, cash, day, owed=None):
                     add(risk, krw * cfg['risk'])
                     add(safe, krw * (1 - cfg['risk']))
                     bought[index] = bought.get(index, 0.0) + krw
-                    sb = s['step_buy'] if (s.get('step_buy') or {}).get('day') == day else {'day': day}
+                    sb = dict(s['step_buy']) if (s.get('step_buy') or {}).get('day') == day else {'day': day}
                     sb[risk] = sb.get(risk, 0) + krw * cfg['risk']
                     sb[safe] = sb.get(safe, 0) + krw * (1 - cfg['risk'])
                     s['step_buy'] = sb
@@ -179,6 +197,15 @@ def plan(cfg, state, ath, values, cash, day, owed=None):
                          + ('(그 전에는 사지 않음)' if not held else ''))
     if (total := sum(bought.values())) > max(0.0, cash):  # the cash runs short: the KOFR reservoir pays the rest
         add(RESERVOIR, -(total - max(0.0, cash)))
+    elif cfg['park'] and res_price and not bought and (need := next_step_money(cfg, state, ath, reservoir)) is not None:
+        if (spare := max(0.0, cash) - need) >= res_price:
+            add(RESERVOIR, spare)
+        elif spare < 0 and values.get(RESERVOIR, 0) >= res_price:
+            add(RESERVOIR, spare)
+        if planned.get(RESERVOIR):
+            notes.append(f'저수지: 다음 단계 몫 {need:,.0f}원은 현금, 나머지는 저수지 ETF')
+    if cfg['park'] and res_price and planned.get(RESERVOIR, 0) < 0:  # whole shares rounded up: a short sale would cut the step
+        planned[RESERVOIR] = -min(math.ceil(-planned[RESERVOIR] / res_price - 1e-9) * res_price, values.get(RESERVOIR, 0))
     return {k: v for k, v in planned.items() if abs(v) >= 1}, state, notes
 
 

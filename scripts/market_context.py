@@ -52,6 +52,7 @@ THEME_GROUPS = {
     '가상자산': ('가상화폐', '블록체인', '스테이블코인', '두나무', 'STO', 'NFT'),
 }
 MAX_AGE = timedelta(minutes=20)  # engines ignore an older snapshot
+PROGRAM_REUSE = timedelta(minutes=10)  # a failed program-trading reading keeps the last one this long (two rounds)
 
 
 def num(text):
@@ -353,6 +354,15 @@ def global_intraday():
     return out
 
 
+def reused(section, previous, now, limit):
+    """`section` of the previous payload marked with the time it was really fetched, or None when that is over `limit` ago."""
+    try:
+        origin = section.get('reused_from') or previous.get('time')
+        return {**section, 'reused_from': origin} if timedelta(0) <= now - datetime.fromisoformat(origin) <= limit else None
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def collect(now=None):
     """Every section is independent: a failed source is listed in errors, never filled with zeros."""
     now = now or datetime.now(KST)
@@ -372,14 +382,8 @@ def collect(now=None):
                     continue
                 except Exception as fallback_exc:
                     errors.append(f'{INDICES[code]} 대체(키움·토스): {type(fallback_exc).__name__}')
-            kept = (previous.get('indices') or {}).get(code)
-            origin = (kept or {}).get('reused_from') or previous.get('time')  # the time it was really fetched
-            try:
-                fresh = timedelta(0) <= now - datetime.fromisoformat(origin) <= MAX_AGE
-            except (TypeError, ValueError):
-                fresh = False
-            if kept and fresh:  # one failed fetch must not switch the engines' market view off
-                payload['indices'][code] = {**kept, 'reused_from': origin}
+            if kept := reused((previous.get('indices') or {}).get(code), previous, now, MAX_AGE):
+                payload['indices'][code] = kept  # one failed fetch must not switch the engines' market view off
     try:
         try:
             rows, theme_source = themes(), 'naver'
@@ -413,6 +417,8 @@ def collect(now=None):
                                            'markets': program()}
         except Exception as exc:
             errors.append(f'프로그램 시계열(키움): {type(exc).__name__}')
+            if kept := reused(previous.get('program_intraday'), previous, now, PROGRAM_REUSE):
+                payload['program_intraday'] = kept  # its rows carry their time: intraday_view drops one that is too old
         try:
             payload['foreign_desks'] = {'source': 'kiwoom:ka10037', 'unit': '억원', 'note': '외국계 증권사 창구 기준(등록외국인 집계 아님)',
                                         **foreign_desks()}

@@ -43,13 +43,15 @@ gantt
 | 시각 | 종류 | 작업 | 하는 일 |
 | --- | --- | --- | --- |
 | 로그인 시 | launchd | `shared-etf-dashboard`, `discord-notify`, `shared-etf-learning`, `shared-etf-regime`, `shared-etf-paper`, `nxt-virtual` | 대시보드, 알림 감시, 관찰기, 실행기(장 밖에서는 기다림) |
-| 금 07:00·07:30 | launchd | `us-ideas` | 미국 종목 아이디어: 07:30 주간 스크린, 07:00 분기 갱신(2·5·8·11월 셋째 금요일만) |
+| 금 10:00·10:30 | launchd | `us-ideas` | 미국 종목 아이디어: 10:30 주간 스크린, 10:00 분기 갱신(2·5·8·11월 셋째 금요일만) |
 | 07:40\~09:10 | launchd | `premarket` | 장전 브리프 수집(07:40, 08:00\~08:55 매 5분, 09:00, 09:10). NXT 프리마켓 체결 요약 포함 |
 | 07:55 | launchd | `nxt-virtual` | NXT 종가매매 가상 아침 청산 |
 | 08:20 | launchd | `preflight` | 장전 사전 점검 1차 |
 | 08:25 | Claude | `trading-preflight` | 점검 실패 보완 뒤 다시 점검 |
 | 08:31 | Claude | `premarket-analysis-daily` | 장전 상세 분석 리포트 |
 | 08:40 | launchd | `vibe-longterm` | 장기 엔진 시작(08:45 판단, 09:40\~14:30 가상 체결·적립식, 15:40 마감) |
+| 08:40 | launchd | `longterm-watch` | 장기투자 상시 감시: 매분 기록 확인, 변화만 Discord 장기 채널로, 16:00 종료 |
+| 08:40 | launchd | `api-watch` | API 부하·분산 상시 감사: 09:05부터 매분 호출 기록 확인, 새 문제만 Discord 실시간 채널로, 15:40 하루 보고서 |
 | 08:50 | launchd | `market-movers` | 순위·관심종목 계산(09:00 개장을 기다렸다가 15:05까지) |
 | 08:50 | Claude | `longterm-strategy-daily` | 장기투자 일일 전략 리포트 |
 | 08:53 | launchd | `preflight` | 장전 사전 점검 2차 |
@@ -88,6 +90,8 @@ gantt
 | `premarket` | 장전 자료 수집 | `premarket.py --once` | 평일 07:40, 08:00\~08:55 매 5분, 09:00, 09:10 | `shared-etf-paper` |
 | `preflight` | 장전 사전 점검 | `preflight.py` | 평일 08:20 · 08:53 | `shared-etf-paper` |
 | `vibe-longterm` | 장기투자 실행기 | `vibe_longterm.py --run` | 평일 08:40 | `vibe-longterm` |
+| `longterm-watch` | 장기투자 상시 감시 | `longterm_watch.py --watch` (기록만 읽음, 변화는 Discord 장기 채널, 16:00 종료) | 로그인 · 평일 08:40 | `vibe-longterm` |
+| `api-watch` | API 부하 감사 | `api_load.py --watch` (호출 기록만 읽음, `reviews/api-audit-DAY.md`) | 로그인 · 평일 08:40 | `shared-etf-paper` |
 | `market-movers` | 순위·관심종목 계산기 | `market_movers.py` | 평일 08:50 | `shared-etf-paper` |
 | `live-follow-1` | 실계좌 1 미러 실행기 | `nh_live_follow.py --execute --account live-1` | 평일 08:58 | `live-follow` |
 | `trading-day-start` | 거래일 준비 | `trading_day_start.py` | 평일 08:55 | `shared-etf-paper` |
@@ -95,7 +99,7 @@ gantt
 | `trading-backup` | 거래 데이터 백업 | `backup_trading_data.py` | 평일 15:50 | `shared-etf-paper` |
 | `state-sync` | 상태 백업 | `state_sync.py export` | 평일 16:55 | `shared-etf-paper` |
 | `exit-replay` | 청산 재현 | `exit_replay.py` | 금 16:10 | `shared-etf-paper` |
-| `us-ideas` | 미국 종목 아이디어 | `us_ideas.py --scheduled` (참고 정보, 주문 없음) | 금 07:00 · 07:30 | `vibe-longterm` |
+| `us-ideas` | 미국 종목 아이디어 | `us_ideas.py --scheduled` (참고 정보, 주문 없음) | 금 10:00 · 10:30 | `vibe-longterm` |
 
 > [!IMPORTANT]
 > 저장소가 생성하는 `live-follow-1`과 `longterm-live-2` 정의에는 `--execute`가 들어 있습니다. 실제 설치에 등록된 인자는 다를 수 있습니다. 실주문은 실행 인자 외에도 계좌별 자동매매·실주문 스위치, HALT 상태와 주문 보호 조건을 확인합니다. [실주문이 나가는 조건](live-accounts.md#실주문이-나가는-조건)

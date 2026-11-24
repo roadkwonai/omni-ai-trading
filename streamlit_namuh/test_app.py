@@ -28,6 +28,11 @@ class SettingsSummaryTests(unittest.TestCase):
         with patch('engine_compare.recent_events', return_value=[]):
             self.assertIn('확인하지 못했습니다', app.split_policy_summary())
 
+    def test_market_size_line_shows_each_regimes_amount(self):
+        line = app.market_size_line({'size_market_on': 1.0, 'size_market_flat_pct': 80, 'size_market_against_pct': 60}, 1_000_000)
+        self.assertIn('상승장 1,000,000원 · 횡보장 800,000원 · 하락장 600,000원', line)
+        self.assertIn('꺼져', app.market_size_line({'size_market_on': 0.0, 'size_market_flat_pct': 80, 'size_market_against_pct': 60}, 1_000_000))
+
     def test_scale_settings_status_distinguishes_saved_from_recorded(self):
         saved = {'scale_signal_add_on': 1, 'scale_step_add_on': 0,
                  'scale_profit_rebuy_on': 1, 'scale_interval_min': 7}

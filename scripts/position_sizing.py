@@ -2,8 +2,9 @@
 
 A buy is not always the full tranche up to the per-symbol limit: it is the tranche times
   holding factor  1.0 while the symbol holds under half of its per-symbol limit, then (1 - held share), at least 0.25
-  market factor   1.0 when the index regime matches the buy's direction, 0.75 in a 횡보장, 0.5 against it
-                  (long in a 하락장, inverse in a 상승장); 1.0 when the regime is unknown
+  market factor   1.0 when the index regime matches the buy's direction, size_market_flat_pct (75%) in a 횡보장,
+                  size_market_against_pct (50%) against it (long in a 하락장, inverse in a 상승장); 1.0 when the
+                  regime is unknown. Both shares are settings (user 2026-11-24).
 clamped to 25%..100% of the tranche. A held position whose index regime turns against it after it was bought sells
 half once (regime_trim). Each part is a strategy setting switch (size_holding_on, size_market_on, regime_trim_on).
 Routes with their own sizing (낙폭과대, 선별 v2, new listings) are not resized here.
@@ -32,13 +33,14 @@ def against(regime, short):
     return regime == ('상승장' if short else '하락장')
 
 
-def market_factor(view, index, short):
+def market_factor(view, index, short, settings=None):
+    settings = settings or {}
     regime = regime_of(view, index)
     if regime is None:
         return 1.0
     if regime == '횡보장':
-        return 0.75
-    return 0.5 if against(regime, short) else 1.0
+        return settings.get('size_market_flat_pct', 75) / 100
+    return settings.get('size_market_against_pct', 50) / 100 if against(regime, short) else 1.0
 
 
 def buy_factor(settings, view, index, short, held_cost, cap):
@@ -47,7 +49,7 @@ def buy_factor(settings, view, index, short, held_cost, cap):
     if settings.get('size_holding_on', 1):
         parts['holding'] = holding_factor(held_cost, cap)
     if settings.get('size_market_on', 1):
-        parts['market'] = market_factor(view, index, short)
+        parts['market'] = market_factor(view, index, short, settings)
     factor = 1.0
     for value in parts.values():
         factor *= value

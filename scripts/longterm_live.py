@@ -226,7 +226,7 @@ def day_orders(plan, stories, book, held, quotes, cash, capital, day, modules=No
         return [], {'nav': 0, 'why': '운용금 없음'}, book
     modules = [] if yeo is not None else list(plan['active'] if modules is None else modules)
     if yeo is not None:  # the steps and the 70 : 30 rebalance on this account's money (L.yeo_orders, the engine's same rule)
-        want, target, why, notes, planned, new_book = L.yeo_orders(plan, yeo, book, values, nav, free, day)
+        want, target, why, notes, planned, new_book = L.yeo_orders(plan, yeo, book, values, nav, free, day, quotes['RES'][0])
     else:
         want, target, why, notes, planned, new_book = L.plan_orders(plan, modules, book, stories, values, nav, free, day)
     orders = to_orders(planned, held, quotes, res)
@@ -258,7 +258,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
     from accounts import DEFAULT_BUDGET, LIVE_PRICE_HARD_CAP, live_limits
     from live_fills import record as record_fills
     from nh_guarded_live import execute
-    from nh_live_broker import collect_snapshots
+    from nh_live_broker import collect_snapshots, orderable_cash
     from nh_live_follow import bid_ask, cancelled_sell, pending_step
     from src.tools.nhplug_live_guard import ORDER_QTY_MAX, LiveOrderBlocked, LiveOrderGuard
     hhmm, day = now.strftime('%H:%M'), now.date().isoformat()
@@ -301,7 +301,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
         return {'action': 'HOLD', 'reason': f'order window closed ({end})', **info}
     rows = [r for r in snapshots['balance']['Output_1'] if isinstance(r, dict)]
     held = {r['iem_cd']: r['rsdl_qty'] for r in rows if isinstance(r.get('iem_cd'), str) and type(r.get('rsdl_qty')) is int and r['rsdl_qty'] > 0}
-    cash = (snapshots['balance'].get('Output_0') or {}).get('orr_pbl_amt1')
+    cash = orderable_cash(snapshots['balance'].get('Output_0'))  # a sale counts at once: the plan must not sell again for money on its way
     cash, capital = cash if type(cash) is int else 0, guard_capital(record['budget']['capital_krw'], snapshots['balance'].get('Output_0') or {}, rows)
     # the 관심목록 sleeve (outside the engine's ETFs, the 적립식's own) at the balance's price: inside the capital, never the
     # engine's to trade; the guard's capital check counts every holding as well
@@ -334,7 +334,9 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             if owed := yeo_owed(root, key, state, yeo):
                 book = {**book, 'yeo_owed': owed}
         dca, deposit = take_deposit(cfg, dca, record, key, day)  # 입금할 때: a raised 운용금 is the 적립식's, not the strategy's
-        waiting = longterm_dca.reserved(dca)  # the 적립식's money: waiting for a drawdown step, carried parts under one share
+        # the 적립식's money (waiting for a drawdown step, carried parts under one share); with the 적립식 off what it left is
+        # the reservoir's, and its own again once it is on (user 2026-11-24)
+        waiting = longterm_dca.reserved(dca) if cfg and cfg['on'] else 0
         settings = L.load_settings(engine_root)  # 계좌별 전략: this account's master modules; regime, stories and indicators are the engine's
         orders, plan_info, new_book = day_orders(plan, stories, book, held, quotes, cash - waiting,
                                                  capital - outside - waiting, day, L.book_modules(settings, key, plan), yeo, res)
@@ -461,6 +463,20 @@ def commit_sent(state, order):
             state[COMMITS[source]] = pending_state
 
 
+def worth_logging(event, last, idle):
+    """One line per change: an idle WAIT/HOLD that already stands since the last real event is not written again, though the
+    two alternate every five minutes (2026-11-24); a refused order (execution) is written whenever the line changes.
+    idle: the reasons written since then, kept up to date here."""
+    fold = (event.get('action'), event.get('reason'))
+    if event.get('action') not in ('WAIT', 'HOLD') or event.get('execution'):
+        idle.clear()
+        return event.get('action') not in ('WAIT', 'HOLD') or fold != last
+    if fold in idle:
+        return False
+    idle.add(fold)
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--account', required=True, help='accounts.json key of a live account set to 장기투자')
@@ -503,7 +519,7 @@ def main():
     name = 'live-auto.lock' if account == primary else f'live-follow-exec-{args.account}.lock'
     with (root / name).open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        last = None
+        last, idle = None, set()
         while True:
             now = datetime.now(KST)
             live_now = False
@@ -522,7 +538,7 @@ def main():
                      'mode': 'execute' if live_now else 'dry_run',
                      'armed': bool(args.execute), **result}
             fold = (event.get('action'), event.get('reason'))
-            if fold != last or event.get('action') not in ('WAIT', 'HOLD'):  # one line per change, not per idle minute
+            if worth_logging(event, last, idle):
                 with (root / LOG).open('a') as stream:
                     stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
                 print(json.dumps(event, ensure_ascii=False, default=str), flush=True)

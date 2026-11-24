@@ -736,3 +736,19 @@ def test_the_views_example_for_a_deposit_book_buys_one_spread_part():
     assert put == pytest.approx(1_000_000 / 20 * 1.2, abs=2)  # 1,000,000 sample over 4 weeks of daily buys x 1.2
     assert any('입금' in f['value'] for f in out['fields'] if f['key'] == 'size')
     assert D.next_day(DEP, date(2026, 11, 21)) == date(2026, 11, 23)
+
+
+def test_a_yeo_books_cash_floor_counts_the_reservoir_etf_but_spends_only_cash():
+    # 2026-11-24: cash moved into the reservoir ETF is still the reservoir; the floor must not stop the 적립식
+    from datetime import datetime
+    import longterm_dca as D
+    cfg = D.clean({'on': True, 'style': 'master', 'profile': 'yeo', 'when_by': 'master', 'size_by': 'master', 'buy_every': 'day',
+                   'amount_krw': 100_000, 'frequency': 'daily', 'time': '10:00', 'time_mode': 'fixed'})
+    now, want, prices = datetime(2026, 11, 25, 10, 0, tzinfo=__import__("vibe_longterm").KST), {'NDX': 0.7, 'NDXMIX': 0.3}, {'NDX': 10_000, 'NDXMIX': 10_000}
+    ind = {'day_ret': -0.01, 'vix': 25}
+
+    def spent(cash, res):
+        orders, *_ = D.plan(cfg, {}, now, ind, 'correction', want, {'RES': res}, cash, prices=prices, yeo=True)
+        return sum(orders.values())
+    assert spent(300_000, 9_700_000) == spent(10_000_000, 0) > 0
+    assert spent(30_000, 9_970_000) <= 30_000

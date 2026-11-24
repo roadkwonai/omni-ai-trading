@@ -69,7 +69,6 @@ class VirtualBroker:
         self.db.commit()
 
     def quote(self, symbol):
-        now = self.clock()
         response = self.read.call_tool('get_stock_price', {'stock_code': symbol})
         for wait in RATE_LIMIT_WAIT:  # a refused burst clears in a moment; anything else fails at once
             if not rate_limited(response):
@@ -78,7 +77,7 @@ class VirtualBroker:
             response = self.read.call_tool('get_stock_price', {'stock_code': symbol})
         if not isinstance(response, dict) or response.get('status') != 'ok':
             raise ValueError('quote unavailable')
-        quote = self.fresh_quote(response.get('data') or {}, symbol, now)
+        quote = self.fresh_quote(response.get('data') or {}, symbol, self.clock())  # when it arrived: a slow answer is not a future quote
         bid, ask = quote.get('bidp'), quote.get('askp')
         if type(bid) is not int or type(ask) is not int or not 0 < bid <= ask:
             raise ValueError('invalid bid/ask')

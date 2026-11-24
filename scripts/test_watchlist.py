@@ -54,6 +54,16 @@ class WatchlistTests(unittest.TestCase):
         self.assertNotIn('000009', jev.call_args.args[3])  # one share above the 1,000,000 tranche
         self.assertEqual(record['market']['K200']['change_pct'], 10.0)
 
+    def test_no_market_news_does_not_stop_the_watchlist(self):
+        answer = {'watchlist': {'type': 'choice', 'choice': '000002', 'confidence': 0.4}, 'chart_sha256': 'a' * 64}
+        for failure in (OSError('offline'), ValueError('no recent news')):
+            with self.subTest(failure=failure), patch('nh_etf_paper_runner.valid_bars', return_value=BARS), \
+                    patch('nh_paper_isolated.fresh_series', return_value=True), patch('etf_news.headlines7', side_effect=failure), \
+                    patch.object(w, 'fresh_stock_news', return_value=[]), \
+                    patch('nh_etf_auto_v2._jev7_question', return_value=answer) as jev:
+                record = w.select(Reader(), self.candidates(), NOW)
+            self.assertEqual((jev.call_args.args[1], record['market_news'], record['selected']), ([], [], ['000002']))
+
     def test_due_load_and_expiry(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'watchlist.json'

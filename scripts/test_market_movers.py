@@ -81,6 +81,15 @@ class MoversTests(unittest.TestCase):
             self.assertEqual(slept, [600.0])  # waited for the open while the refresh was still running
             release.set()
 
+    def test_the_index_series_are_completed_in_the_background_and_a_failure_is_only_printed(self):
+        with patch('oversold_cases.fill_index_series', return_value=['^KS11']) as fill, patch('builtins.print') as out:
+            m.fill_index(datetime(2026, 11, 24, 10, tzinfo=ZoneInfo('Asia/Seoul')))
+            fill.assert_called_once()
+            self.assertIn('^KS11', out.call_args.args[0])
+        with patch('oversold_cases.fill_index_series', side_effect=OSError), patch('builtins.print') as out:
+            m.fill_index(datetime(2026, 11, 24, 10, tzinfo=ZoneInfo('Asia/Seoul')))
+            self.assertIn('OSError', out.call_args.args[0])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -4,6 +4,10 @@ open_dialog(title, fn, *args) shows any render function in a pop-up; table_dialo
 holdings / alerts / events / services pop-ups are shared by 종합 현황, 운영 상태, 실계좌, AI·실행 기록 and the sidebar."""
 from __future__ import annotations
 
+import functools
+import inspect
+import traceback
+
 import engine_compare as ec
 import live_labels as L
 
@@ -39,11 +43,67 @@ def table_frame(data, **kwargs):
     return st.dataframe(data, **kwargs)
 
 
+OPEN = 'dialog_open'  # draws the open pop-up again
+
+
+def dialog(title, icon=None):
+    """st.dialog for this dashboard. Streamlit closes a pop-up at the next full rerun, and timers rerun the whole app (a
+    finished launchctl or broker read, an AI answer): keep_open() draws it again until the user closes it. st.rerun() in
+    the body closes it, as with st.dialog; a widget callback calls close() first."""
+    def decorate(fn):
+        @functools.wraps(fn)
+        def show(*args, **kwargs):
+            import streamlit as st
+            from streamlit.runtime.scriptrunner import RerunException
+
+            @functools.wraps(fn)
+            def body(*args, **kwargs):
+                try:
+                    fn(*args, **kwargs)
+                except RerunException as stop:
+                    if not stop.rerun_data.fragment_id_queue and _called_rerun(stop):
+                        close()
+                    raise
+
+            def draw():
+                st.dialog(title, width=WIDTH, icon=icon, on_dismiss=close)(body)(*args, **kwargs)
+            st.session_state[OPEN] = draw
+            if _drawn():  # one pop-up a run: the new one takes the place of the kept one
+                st.rerun()
+            draw()
+        return show
+    return decorate
+
+
+def close():
+    import streamlit as st
+    st.session_state.pop(OPEN, None)
+
+
+def _called_rerun(stop):
+    """Streamlit stops a body with the same exception when another rerun is asked for: only st.rerun() has its own frame."""
+    import streamlit as st
+    rerun = inspect.unwrap(st.rerun).__code__
+    return any(frame.f_code is rerun for frame, _ in traceback.walk_tb(stop.__traceback__))
+
+
+def _drawn():
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    ctx = get_script_run_ctx()
+    return bool(ctx and ctx.has_dialog_opened)
+
+
+def keep_open():
+    """Draw the open pop-up again, early in a run (app.py): the browser hides it from the start of a run until it comes."""
+    import streamlit as st
+    draw = st.session_state.get(OPEN)
+    if draw and not _drawn():
+        draw()
+
+
 def open_dialog(title, fn, *args, icon=None, **kwargs):
     """Show fn(*args, **kwargs) in a wide pop-up."""
-    import streamlit as st
-
-    @st.dialog(title, width=WIDTH, icon=icon)
+    @dialog(title, icon=icon)
     def show():
         wide()
         fn(*args, **kwargs)
@@ -93,7 +153,7 @@ def _trade_rows(rows, names):
 def realized_dialog(title, rows, names):
     import streamlit as st
 
-    @st.dialog(title, width=WIDTH)
+    @dialog(title)
     def show():
         wide()
         import altair as alt
@@ -128,7 +188,7 @@ def realized_dialog(title, rows, names):
 def trades_dialog(rows, names):
     import streamlit as st
 
-    @st.dialog('오늘 거래 전체', width=WIDTH)
+    @dialog('오늘 거래 전체')
     def show():
         wide()
         if not rows:
@@ -147,7 +207,7 @@ def trades_dialog(rows, names):
 def holdings_dialog(items, names):
     import streamlit as st
 
-    @st.dialog('보유 현황', width=WIDTH)
+    @dialog('보유 현황')
     def show():
         wide()
         import pandas as pd
@@ -166,7 +226,7 @@ def holdings_dialog(items, names):
 def alerts_dialog(watched, warnings, follow):
     import streamlit as st
 
-    @st.dialog('실행기 · 주의 사항', width=WIDTH)
+    @dialog('실행기 · 주의 사항')
     def show():
         wide()
         import pandas as pd

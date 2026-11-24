@@ -242,7 +242,7 @@ class LiveOrderGuard:
                        (fingerprint,self.scope,day,'krstockOrderCashBuy',row['iem_cd'],1,order_number,'acknowledged',0))
         return fingerprint
 
-    def reserve(self, op, fields, *, now, accounts, history, pnl, previous_quote, quote, balance=None, sellable=None, replacement_of=None,
+    def reserve(self, op, fields, *, now, accounts, history, pnl, previous_quote, quote, balance=None, sellable=None, buyable=None, replacement_of=None,
                 capital=DEFAULT_CAPITAL, order_max=DEFAULT_CAPITAL, new_symbols=DAILY_NEW_SYMBOLS, loss_limit=LIMIT,
                 realized_only=False):
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
@@ -304,6 +304,11 @@ class LiveOrderGuard:
             assets = summary.get('tot_aet_amt')
             invested = summary.get('tot_byn_amt')
             cost = price * qty
+            # orr_pbl_amt1 leaves out sale money that settles in two days; NH's own answer for this very order (cash only,
+            # no unpaid balance) counts it (user 2026-11-24). Anything unverified keeps the settled cash.
+            if (isinstance(buyable, dict) and buyable.get('_account') == self.account and buyable.get('_symbol') == symbol
+                    and buyable.get('_price') == price and buyable.get('rsp_cd') == '00221' and type(buyable.get('csh_orr_pbl_amt')) is int):
+                cash = buyable['csh_orr_pbl_amt']
             limit = min(capital, CAPITAL_MAX) if type(capital) is int and capital > 0 else 0
             if type(cash) is not int or type(assets) is not int or cash < cost or assets < 0:
                 raise LiveOrderBlocked('available cash unverified or insufficient')

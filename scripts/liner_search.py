@@ -10,6 +10,9 @@ import local_env
 
 ENDPOINT = 'https://platform.liner.com/api/v1/tools/search/web'
 ANALYSIS_ENDPOINT = 'https://platform.liner.com/api/v1/agents/search'
+# https://liner.com/ko/developers/docs/rate-limits
+REFUSED = {401: 'LINER_API_KEY를 확인하세요.', 402: 'Liner 크레딧이 부족합니다. 충전한 뒤 다시 요청하세요.',
+           403: 'Liner 계정 상태를 확인하세요.', 429: 'Liner 호출 한도에 걸렸습니다. 잠시 뒤 다시 요청하세요.'}
 
 
 def _request_json(endpoint: str, body: dict, timeout: int) -> dict:
@@ -20,10 +23,13 @@ def _request_json(endpoint: str, body: dict, timeout: int) -> dict:
         response = requests.post(
             endpoint, headers={'x-api-key': key}, json=body, timeout=timeout, allow_redirects=False,
         )
+    except requests.Timeout:
+        raise ValueError(f'Liner가 {timeout}초 시간 안에 응답하지 않았습니다. 잠시 뒤 다시 요청하세요.') from None
     except requests.RequestException:
         raise ValueError('Liner에 연결하지 못했습니다.') from None
     if response.status_code != 200:
-        raise ValueError(f'Liner 요청에 실패했습니다(HTTP {response.status_code}).')
+        advice = REFUSED.get(response.status_code, 'Liner 서버 오류입니다. 잠시 뒤 다시 요청하세요.' if response.status_code >= 500 else '')
+        raise ValueError(f'Liner 요청에 실패했습니다(HTTP {response.status_code}). {advice}'.rstrip())
     try:
         payload = response.json()
     except ValueError:

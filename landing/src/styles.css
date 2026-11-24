@@ -236,20 +236,28 @@ button { font-family: inherit; }
 .why-src:hover { color: var(--text); text-decoration-color: currentColor; }
 .poverty-chart { justify-content: center; }
 .poverty-chart .why-src { margin-top: 4px; }
-.poverty-bars { display: grid; gap: 16px; margin-top: 12px; }
-.poverty-bars li { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-weight: 600; }
+.bars { display: grid; gap: 10px; }
+.bars li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; font-size: 0.875rem; line-height: 1.375rem; font-weight: 600; }
+.poverty-group { display: grid; gap: 6px; }
+.poverty-group + .poverty-group { margin-top: 8px; }
 .poverty-track { grid-column: 1 / -1; height: 14px; background: var(--surface-2); }
 .poverty-track span { display: block; height: 100%; background: var(--accent); }
-.poverty-bars li + li .poverty-track span { background: var(--muted); }
+.bars li[data-muted] .poverty-track span { background: var(--muted); }
 .poverty-scale { display: flex; justify-content: space-between; }
-.retirement-photo { width: 100%; height: 100%; min-height: 0; max-height: 420px; object-fit: cover; border-radius: var(--r-lg); }
+.retirement-photo { width: 100%; height: 100%; min-height: 0; object-fit: cover; border-radius: var(--r-lg); }
+.decisions-head { display: grid; gap: 8px; max-width: 680px; margin-top: 48px; }
+.decisions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+.decisions .why-src { margin-top: 0; padding-bottom: 12px; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-block: 8px; }
+.why-cases.single { grid-template-columns: 1fr; }
+.fix-case { margin-top: 40px; }
 .traps-title { margin-top: 56px; }
 .traps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
 .trap { display: flex; flex-direction: column; gap: 8px; padding: 20px 0; border-top: 1px solid var(--line); }
 .trap-fix { display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line); text-wrap: pretty; }
 .trap-fix svg { flex: none; margin-top: 3px; color: var(--accent-text); }
 @media (max-width: 720px) {
-  .retirement-grid, .why-stats, .why-cases, .traps { grid-template-columns: 1fr; }
+  .retirement-grid, .why-stats, .why-cases, .traps, .decisions, .facts { grid-template-columns: 1fr; }
   .why-stat { padding: 20px; }
   .retirement-photo { height: auto; max-height: 280px; }
 }
@@ -337,6 +345,58 @@ button { font-family: inherit; }
 .stack-card:active { transform: scale(0.98); }
 @media (prefers-reduced-motion: reduce) { .stack-card { transition: none; } .stack-card:hover { transform: none; } }
 @media (max-width: 1199px) { .stack-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* AI search: what Liner, the reader and this computer each do */
+.ask-title { margin-top: 56px; }
+.ask-ways { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px 24px; margin-top: 16px; }
+.ask-ways li { display: grid; gap: 4px; align-content: start; padding-top: 16px; border-top: 1px solid var(--line); }
+.ask-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 32px; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg); }
+.ask-rules li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; }
+.ask-rules svg { margin-top: 3px; color: var(--accent-text); }
+.ask-rules div { display: grid; gap: 4px; }
+.search-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 36px; margin-top: 20px; }
+.search-steps li { position: relative; display: grid; gap: 6px; align-content: start; }
+.search-steps li:not(:last-child)::after { content: "→"; position: absolute; right: -26px; top: 0; color: var(--accent-text); font-weight: 700; }
+.who { justify-self: start; padding: 2px 10px; border-radius: 999px; background: var(--surface-2); font-weight: 600; }
+.who[data-liner] { background: var(--accent-tint); color: var(--accent-text); }
+@media (max-width: 960px) { .ask-ways { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ask-rules, .search-steps { grid-template-columns: 1fr; } .search-steps { gap: 32px; }
+  .search-steps li:not(:last-child)::after { content: "↓"; right: auto; left: 8px; top: auto; bottom: -28px; } }
+@media (max-width: 480px) { .ask-ways { grid-template-columns: 1fr; } }
+
+/* Long-term money: when it is needed, and what a fall does */
+.horizon { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 48px; align-items: center; margin-top: 64px; }
+.horizon > div { display: grid; gap: 16px; }
+.horizon-art { width: 264px; max-width: 100%; justify-self: center; }
+.horizons li { display: grid; grid-template-columns: 148px 168px minmax(0, 1fr); gap: 4px 16px; align-items: baseline; padding: 14px 0; border-top: 1px solid var(--line); }
+.horizons li[data-on] > strong { color: var(--accent-text); }
+.risk-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 40px; }
+.risk-charts .why-stat { gap: 16px; }
+.risk-charts .why-src { margin-top: 0; padding-top: 0; }
+@media (max-width: 880px) { .horizon { grid-template-columns: 1fr; gap: 24px; } .horizons li { grid-template-columns: 1fr; } .risk-charts { grid-template-columns: 1fr; } }
+
+/* Using the same way of working elsewhere */
+.extend { border-top: 1px solid var(--line-soft); }
+.extend-art { width: 420px; max-width: 100%; }
+.loop { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 28px; margin-top: 48px; }
+.loop li { position: relative; display: grid; gap: 8px; align-content: start; padding: 20px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg); }
+.loop li:not(:last-child)::after { content: "→"; position: absolute; right: -22px; top: 50%; translate: 0 -50%; color: var(--accent-text); font-weight: 700; }
+.loop-back { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+.loop-back svg { flex: none; color: var(--accent-text); }
+.extend-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; margin-top: 40px; }
+.extend-side { display: grid; gap: 16px; }
+.extend-term { margin: 4px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: #131209; color: #f3f4f5; font-family: ui-monospace, Menlo, monospace; font-size: 0.8125rem; line-height: 1.375rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.extend-list li { padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.extend-next-title { margin-top: 48px; }
+.extend .traps + p { margin-top: 8px; }
+@media (max-width: 960px) { .loop, .extend-grid { grid-template-columns: 1fr; } .loop { gap: 24px; } .loop li:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -24px; translate: 50% 0; } }
+
+/* AI search: a beginner's question path */
+.learn { display: grid; gap: 12px; margin-top: 64px; }
+.learn-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-block: 12px; }
+.learn-steps h4 { margin-top: 0; padding-right: 40px; }
+.learn-question { display: flex; gap: 8px; margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line); text-wrap: pretty; }
+.learn-question svg { flex: none; margin-top: 3px; color: var(--accent-text); }
+@media (max-width: 1199px) { .learn-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .learn-steps { grid-template-columns: 1fr; } }
 @media (max-width: 960px) { .use-steps, .ai-chips, .upstream { grid-template-columns: 1fr; } .upstream { padding: 24px; } }
 @media (max-width: 600px) { .stack-grid { grid-template-columns: 1fr; } .use-step { padding: 20px; } .use-step .craft-no { top: 20px; right: 20px; } }
 
@@ -530,6 +590,7 @@ button { font-family: inherit; }
 }
 .search-panel[hidden] { display: none; }
 .search-panel .zoom { border-radius: var(--r-lg); box-shadow: var(--gloss); }
+.search-panel .zoom-hint { right: auto; left: 12px; }
 .search-example { display: grid; gap: 16px; padding-block: 8px; }
 .search-question {
   display: flex;
@@ -732,11 +793,17 @@ details.limits[open] summary svg { transform: rotate(180deg); }
 
 /* Service intro video (click-to-load YouTube) */
 .video .head { margin-bottom: 40px; }
+.video-grid { display: grid; gap: 48px 32px; }
+@media (min-width: 1024px) { .video-grid { grid-template-columns: 1fr 1fr; } }
+.video-item { min-width: 0; }
+.video-name { margin: 20px 0 0; font-size: 1.375rem; font-weight: 700; letter-spacing: -0.02em; }
+.video-name .caption { margin-left: 6px; font-weight: 500; opacity: 0.72; }
+.video-text { margin: 8px 0 0; line-height: 1.65; }
 .video-frame { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-xl); overflow: hidden; border: 1px solid var(--line); background: #131209; box-shadow: var(--shadow), var(--gloss); }
 .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .video-poster { position: absolute; inset: 0; padding: 0; border: 0; background: none; cursor: pointer; display: block; width: 100%; }
 .video-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.video-play { position: absolute; left: 50%; top: 50%; width: 88px; height: 88px; margin: -44px 0 0 -44px; border-radius: 9999px; display: grid; place-items: center;
+.video-play { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 9999px; display: grid; place-items: center;
   background: var(--accent); color: #fff; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45), 0 0 0 6px rgba(255, 255, 255, 0.16); transition: transform 160ms ease; }
 .video-play svg { margin-left: 4px; }
 .video-len { position: absolute; right: 16px; bottom: 14px; padding: 2px 10px; border-radius: 6px; background: rgba(0, 0, 0, 0.75); color: #fff; font-weight: 700; }

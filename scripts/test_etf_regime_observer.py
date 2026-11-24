@@ -334,17 +334,23 @@ class ObserverTest(unittest.TestCase):
                                  'outside_session')
             self.assertEqual(len(observations), 2)  # kept observing after the STOP appeared
 
-    def test_watch_preopen_stop_exits_without_fetching(self):
-        now = datetime(2026, 11, 16, 9, 9, 50, tzinfo=KST)
+    def test_watch_survives_a_runner_restart_while_waiting_for_ten_past_nine(self):
+        """11-24 09:07: the shared runner's STOP-restart fell in the 09:00~09:10 wait and ended the observer until 09:58."""
+        now = datetime(2026, 11, 24, 9, 6, 40, tzinfo=KST)
         _, days = fixture(now)
         with tempfile.TemporaryDirectory() as td:
-            root = Path(td); current = [now]; reader = Reader(now, days)
+            root = Path(td); current = [now]; observations = []
             def sleep(seconds):
-                (root / 'STOP').touch()
                 current[0] += timedelta(seconds=seconds)
-            self.assertEqual(run(root, reader, watch=True, clock=lambda: current[0], sleeper=sleep), 'stopped')
-            self.assertFalse(reader.calls)
-            self.assertFalse((root / 'regime-observation.json').exists())
+                (root / 'STOP').touch() if current[0].minute < 8 else (root / 'STOP').unlink(missing_ok=True)
+                if observations:
+                    current[0] = current[0].replace(hour=15, minute=0)
+            def fake_observe(reader, path, clock, sleeper, daily_cache=None):
+                observations.append(clock())
+                return {'time': clock().isoformat(), 'status': 'ready', 'symbols': {}}
+            with patch('etf_regime_observer.observe', side_effect=fake_observe):
+                self.assertEqual(run(root, Reader(now, days), watch=True, clock=lambda: current[0], sleeper=sleep), 'outside_session')
+            self.assertEqual([t.strftime('%H:%M') for t in observations], ['09:10'])
 
     def test_watch_before_nine_waits_for_the_bell(self):  # user 2026-11-20: started 08:55, ready at 09:00
         now = datetime(2026, 11, 16, 8, 59, tzinfo=KST)
@@ -354,7 +360,7 @@ class ObserverTest(unittest.TestCase):
             def sleep(seconds):
                 slept.append(seconds); current[0] += timedelta(seconds=seconds)
                 if current[0] >= now.replace(hour=9, minute=0):
-                    (Path(td) / 'STOP').write_text('')
+                    current[0] = now.replace(hour=15, minute=0)
             run(Path(td), Reader(now, days), watch=True, clock=lambda: current[0], sleeper=sleep)
             self.assertEqual(slept[:2], [30, 30])  # waited the minute before the open, in 30-second steps
 

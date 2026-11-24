@@ -174,3 +174,59 @@ def test_switching_to_the_method_warns_that_held_etfs_are_rebalanced():
     assert planned['NDX'] < 0  # a book that holds the risk ETF sells part of it at the first check
     note = Y.switch_note(None)
     assert '나스닥100' in note and '70 : 30' in note and '팔' in note
+
+
+# ---- 저수지 현금 → 저수지 ETF (user 2026-11-24). The next step's money stays cash: NH's 주문가능금액 does not count the
+# same-day sale of an older holding (11-24, live-1: 005930 sold, 1,322,755 before and after), so the guard would refuse the step
+
+PARK = Y.clean({'park': True})
+
+
+def test_parking_is_off_unless_set_and_needs_the_reservoir_price():
+    assert Y.clean({})['park'] is False and Y.clean({'park': 1})['park'] is False
+    assert Y.plan(CFG, {}, ATH(-0.14), {}, 500_000, '2026-11-25', res_price=58_000)[0] == {}
+    assert Y.plan(PARK, {}, ATH(-0.14), {}, 500_000, '2026-11-25')[0] == {}
+
+
+def test_what_the_next_step_does_not_need_goes_into_the_reservoir_etf():
+    planned, _, notes = Y.plan(PARK, {}, ATH(-0.14), {}, 500_000, '2026-11-25', res_price=58_000)
+    assert planned == {'RES': pytest.approx(300_000)} and any('다음 단계 몫 200,000원은 현금' in n for n in notes)
+    # held already: the target counts cash and ETF together, and nothing moves for less than a share
+    assert Y.plan(PARK, {}, ATH(-0.14), {'RES': 290_000}, 210_000, '2026-11-26', res_price=58_000)[0] == {}
+    assert Y.plan(PARK, {}, {}, {}, 500_000, '2026-11-25', res_price=58_000)[0] == {}  # no drawdown known: no move
+
+
+def test_the_step_day_buys_with_the_cash_kept_for_it_and_parks_nothing():
+    planned, state, _ = Y.plan(PARK, {}, ATH(-0.21), {'RES': 290_000}, 210_000, '2026-12-01', res_price=58_000)
+    assert planned == {'NDX': pytest.approx(140_000), 'NDXMIX': pytest.approx(60_000)}  # no RES sale needed
+    # the next day the second step's 200,000 is made cash again ahead of time, in whole shares rounded up
+    held = {'NDX': 140_000, 'NDXMIX': 60_000, 'RES': 290_000}
+    planned, _, _ = Y.plan(PARK, state, ATH(-0.22), held, 10_000, '2026-12-02', res_price=58_000)
+    assert planned == {'RES': -58_000 * 4}  # 190,000 short → 4 shares
+
+
+def test_after_the_last_step_everything_left_is_parked_and_a_short_step_sells_whole_shares_up():
+    done = {'ndx': {'used': [-0.20, -0.30, -0.40], 'base': 500_000, 'rebalanced': '2026-12'}}
+    planned, _, _ = Y.plan(PARK, done, ATH(-0.41), {'NDX': 70_000, 'NDXMIX': 30_000}, 100_000, '2026-12-03', res_price=58_000)
+    assert planned == {'RES': pytest.approx(100_000)}
+    planned, _, _ = Y.plan(PARK, {}, ATH(-0.31), {'RES': 290_000}, 210_000, '2026-12-01', res_price=58_000)  # a gap through two steps
+    assert planned['RES'] == -58_000 * 4 and sum(v for v in planned.values() if v > 0) == pytest.approx(400_000)
+
+
+def test_planning_a_step_never_marks_it_used_in_the_state_it_was_given():
+    # 2026-11-24 rehearsal: the caller's 'used' list was appended to, so a step none of whose orders went out was lost
+    given = {'ndx': {'used': [], 'base': None, 'rebalanced': '2026-11'}}
+    _, new, _ = Y.plan(CFG, given, ATH(-0.21), {}, 500_000, '2026-12-01')
+    assert new['ndx']['used'] == [-0.20] and given == {'ndx': {'used': [], 'base': None, 'rebalanced': '2026-11'}}
+
+
+def test_only_a_longterm_book_set_to_the_method_ever_has_a_reservoir():
+    # user 2026-11-24: never on a Jev account (실계좌 1)
+    from pathlib import Path
+    import vibe_longterm as L
+    settings = {'books': {'live-2': L.clean_book({'strategy': 'yeo_method', 'yeo': {'park': True}}), 'other': L.clean_book({'strategy': 'engine', 'yeo': {'park': True}})}}
+    assert L.yeo_settings(settings, 'live-2')['park'] and L.yeo_settings(settings, 'other') is None and L.yeo_settings(settings, 'live-1') is None
+    here = Path(__file__).parent
+    for name in ('nh_live_follow.py', 'nh_paper_isolated.py', 'nh_live_shadow.py', 'nh_guarded_live.py'):
+        text = (here / name).read_text(encoding='utf-8')
+        assert 'yeo_method' not in text and 'yeo_orders' not in text, name

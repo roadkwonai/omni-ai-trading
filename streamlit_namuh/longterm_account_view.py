@@ -368,7 +368,7 @@ def yeo_instruments(cfg, res=None):
                          '기준 지수': f'{Y.INDEX[index][3]} 전고점 대비 낙폭 (단계: {when})', '저수지 몫': f'{share:.0%}'})
     code = L.code_of(Y.RESERVOIR, res)
     rows.append({'역할': '저수지(대기)', '종목': L.RESERVOIRS.get(code, L.asset_name(Y.RESERVOIR)), '코드': code, '비율': '—',
-                 '기준 지수': '단계 전까지 현금·저수지 ETF로 대기', '저수지 몫': '—'})
+                 '기준 지수': '다음 단계 몫은 현금, 나머지는 저수지 ETF로 대기' if cfg['park'] else '단계 전까지 현금으로 대기(저수지 ETF를 사지 않음)', '저수지 몫': '—'})
     return rows
 
 
@@ -397,7 +397,12 @@ def yeo_panel(key, prefix, root, saved, capital=None):
                                           '저수지 사용(%)': st.column_config.NumberColumn(min_value=0, max_value=100, step=1)})
     rows = [[r['낙폭(%)'] / 100, r['저수지 사용(%)'] / 100] for r in steps.to_dict('records')
             if pd.notna(r['낙폭(%)']) and pd.notna(r['저수지 사용(%)'])]
-    cfg = Y.clean({**saved, 'market': market, 'us_index': us, 'risk': risk / 100, 'band': band / 100, 'steps': rows})
+    park = st.toggle('다음 단계에 쓰지 않는 저수지 현금을 저수지 ETF로', value=saved['park'], key=f'{p}_park',
+                     help='다음 단계 몫(예: 1단계 40%)은 늘 현금으로 남기고, 그보다 많은 현금만 저수지 ETF를 삽니다. 단계를 쓰고 나면 그다음 단계 몫을 '
+                          '미리 팔아 현금으로 만듭니다. 전날 산 ETF를 판 돈은 그날 주문가능금액에 잡히지 않아 단계 당일에 팔면 매수가 막히기 때문입니다. '
+                          '하루에 두 단계를 건너뛰면 두 번째 몫은 매도 대금이 들어온 뒤(약 2거래일)에 삽니다.'
+                          + ('' if key == 'actual' else ' 실주문이 켜져 있으면 실제 주문이 나갑니다.'))
+    cfg = Y.clean({**saved, 'market': market, 'us_index': us, 'risk': risk / 100, 'band': band / 100, 'steps': rows, 'park': park})
     st.markdown('**이 설정으로 사는 종목** :gray[· 단계가 오면 저수지 돈을 위험 : 안전 비율로 나눠 삽니다]')
     import vibe_longterm_view as VV
     held_now, cash_now = VV.holdings(root) if key == 'actual' else ({}, None)
@@ -423,7 +428,7 @@ def yeo_panel(key, prefix, root, saved, capital=None):
         invested = 0
         reservoir_base = max(0, (cash_now if cash_now is not None else L.CAPITAL) - waiting) + res_qty * res_price
     else:
-        invested = info.get('invested') or 0
+        invested = (info.get('invested') or 0) - round(((info.get('weights') or {}).get('RES') or 0) * (info.get('nav') or 0))  # the reservoir ETF is reservoir
         reservoir_base = max(0, (capital or 0) - invested)
     ystate = ((today.get('book') if key != 'actual' else L.read_state(root, ('book:actual',)).get('book:actual')) or {}).get('yeo') or {}
     lines = []

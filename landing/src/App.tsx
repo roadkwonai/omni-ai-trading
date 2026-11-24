@@ -9,8 +9,8 @@ import {
 } from '@phosphor-icons/react'
 import {
   doc, FAQ, FEATURES, LIMITS, NAV, PROMPT, REPO, SAFETY_STAGES, SCREENS, START, STEPS, TAGLINE, VERSION,
-  AI_LOOP, AI_PAID, AI_SEARCH_EXAMPLES, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
-  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_FLOW, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, RETIREMENT_POVERTY, TRAPS, WHY_CASES, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEO,
+  AI_LOOP, AI_PAID, AI_SEARCH_EXAMPLES, ASK_RULES, ASK_SCENES, ASK_WAYS, DECISIONS, EXTEND_CHECK, EXTEND_MOVE, EXTEND_NEXT, EXTEND_STEPS, FIRST_BUSINESS, FIX_CASE, HOLDING_LOSS, HORIZONS, LEARN_STEPS, SEARCH_STEPS, SEQUENCE, ARCH_LAYERS, CHAT, DAILY, DCA_AXES, DCA_PROFILES, DISCLAIMER_FULL, DISCLAIMER_SHORT, HIGHLIGHTS, INTEGRATIONS,
+  JEV_INPUTS, JEV_TRUST, JEV_USES, LONGTERM_FLOW, LONGTERM_POINTS, MASTERS, PILLARS, REGIMES, RETIREMENT_POVERTY, TRAPS, WHY_CASES, WHY_STATS, BUY_CRAFT, SELL_ART, LIFECYCLE, LIFECYCLE_EXITS, REGIME_PLAYS, STYLES, GROW, DATA_JSON, DATA_SQLITE, CALIBRATION, USE_STEPS, SCHEDULE_CHIPS, AI_SKILLS, UPSTREAM, STACK, VIDEOS,
 } from './content'
 import { useNavState, useReveal, useTaglineWords } from './motion'
 // Charts load in their own chunk; the placeholder keeps the height so nothing jumps.
@@ -18,7 +18,7 @@ const ScheduleChart = lazy(() => import('./Charts').then((m) => ({ default: m.Sc
 const chart = (el: React.ReactNode, h: number) => <Suspense fallback={<div className="chart-slot" style={{ height: h }} />}>{el}</Suspense>
 
 const ICONS = { TrendDown, Bank, Plant, Notebook, BellRinging, ListChecks, Scales, Stack, ShieldCheck, ArrowsClockwise, ChatsCircle, LockKey,
-  Lightning, Compass, PiggyBank, ClipboardText, PlugsConnected, Download, CalendarCheck, Robot, Monitor } as const
+  Lightning, Compass, PiggyBank, ClipboardText, PlugsConnected, Download, CalendarCheck, Robot, Monitor, MagnifyingGlassPlus } as const
 const img = (name: string) => `./img/${name}.webp`
 const shot = (id: string) => `./img/screens/${id}.webp`
 const css = (vars: Record<string, string | number>) => vars as React.CSSProperties
@@ -193,45 +193,65 @@ const mmss = (t: number) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, 
 
 // Click-to-load: the YouTube iframe (and its cookies/scripts) loads only after the visitor presses play.
 function Video() {
-  const [play, setPlay] = useState(false)
-  const [start, setStart] = useState(0)
-  const go = (t: number) => { setStart(t); setPlay(true) }
+  const [playing, setPlaying] = useState<{ id: string; start: number } | null>(null) // one video at a time
   return (
     <section id="video" className="section video" aria-labelledby="video-title">
       <div className="container">
         <div className="head">
-          <p className="kicker">서비스 소개 영상 · {VIDEO.length}</p>
+          <p className="kicker">서비스 소개 영상 {VIDEOS.length}편</p>
           <h2 id="video-title" className="heading-2">실제 화면으로 보는 <span className="accent-text">Omni AI Trading</span></h2>
-          <p className="lead">실제 대시보드에서 장중 매매와 장기투자가 어떻게 다른지 보여 드립니다. 주문을 막는 조건과 장 마감 뒤 남는 기록도 볼 수 있습니다. 실계좌 금액은 가렸습니다.</p>
+          <p className="lead">노후를 위한 장기투자와 장중 트레이딩을 나눠 실제 대시보드로 보여 드립니다.</p>
         </div>
-        <div className="video-frame" data-reveal>
-          {play ? (
-            <iframe src={`https://www.youtube-nocookie.com/embed/${VIDEO.id}?autoplay=1&rel=0&start=${start}`}
-              title="Omni AI Trading 서비스 소개 영상" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-              allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
-          ) : (
-            <button type="button" className="video-poster" onClick={() => go(0)} aria-label={`서비스 소개 영상 재생 (${VIDEO.length})`}>
-              <img src="./img/video-thumb.webp" width="1280" height="720" loading="lazy"
-                alt="영상 썸네일. Jev로 하는 단기 매매와 투자 거장의 원칙에 따른 장기투자를 소개합니다." />
-              <span className="video-play" aria-hidden><Play size={34} weight="fill" /></span>
-              <span className="video-len caption" aria-hidden>{VIDEO.length.replace('분 ', ':').replace('초', '')}</span>
-            </button>
-          )}
-        </div>
-        <ol className="video-chapters">
-          {VIDEO.chapters.map((c) => (
-            <li key={c.t}>
-              <button type="button" className="chip-btn small" onClick={() => go(c.t)}>
-                <span className="video-t">{mmss(c.t)}</span>{c.label}
-              </button>
-            </li>
+        <div className="video-grid">
+          {VIDEOS.map((v) => (
+            <article key={v.id} className="video-item" data-reveal>
+              <div className="video-frame">
+                {playing?.id === v.id ? (
+                  <iframe src={`https://www.youtube-nocookie.com/embed/${v.id}?autoplay=1&rel=0&start=${playing.start}`}
+                    title={`Omni AI Trading 소개 영상 · ${v.title}`} allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+                ) : (
+                  <button type="button" className="video-poster" onClick={() => setPlaying({ id: v.id, start: 0 })} aria-label={`${v.title} 영상 재생 (${v.length})`}>
+                    <img src={v.thumb} width="1280" height="720" loading="lazy" alt={v.alt} />
+                    <span className="video-play" aria-hidden><Play size={26} weight="fill" /></span>
+                    <span className="video-len caption" aria-hidden>{v.length.replace(/(\d+)분 (\d+)초/, (_, m, s) => `${m}:${s.padStart(2, '0')}`)}</span>
+                  </button>
+                )}
+              </div>
+              <h3 className="video-name">{v.title} <span className="caption">{v.length}</span></h3>
+              <p className="video-text">{v.text}</p>
+              <ol className="video-chapters">
+                {v.chapters.map((c) => (
+                  <li key={c.t}>
+                    <button type="button" className="chip-btn small" onClick={() => setPlaying({ id: v.id, start: c.t })}>
+                      <span className="video-t">{mmss(c.t)}</span>{c.label}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <p className="more-row" style={{ marginTop: 20 }}>
+                <a className="more button-md" href={v.url} target="_blank" rel="noopener noreferrer" aria-label={`${v.title} YouTube에서 보기`}>YouTube에서 보기 <ArrowUpRight size={16} aria-hidden /></a>
+              </p>
+            </article>
           ))}
-        </ol>
-        <p className="more-row" style={{ marginTop: 24 }}>
-          <a className="more button-md" href={VIDEO.url} target="_blank" rel="noopener noreferrer">YouTube에서 보기 <ArrowUpRight size={16} aria-hidden /></a>
-        </p>
+        </div>
       </div>
     </section>
+  )
+}
+
+// Horizontal bars as plain HTML: the value is always written next to the bar, so the bar itself is decoration.
+function Bars({ rows, max }: { rows: { label: string; value: number; text: string; muted?: boolean }[]; max: number }) {
+  return (
+    <ul className="bars">
+      {rows.map((r) => (
+        <li key={r.label} data-muted={r.muted || undefined}>
+          <span>{r.label}</span>
+          <strong className="tabular">{r.text}</strong>
+          <div className="poverty-track" aria-hidden="true"><span style={{ width: `${r.value / max * 100}%` }} /></div>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -247,18 +267,46 @@ function Why() {
             더 여유로운 노후를 준비하도록 돕습니다.
           </p>
         </div>
+        <div className="decisions-head">
+          <h3 className="heading-3">한 번 내리면 되돌리기 어려운 결정</h3>
+          <p className="body muted">퇴직할 무렵에는 큰돈이 걸린 결정이 겹칩니다. 잘못 고른 사람을 탓하기에 앞서, <strong className="em">미리 확인하고 작게 시험하고 돈을 나눠 둘 시간과 도구</strong>가 있어야 합니다.</p>
+        </div>
+        <ul className="decisions">
+          {DECISIONS.map((d) => (
+            <li key={d.title} className="why-stat">
+              <p className="kicker">{d.kind}</p>
+              <h4 className="heading-4">{d.title}</h4>
+              <strong className="why-num tabular">{d.num}</strong>
+              <p className="small muted">{d.body}</p>
+              <a className="caption why-src" href={d.href} target="_blank" rel="noopener noreferrer">{d.source} <ArrowUpRight size={12} aria-hidden /></a>
+              <p className="small trap-fix"><ShieldCheck size={16} aria-hidden /><span><strong className="em">{d.does}</strong> {d.not}</span></p>
+            </li>
+          ))}
+        </ul>
+        <div className="retirement-grid">
+          <img className="retirement-photo" src={img('pause-and-check')} alt="휴대전화를 내려놓고 노트를 보며 함께 확인하는 어머니와 딸" width="1120" height="840" loading="lazy" />
+          <figure className="why-stat poverty-chart" aria-labelledby="business-title">
+            <figcaption id="business-title" className="heading-3">60대의 첫 창업, 그만둔 뒤가 더 어렵습니다</figcaption>
+            <dl className="facts">
+              {FIRST_BUSINESS.map((f) => <div key={f.num}><dt className="why-num tabular">{f.num}</dt><dd className="small muted">{f.label}</dd></div>)}
+            </dl>
+            <p className="small">그만둔 뒤는 달랐습니다. 20~50대는 절반 넘게 상용직 일자리를 얻었지만 <strong className="em">60대는 상당수가 임시·일용직에 그치거나 일을 그만뒀습니다.</strong></p>
+            <p className="caption muted">이 자료는 창업 자금이 퇴직금이었는지 조사하지 않았습니다. 앞의 두 값은 2022년 조사 결과이고, 31%와 이후 일자리는 한국노동패널조사 결과입니다.</p>
+            <a className="caption why-src" href={DECISIONS[1].href} target="_blank" rel="noopener noreferrer">{DECISIONS[1].source} <ArrowUpRight size={12} aria-hidden /></a>
+          </figure>
+        </div>
         <div className="retirement-grid">
           <figure className="why-stat poverty-chart" aria-labelledby="poverty-title">
-            <figcaption id="poverty-title" className="heading-3">66세 이상 상대적 소득 빈곤율</figcaption>
-            <ul className="poverty-bars">
-              {RETIREMENT_POVERTY.rows.map(({ label, rate }) => (
-                <li key={label}>
-                  <span>{label}</span>
-                  <strong className="tabular">{rate.toFixed(1)}%</strong>
-                  <div className="poverty-track" aria-hidden="true"><span style={{ width: `${rate / Math.max(...RETIREMENT_POVERTY.scale) * 100}%` }} /></div>
-                </li>
-              ))}
-            </ul>
+            <figcaption id="poverty-title" className="heading-3">고령층의 상대적 소득 빈곤율 <span className="small muted nowrap">2022년</span></figcaption>
+            {RETIREMENT_POVERTY.groups.map((g) => (
+              <div key={g.label} className="poverty-group">
+                <p className="title-3">{g.label}</p>
+                <Bars max={Math.max(...RETIREMENT_POVERTY.scale)} rows={[
+                  { label: '한국', value: g.korea, text: `${g.korea.toFixed(1)}%` },
+                  { label: 'OECD 평균', value: g.oecd, text: `${g.oecd.toFixed(1)}%`, muted: true },
+                ]} />
+              </div>
+            ))}
             <div className="poverty-scale caption muted tabular" aria-hidden="true">
               {RETIREMENT_POVERTY.scale.map((tick) => <span key={tick}>{tick}%</span>)}
             </div>
@@ -287,7 +335,7 @@ function Why() {
             </li>
           ))}
         </ul>
-        <ul className="why-cases">
+        <ul className="why-cases single">
           {WHY_CASES.map((item) => (
             <li key={item.title} className="why-stat">
               <p className="kicker">{item.kind}</p>
@@ -532,6 +580,38 @@ function Longterm() {
             ))}
           </ol>
         </figure>
+        <div className="horizon">
+          <img className="horizon-art" src={img('mascot-envelopes')} alt="" width="640" height="724" loading="lazy" />
+          <div>
+            <h3 className="heading-3">언제 쓸 돈인지부터 나눕니다</h3>
+            <ol className="horizons">
+              {HORIZONS.map((h) => (
+                <li key={h.when} data-on={h.on || undefined}>
+                  <strong className="title-1">{h.when}</strong>
+                  <span className="small muted">{h.where}</span>
+                  <span className="small">{rich(h.omni)}</span>
+                </li>
+              ))}
+            </ol>
+            <p className="caption muted">기간은 설명을 위한 예시이며 개인 사정에 따라 다릅니다.</p>
+          </div>
+        </div>
+        <div className="risk-charts">
+          <figure className="why-stat" aria-labelledby="holding-title">
+            <figcaption id="holding-title" className="heading-4">오래 보유할수록 손실로 끝난 구간이 줄었습니다</figcaption>
+            <Bars max={20} rows={HOLDING_LOSS.map((r) => ({ ...r, text: `${r.value}%`, muted: r.value === 0 }))} />
+            <p className="small"><strong className="em">10년을 보유해도 손실이 난 구간이 있었습니다.</strong> 가장 나빴던 10년은 −29.5%, 월말 기준 최대 낙폭은 −50.9%였습니다.</p>
+            <p className="caption muted">S&amp;P 500(배당 포함, 달러) 1988년 1월~2026년 10월 월말 값으로 직접 계산했습니다. 구간이 겹쳐 독립된 표본은 훨씬 적고, 환율·세금·물가는 반영하지 않았습니다. 앞으로의 수익을 보장하지 않습니다.</p>
+          </figure>
+          <figure className="why-stat" aria-labelledby="sequence-title">
+            <figcaption id="sequence-title" className="heading-4">은퇴 직후에 하락하면 타격이 더 큽니다</figcaption>
+            <Bars max={30000} rows={SEQUENCE.map((r, i) => ({ ...r, muted: i > 0 }))} />
+            <p className="small">3억 원에서 해마다 1,500만 원을 꺼내 쓸 때 20년 뒤 남는 돈입니다. 두 경우의 <strong className="em">연평균 수익률은 3.96%로 같고 순서만 다릅니다.</strong> 그래서 곧 쓸 돈은 투자하지 않습니다.</p>
+            <p className="small">Vanguard는 은퇴 초기에 수익률이 나빴던 사람이 생전에 자산을 다 쓸 가능성이 <strong className="em">31% 더 높다</strong>고 추정했습니다(2020년, 모형 추정치).</p>
+            <a className="caption why-src" href="https://www.vanguard.co.uk/content/dam/intl/europe/documents/en/whitepapers/safeguarding-retirement-bear-market.pdf" target="_blank" rel="noopener noreferrer">Vanguard 보고서 <ArrowUpRight size={12} aria-hidden /></a>
+            <p className="caption muted">실제 시장 자료가 아니라 설명을 위한 가정입니다. 하락한 3년은 −15·−10·−10%, 나머지 17년은 해마다 7%로 두었고, 돈은 연초에 꺼냅니다.</p>
+          </figure>
+        </div>
         <div className="regimes" role="group" aria-label="시장 국면 선택. 위험이 큰 순서입니다.">
           {REGIMES.map((r, i) => (
             <button key={r.name} type="button" className="regime" aria-pressed={i === pick} onClick={() => setPick(i)} style={css({ '--heat': HEAT[i] })}>
@@ -749,72 +829,115 @@ function AiOps() {
   )
 }
 
+type Scene = { id: string; label: string; screen: string; height?: number; title: string; question: string; body: string; detail: string; note?: string; alt: string }
+
+// Screens of the AI search in tabs; each opens larger.
+function SearchDemo({ title, items }: { title: string; items: Scene[] }) {
+  return (
+    <div className="search-demo" data-reveal>
+      <Tabs defaultValue={items[0].id}>
+        <div className="search-demo-head">
+          <h3 className="heading-3">{title}</h3>
+          <TabsList aria-label={`${title} 고르기`} className="tab-chips">
+            <TabsIndicator className="tab-thumb" />
+            {items.map((item) => <TabsTab key={item.id} value={item.id} className="tab-chip">{item.label}</TabsTab>)}
+          </TabsList>
+        </div>
+        <div className="panels search-panels">
+          {items.map((item) => {
+            const note = item.note ?? '실제 대시보드 화면에 예시 데이터를 넣었습니다.'
+            return (
+              <TabsPanel key={item.id} value={item.id} className="search-panel">
+                <figure className="screen-panel">
+                  <Dialog>
+                    <DialogTrigger className="zoom" aria-label={item.title + ' 화면 크게 보기'}>
+                      <img src={shot(item.screen)} width="1440" height={item.height ?? 1068} loading="lazy" alt={item.alt} />
+                      <span className="zoom-hint"><MagnifyingGlassPlus size={14} aria-hidden /> 크게 보기</span>
+                    </DialogTrigger>
+                    <DialogBackdrop className="backdrop" />
+                    <DialogContent className="lightbox">
+                      <div className="lightbox-head">
+                        <DialogTitle className="title-1">{item.title}</DialogTitle>
+                        <DialogClose className="icon-btn" aria-label="닫기"><X size={18} aria-hidden /></DialogClose>
+                      </div>
+                      <DialogDescription className="small muted">{note}</DialogDescription>
+                      <img src={shot(item.screen)} width="1440" height={item.height ?? 1068} alt={item.alt} />
+                    </DialogContent>
+                  </Dialog>
+                  <figcaption className="caption muted">{note}</figcaption>
+                </figure>
+                <div className="search-example">
+                  <h4 className="heading-4">{item.title}</h4>
+                  <blockquote className="search-question title-2">
+                    <ChatsCircle size={20} aria-hidden />
+                    <p>{item.question}</p>
+                  </blockquote>
+                  <p className="body muted">{rich(item.body)}</p>
+                  <p className="small muted">{item.detail}</p>
+                </div>
+              </TabsPanel>
+            )
+          })}
+        </div>
+      </Tabs>
+    </div>
+  )
+}
+
 function AiSearch() {
   return (
     <section id="ai-search" className="section search-section" aria-labelledby="ai-search-title">
       <div className="container">
         <div className="search-intro">
           <div className="head">
-            <p className="kicker">AI 검색</p>
-            <h2 id="ai-search-title" className="heading-2">뉴스를 읽고<br />내 계좌를 확인합니다</h2>
-            <p className="lead">대시보드 안에서 기사와 공시 원문을 찾고, 뉴스의 시장 영향이나 내 보유 종목을 채팅으로 물어보세요.</p>
+            <p className="kicker">AI 검색 · Liner API</p>
+            <h2 id="ai-search-title" className="heading-2">궁금할 때 바로 묻고<br />투자 지식을 쌓아 가세요</h2>
+            <p className="lead">투자가 처음이어도 괜찮습니다. 시세나 매매 기록을 보다가 모르는 말이 나오면 <strong className="em">글자를 드래그해 그 자리에서 물어보세요.</strong>{' '}오른쪽 아래 작은 채팅창이 열려 보던 화면을 떠나지 않아도 됩니다. 기사와 공시 원문, 뉴스의 시장 영향, 내 보유 종목도 같은 창에서 확인합니다.</p>
             <div className="search-actions">
               <a className="btn btn-primary button-md" href={doc('ai-search.md')}>
                 AI 검색 사용 가이드 <ArrowUpRight size={16} aria-hidden />
               </a>
-              <p className="small muted"><code>LINER_API_KEY</code>를 설정하면 대시보드 상단에 AI 검색이 표시됩니다.</p>
+              <p className="small muted"><code>LINER_API_KEY</code>를 설정하면 상단의 AI 검색과 오른쪽 아래 AI에게 묻기 버튼이 표시됩니다.</p>
             </div>
           </div>
           <div className="search-art" aria-hidden>
             <img src={img('mascot-ai-search')} alt="" width="640" height="640" loading="lazy" />
           </div>
         </div>
-        <div className="search-demo" data-reveal>
-          <Tabs defaultValue={AI_SEARCH_EXAMPLES[0].id}>
-            <div className="search-demo-head">
-              <h3 className="heading-3">대시보드 사용 예시</h3>
-              <TabsList aria-label="AI 검색 예시 고르기" className="tab-chips">
-                <TabsIndicator className="tab-thumb" />
-                {AI_SEARCH_EXAMPLES.map((example) => (
-                  <TabsTab key={example.id} value={example.id} className="tab-chip">{example.label}</TabsTab>
-                ))}
-              </TabsList>
-            </div>
-            <div className="panels search-panels">
-              {AI_SEARCH_EXAMPLES.map((example) => (
-                <TabsPanel key={example.id} value={example.id} className="search-panel">
-                  <figure className="screen-panel">
-                    <Dialog>
-                      <DialogTrigger className="zoom" aria-label={example.label + ' 화면 크게 보기'}>
-                        <img src={shot(example.screen)} width="1440" height="1068" loading="lazy" alt={example.alt} />
-                        <span className="zoom-hint"><MagnifyingGlassPlus size={14} aria-hidden /> 크게 보기</span>
-                      </DialogTrigger>
-                      <DialogBackdrop className="backdrop" />
-                      <DialogContent className="lightbox">
-                        <div className="lightbox-head">
-                          <DialogTitle className="title-1">{example.label} 예시</DialogTitle>
-                          <DialogClose className="icon-btn" aria-label="닫기"><X size={18} aria-hidden /></DialogClose>
-                        </div>
-                        <DialogDescription className="small muted">테스트 데이터로 만든 예시 화면입니다.</DialogDescription>
-                        <img src={shot(example.screen)} width="1440" height="1068" alt={example.alt} />
-                      </DialogContent>
-                    </Dialog>
-                    <figcaption className="caption muted">실제 대시보드 화면에 예시 데이터를 넣었습니다.</figcaption>
-                  </figure>
-                  <div className="search-example">
-                    <h4 className="heading-4">{example.title}</h4>
-                    <blockquote className="search-question title-2">
-                      <ChatsCircle size={20} aria-hidden />
-                      <p>{example.question}</p>
-                    </blockquote>
-                    <p className="body muted">{example.body}</p>
-                    <p className="small muted">{example.detail}</p>
-                  </div>
-                </TabsPanel>
-              ))}
-            </div>
-          </Tabs>
+        <SearchDemo title="보던 화면에서 바로 묻기" items={ASK_SCENES} />
+        <h3 className="heading-4 ask-title">묻는 방법 네 가지</h3>
+        <ul className="ask-ways">
+          {ASK_WAYS.map((w) => <li key={w.title}><h4 className="title-2">{w.title}</h4><p className="small muted">{w.body}</p></li>)}
+        </ul>
+        <ul className="ask-rules">
+          {ASK_RULES.map((x) => <li key={x.title}><ShieldCheck size={18} aria-hidden /><div><h4 className="title-2">{x.title}</h4><p className="small muted">{rich(x.body)}</p></div></li>)}
+        </ul>
+        <h3 className="heading-4 ask-title">자료를 찾고 확인하는 순서</h3>
+        <ol className="search-steps" aria-label="AI 검색이 하는 일">
+          {SEARCH_STEPS.map((s) => (
+            <li key={s.title}>
+              <span className="who caption" data-liner={s.liner || undefined}>{s.who}</span>
+              <h3 className="title-1">{s.title}</h3>
+              <p className="small muted">{rich(s.body)}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="learn">
+          <h3 className="heading-3">처음이라면 이런 순서로 물어보세요</h3>
+          <p className="muted">추천 질문 약 100개를 서비스 사용법, 투자 기초, 투자 거장, 노후 자금·투자 권유 등 9개 분류로 나눠 두었습니다. 화면에 보이는 추천 태그를 누르면 바로 전송되고, 답변을 읽다가 궁금한 점을 이어서 물을 수 있습니다.</p>
+          <ol className="use-steps learn-steps" data-reveal>
+            {LEARN_STEPS.map((step, i) => (
+              <li key={step.title} className="use-step">
+                <span className="craft-no" aria-hidden>{i + 1}</span>
+                <h4 className="title-1">{step.title}</h4>
+                <p className="small muted">{rich(step.body)}</p>
+                <p className="learn-question small"><ChatsCircle size={16} aria-hidden /><span>{step.question}</span></p>
+              </li>
+            ))}
+          </ol>
+          <p className="small muted">답변은 공부를 돕는 참고 자료입니다. 웹 답변은 출처를 함께 보고, 중요한 내용은 원문에서 확인하세요. 도움이 된 답변은 마크다운으로 복사해 나만의 공부 노트에 모을 수 있습니다.</p>
         </div>
+        <SearchDemo title="넓은 창에서 하는 일" items={AI_SEARCH_EXAMPLES} />
       </div>
     </section>
   )
@@ -850,6 +973,12 @@ function Daily() {
             </section>
           ))}
         </div>
+        <div className="why-stat fix-case">
+          <p className="kicker">{FIX_CASE.kind}</p>
+          <h3 className="heading-4">{FIX_CASE.title}</h3>
+          <p className="small muted">{FIX_CASE.body}</p>
+          <a className="caption why-src" href={FIX_CASE.href} target="_blank" rel="noopener noreferrer">{FIX_CASE.label} <ArrowUpRight size={12} aria-hidden /></a>
+        </div>
         <div className="cta-line">
           <div>
             <img src={img('mascot-journal')} alt="" width="200" height="200" loading="lazy" />
@@ -857,6 +986,56 @@ function Daily() {
           </div>
           <a className="btn btn-ghost button-sm" href="./reports/">보관함 열기 <ArrowRight size={16} aria-hidden /></a>
         </div>
+      </div>
+    </section>
+  )
+}
+
+function Extend() {
+  return (
+    <section id="extend" className="section extend" aria-labelledby="extend-title">
+      <div className="container">
+        <div className="head-split">
+          <div className="head">
+            <p className="kicker">다른 결정에 활용하기</p>
+            <h2 id="extend-title" className="heading-2">투자에서 다듬은 방식을<br />다른 결정에도</h2>
+            <p className="lead">내 투자 데이터는 그대로 두고 <strong className="em">기준을 적고, 근거를 찾고, 사람이 승인하고, 결과를 복기하는 방식</strong>만 가져다 씁니다.</p>
+          </div>
+          <img className="extend-art" src={img('mascot-extend')} alt="" width="840" height="417" loading="lazy" />
+        </div>
+        <ol className="loop" aria-label="다섯 단계를 거쳐 다시 기준으로 돌아옵니다">
+          {EXTEND_STEPS.map((s, i) => (
+            <li key={s.title}>
+              <span className="craft-no" aria-hidden>{i + 1}</span>
+              <h3 className="title-1">{s.title}</h3>
+              <p className="small muted">{s.body}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="loop-back small muted"><ArrowsClockwise size={16} aria-hidden /> 고친 기준으로 1단계부터 다시 시작합니다.</p>
+        <div className="extend-grid">
+          <div className="why-stat">
+            <p className="kicker">실제로 만든 사례</p>
+            <h3 className="heading-4">창업 준비 점검</h3>
+            <p className="small muted">AI 검색 질문 8개로 공공 자료와 손익분기점을 알아보고, 8절로 된 점검표에 생활비와 멈출 기준을 적습니다. 주문과 매매 기록은 쓰지 않습니다.</p>
+            <pre className="extend-term" tabIndex={0} aria-label="가상 점검표를 검사한 결과">{EXTEND_CHECK}</pre>
+            <p className="caption muted">가상 사례에서 세 항목을 일부러 빼고 실제로 검사한 결과입니다. 사업이 잘될지는 판단하지 않습니다.</p>
+            <a className="caption why-src" href={`${doc('ai-search.md')}#창업-준비-점검`}>창업 준비 점검 보기 <ArrowUpRight size={12} aria-hidden /></a>
+          </div>
+          <div className="extend-side">
+            {EXTEND_MOVE.map((m) => (
+              <div key={m.title} className="why-stat">
+                <h3 className="title-1">{m.title}</h3>
+                <ul className="extend-list">{m.items.map((x) => <li key={x} className="small muted">{x}</li>)}</ul>
+              </div>
+            ))}
+          </div>
+        </div>
+        <h3 className="heading-4 extend-next-title">다음으로 넓힐 곳</h3>
+        <ul className="traps">
+          {EXTEND_NEXT.map((n) => <li key={n.title} className="trap"><h4 className="title-2">{n.title}</h4><p className="small muted">{n.body}</p></li>)}
+        </ul>
+        <p className="small muted">다른 조직에 도입한 사례는 아직 없고, 시간을 얼마나 아꼈는지도 측정하지 않았습니다. 같은 일을 직접 할 때와 비교해 측정할 계획입니다.</p>
       </div>
     </section>
   )
@@ -1193,10 +1372,10 @@ export default function App() {
         <span id="top" />
         <Hero />
         <Why />
+        <AiSearch />
         <Video />
         <Principle />
         <AiOps />
-        <AiSearch />
         <Art />
         <Jev />
         <Longterm />
@@ -1204,6 +1383,7 @@ export default function App() {
         <Styles />
         <Data />
         <Daily />
+        <Extend />
         <StackSection />
         <Integrations />
         <Safety />

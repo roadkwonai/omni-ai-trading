@@ -828,8 +828,11 @@ class MCPServerAdapter:
             if not verdict.get('allowed'):
                 raise NHOrderBlocked('Paper loss check: ' + verdict.get('reason', 'unavailable'))
 
-    def _build_client(self) -> AsyncMCPClient:
+    def _build_client(self, init_limit: float | None = None) -> AsyncMCPClient:
         """Create the default FastMCP client from MCP transport config.
+
+        Args:
+            init_limit: Upper bound of the initialization timeout, if any.
 
         Returns:
             Configured async FastMCP client.
@@ -905,6 +908,8 @@ class MCPServerAdapter:
             if self.server_config.init_timeout is not None
             else max(self.server_config.tool_timeout, 30.0)
         )
+        if init_limit is not None:
+            init_timeout = min(init_timeout, init_limit)
         return Client(
             transport,
             name=self.server_name,
@@ -953,8 +958,19 @@ class MCPServerAdapter:
         Raises:
             Exception: Propagates non-transient or exhausted failures.
         """
+        from src.tools import nh_sessions
+        shared = pre_send_check is None and nh_sessions.reusable(
+            self.server_name, self.server_config, remote_name, arguments, self._custom_client_factory)
+
+        def build() -> AsyncMCPClient:  # an NH read gives up a stalled start early; an order keeps its time
+            return self._build_client(nh_sessions.READ_INIT_S) if shared else self._client_factory()
+
         async def _invoke() -> CallToolResult:
-            async with self._client_factory() as client:
+            if shared:
+                result = await nh_sessions.call(self.server_config, build, remote_name, arguments, self.server_config.tool_timeout)
+                if result is not None:
+                    return result
+            async with build() as client:
                 if pre_send_check is not None:
                     _check_nh_pre_send(pre_send_check)
                 return await client.call_tool(

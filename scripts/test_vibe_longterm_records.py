@@ -15,7 +15,7 @@ def rows(root, kind):
 def test_the_morning_decision_keeps_module_impacts_levels_and_the_story_inputs(tmp_path, monkeypatch):
     monkeypatch.setenv('VIBE_TRADING_SETTINGS_HISTORY', str(tmp_path / 'h.sqlite3'))
     monkeypatch.setattr(L, 'story_context', lambda: {'trading_journal': {'days': []}, 'premarket': {'as_of': '2026-11-18T08:20'}})
-    answer = json.dumps({'market_view': '조정', 'sources': ['Reuters · 2026-11-17 · 반도체 수요', {'title': 'IonQ 실적', 'url': 'https://x'}],
+    answer = json.dumps({'market_view': '조정', 'sources': ['Reuters · 2026-11-17 · 반도체 수요', {'title': 'IonQ 실적', 'date': '2026-11-16', 'url': 'https://x'}],
                          'stories': {k: {'status': 'intact', 'tilt': 0, 'reason': 'ok'} for k in L.SATS}})
     now = datetime.combine(DAY, datetime.min.time(), KST).replace(hour=8, minute=45)
     assert L.decide(tmp_path, now, fetch=fake_fetch, ask=lambda text: answer) == 'decided'
@@ -115,3 +115,25 @@ def test_the_virtual_book_deposits_and_buys_n_shares_of_each_chosen_etf_and_the_
     assert L.close(tmp_path, Read(), now.replace(hour=15, minute=40), execute=True) == 'closed'
     shadow = L.read_state(tmp_path)['shadow:base']['dca']
     assert shadow['contributed_krw'] == __import__('pytest').approx(spent)
+
+
+def test_the_story_keeps_only_dated_sources_of_the_last_30_days():
+    # 2026-11-24: two of three sources were from February and June (user approval: recent sources or '새 근거 없음')
+    from datetime import date
+    today = date(2026, 11, 24)
+    kept, dropped = L.recent_sources(['TrendForce · 2026-11-18 · Chip rules', 'SpaceNexus · 2026-02-14 · Space', 'PwC · 발행일 미확인 · Semis',
+                                      'Future · 2026-12-30 · x', 'Bad · 2026-13-40 · x'], today)
+    assert kept == ['TrendForce · 2026-11-18 · Chip rules'] and len(dropped) == 4
+    assert L.recent_sources([], today) == (['새 근거 없음'], [])
+    assert L.recent_sources(['Old · 2026-01-02 · x'], today)[0] == ['새 근거 없음']
+    prompt = L.story_prompt({}, 'correction', {}, {}, news='[반도체] x')
+    assert '30 days' in prompt and 'no new evidence' in prompt.lower()
+
+
+def test_the_story_record_says_what_was_dropped(monkeypatch):
+    from datetime import datetime
+    answer = json.dumps({'market_view': '', 'sources': ['McKinsey · 2026-04-28 · Quantum', 'Reuters · 2026-11-23 · Chips'],
+                         'stories': {k: {'status': 'watch', 'tilt': 0, 'reason': 'ok'} for k in L.SATS}})
+    stories, _, source = L.story_check({}, 'correction', None, datetime(2026, 11, 24, 8, 45, tzinfo=L.KST), ask=lambda t: answer)
+    assert source == 'llm' and stories['SEMI']['status'] == 'watch'  # the judgement itself is not touched
+    assert L.STORY_SEEN['sources'] == ['Reuters · 2026-11-23 · Chips'] and L.STORY_SEEN['inputs']['old_sources'] == ['McKinsey · 2026-04-28 · Quantum']

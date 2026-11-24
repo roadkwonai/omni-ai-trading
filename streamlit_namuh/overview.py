@@ -282,7 +282,8 @@ def realized_section(items, now):
 
 
 def balance_records(path):
-    """Read usable total-asset observations from the dashboard balance log."""
+    """Read usable total-asset observations from the dashboard balance log (impossible ones skipped, live_fills.plausible)."""
+    from live_fills import plausible
     try:
         lines = Path(path).read_text().splitlines()
     except OSError:
@@ -292,7 +293,7 @@ def balance_records(path):
             row = json.loads(line)
         except ValueError:
             continue
-        if isinstance(row, dict) and type(row.get('total_assets')) in (int, float) and isinstance(row.get('time'), str):
+        if plausible(row) and isinstance(row.get('time'), str):
             yield row
 
 
@@ -478,7 +479,7 @@ def render(runtime, records, states, names, refresh_balances=None):
              'sub': ', '.join(f"{i['label']} {len(i['holdings'])}" for i in items if i['holdings']) or '없음'},
             {'label': '실행기 · 주의', 'value': '확인 중' if '확인 중' in watched.values() else f'{running}/{len(watched)} 실행', 'icon': 'monitor_heart',
              'tone': 'alert' if warnings else 'off' if '확인 중' in watched.values() else 'ok', 'sub': f'주의 {len(warnings)}건' if warnings else '주의 없음',
-             'help': '실행기·판단기 중 실행 중인 수(장 밖에는 종료가 정상)와 확인이 필요한 항목 수입니다.'}])
+             'help': '실행기·판단기 중 실행 중인 수(장 밖에는 종료가 정상)와 확인이 필요한 항목 수입니다.'}], ask='summary')
     todays_all = [{**r, '계좌': i['label'], 'kind': i['kind']} for i in items for r in ec.in_period(i['rows'], today)]
     detail = st.columns(5)
     if detail[0].button('자세히 · 모의계좌 실현', key='ov_d_paper', icon=':material/open_in_new:', width='stretch'):

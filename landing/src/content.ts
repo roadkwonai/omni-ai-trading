@@ -1,5 +1,5 @@
 export const REPO = 'https://github.com/roadkwonai/omni-ai-trading'
-export const VERSION = '0.1.5' // the repository VERSION file; scripts/release.py --check compares them
+export const VERSION = '0.1.6' // the repository VERSION file; scripts/release.py --check compares them
 export const doc = (name: string) => `${REPO}/blob/main/docs/${name}`
 export const START = `${REPO}#빠른-시작`
 
@@ -15,26 +15,49 @@ export const DISCLAIMER_FULL = [
 ]
 export const AI_PAID = "이 서비스는 AI 도구와 함께 쓰는 AI 트레이딩 시스템입니다. 설치·운영·리포트 작성에 Claude Code나 Codex 같은 AI 코딩 에이전트가 필요하고, 이를 쓰려면 해당 서비스의 유료 요금제(Claude Pro·Max 또는 ChatGPT Plus·Pro 같은 구독, 또는 API 사용료)가 필요합니다. 매매 판단에 쓰는 Jev·OpenAI API도 각 서비스의 이용 조건과 요금을 따릅니다."
 
-// Service intro video (YouTube, 권로드의 AI실험실 channel). Chapters match the video description.
-export const VIDEO = {
-  id: 'c4FZw6AYRAg',
-  url: 'https://youtu.be/c4FZw6AYRAg',
-  length: '3분 33초',
-  chapters: [
-    { t: 0, label: '왜 망설이면 지는가' },
-    { t: 36, label: '두 엔진 · AI는 의견, 규칙이 주문' },
-    { t: 84, label: 'Jev의 실시간 판단과 매수 조건' },
-    { t: 109, label: '여러 겹의 안전장치' },
-    { t: 138, label: '장기투자 · 여운봉 저수지 매매법' },
-    { t: 165, label: '복기와 리포트' },
-  ],
-}
+// Service intro videos (YouTube, 권로드의 AI실험실 channel). Chapters match the video descriptions.
+export const VIDEOS = [
+  {
+    id: 'JjL6to4mxN4',
+    url: 'https://youtu.be/JjL6to4mxN4',
+    length: '4분 4초',
+    title: '노후·장기투자 편',
+    text: '투자 권유를 받았을 때 AI 검색으로 근거부터 확인하고, 쓸 시점에 따라 돈을 나눠 정한 규칙으로 길게 운용하는 과정을 보여 줍니다. 첫 장면의 문자는 가상의 예시이며 화면은 모의·가상 계좌입니다.',
+    thumb: './img/video-thumb-longterm.webp',
+    alt: '영상 썸네일. 내 노후는 내가 지킨다. AI 검색으로 먼저 확인하고 장기투자는 정한 규칙대로 합니다.',
+    chapters: [
+      { t: 0, label: '도착한 문자' },
+      { t: 56, label: '보내기 전에 묻기' },
+      { t: 88, label: '모르는 말 바로 묻기' },
+      { t: 108, label: '돈부터 나누기' },
+      { t: 131, label: '정한 규칙으로 길게' },
+      { t: 171, label: '폭락 뉴스가 뜬 날' },
+    ],
+  },
+  {
+    id: 'c4FZw6AYRAg',
+    url: 'https://youtu.be/c4FZw6AYRAg',
+    length: '3분 33초',
+    title: 'Jev 트레이딩 편',
+    text: '장중 매매와 장기투자가 어떻게 다른지, 주문을 막는 조건과 장 마감 뒤 남는 기록을 실제 대시보드로 보여 줍니다. 실계좌 금액은 가렸습니다.',
+    thumb: './img/video-thumb.webp',
+    alt: '영상 썸네일. Jev로 하는 단기 매매와 투자 거장의 원칙에 따른 장기투자를 소개합니다.',
+    chapters: [
+      { t: 0, label: '왜 망설이면 지는가' },
+      { t: 36, label: '두 엔진 · AI는 의견, 규칙이 주문' },
+      { t: 84, label: 'Jev의 실시간 판단과 매수 조건' },
+      { t: 109, label: '여러 겹의 안전장치' },
+      { t: 138, label: '장기투자 · 여운봉 저수지 매매법' },
+      { t: 165, label: '복기와 리포트' },
+    ],
+  },
+]
 
 export const NAV = [
   { href: '#why', label: '만든 이유' },
+  { href: '#ai-search', label: 'AI 검색' },
   { href: '#video', label: '소개 영상' },
   { href: '#ai', label: 'AI로 운영' },
-  { href: '#ai-search', label: 'AI 검색' },
   { href: '#art', label: '투자 기법' },
   { href: '#jev', label: 'Jev' },
   { href: '#longterm', label: '장기투자' },
@@ -51,27 +74,45 @@ export const PILLARS = [
   { href: '#dca', icon: 'PiggyBank', label: '적립식 투자', body: '새 적립금으로 ETF를 꾸준히 매수' },
   { href: '#ai', icon: 'ChatsCircle', label: 'AI 에이전트 운영', body: '채팅으로 묻고 맡기기' },
   { href: '#daily', icon: 'ClipboardText', label: '자동 점검과 리포트', body: '장전부터 마감까지 자동 점검' },
-  { href: '#integrations', icon: 'PlugsConnected', label: '연동 서비스', body: '증권사·AI·데이터·알림' },
+  { href: '#ai-search', icon: 'MagnifyingGlassPlus', label: 'AI 검색', body: '보던 화면에서 바로 묻기' },
 ]
 
 export const RETIREMENT_POVERTY = {
   source: 'https://www.oecd.org/en/publications/pensions-at-a-glance-2025_e40274c1-en/full-report/old-age-income-poverty_3cd946d7.html',
-  scale: [0, 25, 50],
-  rows: [
-    { label: '한국', rate: 39.7 },
-    { label: 'OECD 평균', rate: 14.8 },
+  scale: [0, 30, 60],
+  groups: [
+    { label: '66세 이상 전체', korea: 39.7, oecd: 14.8 },
+    { label: '66~75세', korea: 29.8, oecd: 13.1 },
+    { label: '76세 이상', korea: 54.0, oecd: 17.2 },
   ],
 }
 
+// Three decisions around retirement that are hard to undo. `not` says what Omni does not do.
+export const DECISIONS = [
+  { kind: '투자 권유를 받았을 때', title: '믿고 보내도 될까요?', num: '6,581억 원', body: '2025년 불법 투자리딩방 사기의 피해액입니다(6,853건). 2024년의 7,104억 원보다 줄었지만 여전히 큽니다.', source: '경찰청 자료 · 파이낸셜뉴스', href: 'https://v.daum.net/v/WPn7aTKpAv',
+    does: 'AI 검색으로 근거와 공식 확인처를 찾습니다.', not: '사기인지 판정하지는 않습니다.' },
+  { kind: '퇴직 후 가게를 준비할 때', title: '이 돈을 넣어도 될까요?', num: '35%', body: '60대에 처음 창업한 사람 가운데 한 해 영업이익이 1천만 원에 못 미친 비율입니다(2022년 조사).', source: '한국은행 이슈노트 2025-12호', href: 'https://www.bok.or.kr/portal/bbs/P0002353/view.do?nttId=10091405&menuNo=200433',
+    does: '공공 자료를 찾고 생활비와 멈출 기준을 점검표에 정리합니다.', not: '성공을 예측하지는 않습니다.' },
+  { kind: '퇴직금을 받을 때', title: '언제 쓸 돈인가요?', num: '83.5%', body: '2025년 퇴직연금을 받기 시작한 계좌 가운데 일시금을 택한 비율입니다. 금액으로는 61.6%가 연금이었습니다.', source: '퇴직연금 통계 · 브라보마이라이프', href: 'https://bravo.etoday.co.kr/view/atc_view/20517',
+    does: '오래 둘 돈만 따로 정해 적립하고, 비중과 판단 이유를 기록합니다.', not: '세금과 수령 방식은 조언하지 않습니다.' },
+]
+export const FIRST_BUSINESS = [
+  { num: '9개월', label: '평균 창업 준비 기간입니다. 다른 연령대보다 짧습니다.' },
+  { num: '3천만 원', label: '1인당 한 해 매출의 중앙값입니다.' },
+  { num: '31%', label: '5년 안에 자영업을 그만둔 비율입니다. 20~50대와 큰 차이가 없습니다.' },
+]
+
 export const WHY_STATS = [
   { num: '42.5점', title: '장기 재무목표 설정', label: '한국은행·금융감독원의 2024년 성인 금융이해력 조사에서 장기 재무목표 설정 항목이 받은 점수입니다.', source: '금융위원회 조사 참고표', href: 'https://www.fsc.go.kr/comm/getFile?fileNo=8&fileTy=ATTACH&srvcId=BBSTY1&upperNo=87218' },
-  { num: '60%', title: '조사 대상 신규 투자자 중 손실을 본 비율', label: '자본시장연구원이 4개 증권사의 2020년 3~10월 거래를 분석했을 때, 조사 대상 신규 투자자 10명 중 6명이 거래 비용을 반영한 결과 손실을 봤습니다.', source: '자본시장연구원 연구', href: 'https://www.kcmi.re.kr/report/report_view?report_no=1243' },
+  { num: '60%', title: '조사 대상 신규 투자자 중 손실을 본 비율', label: '자본시장연구원이 4개 증권사의 2020년 3~10월 거래(1곳은 6월까지)를 분석했을 때, 조사 대상 신규 투자자 10명 중 6명이 거래 비용을 반영한 결과 손실을 봤습니다.', source: '자본시장연구원 연구', href: 'https://www.kcmi.re.kr/report/report_view?report_no=1243' },
 ]
 
 export const WHY_CASES = [
   { kind: '금융위원회 공개 상담 사례', title: '수입이 불규칙하면 비상자금부터', body: '수입이 일정하지 않은 20대 프리랜서의 상담에서는 3개월 평균 수입을 바탕으로 재무 계획을 세우고 비상자금을 마련하는 일부터 다뤘습니다. Omni를 쓸 때도 먼저 운용할 수 있는 자금을 정하고 그 범위에서 적립과 비중 관리 기준을 세웁니다.', href: 'https://www.fsc.go.kr/no010101/87218', label: '상담 사례 보기' },
-  { kind: 'Omni v0.1.3 개선 사례', title: '개장 직후 판단이 늦었던 이유', body: '당일 1분봉이 쌓일 때까지 기다리느라 판단이 늦었습니다. 이제 08:55에 실행기를 준비합니다. 개장 직후 1분봉이 부족하면 전 거래일 마감 자료나 확인 가능한 당일 NXT 프리마켓 자료를 함께 씁니다.', href: `${REPO}/blob/v0.1.3/release/2026-11-20-v0.1.3-opening-and-inverse.md#개장-즉시-진입`, label: '릴리스에서 개선 과정 보기' },
 ]
+
+// Shown with the daily reports: one problem found in the records and how it was changed.
+export const FIX_CASE = { kind: 'Omni v0.1.3 개선 사례', title: '개장 직후 판단이 늦었던 이유', body: '당일 1분봉이 쌓일 때까지 기다리느라 판단이 늦었습니다. 이제 08:55에 실행기를 준비합니다. 개장 직후 1분봉이 부족하면 전 거래일 마감 자료나 확인 가능한 당일 NXT 프리마켓 자료를 함께 씁니다.', href: `${REPO}/blob/v0.1.3/release/2026-11-20-v0.1.3-opening-and-inverse.md#개장-즉시-진입`, label: '릴리스에서 개선 과정 보기' }
 
 export const TRAPS = [
   { trap: '이미 오른 종목을 뒤늦게 따라 삽니다', human: '차트와 뉴스, 수급을 따로 찾는 사이 가격이 바뀝니다.', fix: 'Jev가 자료를 함께 읽습니다. 주문 실행기는 신규 매수 조건과 가격이 너무 오른 뒤 따라 사는 것을 막는 기준을 확인합니다. 주문을 보류한 이유도 남깁니다.' },
@@ -234,6 +275,45 @@ export const LONGTERM_POINTS = [
   { title: '전략 조합 비교와 주문 근거', body: '가상 1억 원 계좌와 전략 조합별 가상 장부의 결과를 비교합니다. 주문마다 판단 근거를 남깁니다.' },
 ]
 
+// Split money by when it is needed. The years are an example; only the last row is what the long-term engine handles.
+export const HORIZONS = [
+  { when: '1~2년 안에 쓸 돈', where: '예금처럼 바로 꺼낼 수 있는 곳', omni: 'Omni에서는 다루지 않습니다. **투자할 돈에서 먼저 뺍니다.**', on: false },
+  { when: '3~7년 뒤에 쓸 돈', where: '가격 변동이 작은 자산', omni: '장기투자 엔진이 맡는 돈이 아닙니다.', on: false },
+  { when: '8년 넘게 둘 돈', where: '장기투자 자금', omni: '적립과 비중 조정을 계획하고 **왜 사고팔았는지 기록합니다.**', on: true },
+]
+// S&P 500 total return (USD), month ends 1988-01 to 2026-10, overlapping windows; own calculation from Yahoo ^SP500TR.
+export const HOLDING_LOSS = [
+  { label: '1년 보유', value: 16.3 }, { label: '3년', value: 13.7 }, { label: '5년', value: 12.1 },
+  { label: '10년', value: 6.9 }, { label: '15년', value: 0 }, { label: '20년', value: 0 },
+]
+// 300M KRW, 15M withdrawn at the start of each year for 20 years: -15, -10, -10% in the first or the last three years, 7% otherwise.
+export const SEQUENCE = [
+  { label: '하락이 먼저 온 경우', value: 4380, text: '4,380만 원' },
+  { label: '하락이 나중에 온 경우', value: 27570, text: '2억 7,570만 원' },
+]
+
+// Using the same way of working outside trading (docs/ai-search.md 창업 준비 점검).
+export const EXTEND_STEPS = [
+  { title: '기준 적기', body: '설정과 스킬에 내 기준을 적습니다.' },
+  { title: '근거 찾기', body: 'AI 검색으로 자료와 출처를 찾습니다.' },
+  { title: '승인하기', body: '제안은 사람이 승인한 뒤 적용합니다.' },
+  { title: '기록하기', body: '바꾼 값과 이유를 남깁니다.' },
+  { title: '복기하기', body: '결과를 보고 기준을 다시 고칩니다.' },
+]
+export const EXTEND_MOVE = [
+  { title: '가져다 쓰는 것', items: ['일하는 순서와 승인 절차', '질문 묶음, 점검표와 검사 도구', '변경 이력과 재발 확인'] },
+  { title: '가져다 쓰지 않는 것', items: ['계좌, 체결, 시세 데이터', '종목 판단과 매매 규칙'] },
+]
+export const EXTEND_NEXT = [
+  { title: '부모님 자금을 챙기는 가족', body: '각자 설치하고 자기 계좌와 기준에 맞춰 씁니다.' },
+  { title: '금융교육과 소비자 상담', body: '기관의 답변 기준과 승인이 필요합니다.' },
+  { title: '구매, 재무, IT 운영', body: '업무 규칙과 시스템 연결을 새로 만들어야 합니다.' },
+]
+export const EXTEND_CHECK = `$ startup_template.py --check 점검표.md
+- 출처 링크가 없습니다: 하루 30그릇이면 남는다
+- 비상금 금액을 창업 자금과 따로 적으세요.
+- 멈출 기준에 날짜와 숫자를 함께 적으세요.`
+
 export const LONGTERM_FLOW = [
   { title: '적립 계획 세우기', body: '장기투자 자금을 언제 얼마나 넣을지 정합니다.' },
   { title: '현재 비중과 목표 비교', body: '시장 국면과 선택한 전략을 바탕으로 비중 차이를 살핍니다.' },
@@ -325,9 +405,71 @@ export const FEATURES = [
   { icon: 'ListChecks', title: '장전 점검과 장중 감사', body: '개장 전에 자동 실행 프로그램과 계좌를 점검하고, 장중에는 매시간 판단과 주문이 막힌 이유를 살펴 문제 기록을 남깁니다.', href: doc('automation.md') },
 ]
 
+// A beginner's path through the AI search. Every question is one of the dashboard's own suggestions (streamlit_namuh/liner_topics.py).
+export const LEARN_STEPS = [
+  { title: '용어부터 물어보기', body: 'ETF, 분산 투자, 최대 낙폭처럼 **처음 보는 말의 쉬운 뜻과 예**를 묻습니다.', question: 'ETF와 일반 펀드는 어떻게 다른가요?' },
+  { title: '화면의 숫자 이해하기', body: '차트나 시장 화면에서 본 지표가 **무엇을 알려 주는지** 확인합니다.', question: 'VWAP과 거래량 배율은 어떤 정보를 주나요?' },
+  { title: '투자 원칙 배우기', body: '투자 거장이 **왜 그렇게 생각했는지** 묻고, 답변에 달린 출처를 읽어 봅니다.', question: '존 보글은 왜 저비용 인덱스 펀드를 강조했나요?' },
+  { title: '내 기록으로 복기하기', body: '배운 내용을 **매매일지의 진입 근거와 청산 결과**에 비춰 봅니다.', question: '매매일지에서 진입 근거와 청산 결과를 어떻게 복기하나요?' },
+]
+
+// Asking from the screen you are looking at (docs/ai-search.md 작은 창으로 묻기 · 화면에서 바로 묻기).
+export const ASK_SCENES = [
+  {
+    id: 'drag', label: '1. 드래그', screen: 'ai-ask-1', height: 900,
+    title: '모르는 글자를 드래그합니다', question: '추세형이 무슨 뜻이지?',
+    body: '드래그한 글자 옆에 **AI에게 묻기** 버튼이 뜹니다. 카드의 숫자를 드래그하면 그 카드 이름으로 묻습니다.',
+    detail: '데이터 표와 도식 안의 글자는 드래그할 수 없습니다.',
+    note: '실제 대시보드 화면 구성에 예시 값을 넣었습니다.',
+    alt: '전략 구조 화면에서 추세형이라는 글자를 드래그하자 AI에게 묻기 버튼이 나타난 화면',
+  },
+  {
+    id: 'draft', label: '2. 뜻 보기', screen: 'ai-ask-2', height: 900,
+    title: '질문을 채우고 뜻을 먼저 보여 줍니다', question: '‘추세형’의 뜻을 쉽게 알려 주세요. (전략 구조 화면)',
+    body: '작은 채팅창이 열리고 질문이 입력칸에 채워집니다. 서비스에 적어 둔 설명이 있으면 **요청을 보내지 않고 먼저** 보여 줍니다.',
+    detail: '설명으로 충분하면 여기서 끝입니다. 더 궁금하면 질문을 고쳐 보내세요.',
+    note: '실제 대시보드 화면 구성에 예시 값을 넣었습니다.',
+    alt: '작은 채팅창에 추세형의 서비스 설명이 보이고 질문이 입력칸에 채워진 화면',
+  },
+  {
+    id: 'answer', label: '3. 답변', screen: 'ai-ask-3', height: 900,
+    title: '출처와 함께 답변을 받습니다', question: '‘추세형’의 뜻을 쉽게 알려 주세요. (전략 구조 화면)',
+    body: '서비스 가이드와 웹 출처를 바탕으로 답합니다. **답변을 기다리는 동안 보던 화면은 그대로**이고, 이어서 더 물을 수 있습니다.',
+    detail: '이 답변에는 웹 출처 9개와 서비스 가이드 2개가 함께 표시됐습니다.',
+    note: '2026년 11월 24일에 받은 실제 답변입니다. 답변은 물을 때마다 달라질 수 있습니다.',
+    alt: '작은 채팅창에서 추세형을 설명하는 답변을 보는 화면. 뒤에는 보던 전략 구조 화면이 그대로 있음',
+  },
+]
+export const ASK_WAYS = [
+  { title: '글자 드래그', body: '화면의 글자를 선택하면 옆에 버튼이 뜹니다.' },
+  { title: '카드 이름', body: '종합 현황, 트레이딩 현황, 장기투자의 상태 카드 아래에서 이름을 누릅니다.' },
+  { title: '화면 안내', body: '각 탭의 화면 안내에서 화면 전체나 용어를 골라 묻습니다.' },
+  { title: '화면별 추천 질문', body: '작은 창을 열면 지금 화면에 맞는 질문 3개가 보입니다.' },
+]
+export const ASK_RULES = [
+  { title: '보내기를 눌러야 전송됩니다', body: '어느 방법으로 묻든 질문을 **채우기만** 합니다. 보내기를 누르기 전에는 전송도 요금도 없습니다.' },
+  { title: '드래그한 금액은 가립니다', body: '드래그한 글의 **금액, 수량, 비율과 6자리 이상 숫자**는 ○로 바꿔 채웁니다. 직접 적은 내용은 그대로 전송되니 확인하고 보내세요.' },
+  { title: '작은 창과 넓은 창이 이어집니다', body: '**크게**를 누르면 넓은 AI 검색 창으로 옮깁니다. 대화, 검색 결과, 진행 중인 요청을 두 창이 함께 씁니다.' },
+]
+// What each step of the AI search does, and who does it.
+export const SEARCH_STEPS = [
+  { who: 'Liner Search', liner: true, title: '원문 찾기', body: '기사와 공시의 제목, 발행일, **원문 링크**를 찾습니다.' },
+  { who: 'Liner Search Agent', liner: true, title: '뜻과 영향 묻기', body: '**출처가 달린 답변**을 받고 궁금한 점을 이어서 묻습니다.' },
+  { who: '사용자', liner: false, title: '출처 열어 보기', body: '중요한 내용은 **원문에서 직접** 확인합니다.' },
+  { who: '내 컴퓨터', liner: false, title: '내 기록과 비교하기', body: '내부 데이터를 선택해 물으면 **Liner로 보내지 않고** 대시보드에서 답합니다.' },
+]
 export const AI_SEARCH_EXAMPLES = [
   {
-    id: 'research', label: '웹 검색·시장 분석', screen: 'ai-search-research',
+    id: 'offer', label: '권유 확인', screen: 'ai-search-offer',
+    question: '원금을 보장하고 월 5% 수익을 준다는 투자 권유를 받았습니다. 보내기 전에 확인할 점과 공식 확인처를 알려 주세요.',
+    title: '돈을 보내기 전에 근거부터',
+    body: '들은 말을 그대로 입력하면 확인할 점과 공식 확인처를 출처와 함께 보여 줍니다. 추천 질문의 노후 자금·투자 권유 분류에서 바로 고를 수도 있습니다.',
+    detail: '이름, 연락처, 계좌번호는 넣지 마세요. AI 검색은 사기인지 판정하지 않습니다.',
+    note: '2026년 11월 24일에 받은 실제 답변입니다. 뉴스 목록은 예시이고, 답변은 물을 때마다 달라질 수 있습니다.',
+    alt: '원금 보장과 월 5% 수익을 약속하는 투자 권유를 두고 확인할 점과 공식 확인처를 안내하는 AI 채팅 화면',
+  },
+  {
+    id: 'research', label: '웹 검색·분석', screen: 'ai-search-research',
     question: '반도체 실적 뉴스가 코스피에 미치는 영향은?',
     title: '뉴스의 영향을 출처와 함께',
     body: '기사와 공시 원문을 찾고, 선택한 이슈의 시장 영향이나 투자 용어를 물어보세요. 답변의 출처에서 어떤 자료를 참고했는지 확인할 수 있습니다.',
@@ -394,6 +536,7 @@ export const FAQ = [
   { q: '설치하면 실계좌로 바로 주문하나요?', a: '기본은 모의계좌입니다. 실계좌 주문에는 실행기에 실주문 옵션을 지정하고 계좌별 자동매매·실주문 스위치를 켜야 합니다. 실행기는 긴급 중단 해제 여부와 주문별 보호 조건을 확인합니다. 실주문 스위치를 켤 때는 확인 문구를 입력합니다.' },
   { q: '어떤 증권사를 쓰나요?', a: 'NH투자증권 나무 PLUG OpenAPI와 공식 MCP를 씁니다. 키움과 토스 Open API는 종목 순위와 시장 정보를 보조로 받아 오는 데만 씁니다. NH투자증권과 제휴 관계가 없는 비공식 프로젝트입니다.' },
   { q: '키와 계좌번호는 어디에 저장되나요?', a: '내 컴퓨터의 .env 파일에만 둡니다. 화면, 기록, 리포트, Discord 알림은 계좌번호를 가리고, 저장소에는 키가 들어가지 않습니다.' },
+  { q: 'AI 검색에 내 계좌 정보가 전송되나요?', a: '지원하는 계좌·체결·성과 질문은 대시보드가 기록과 NH 조회로 직접 답하고 Liner로 보내지 않습니다. 그 밖의 계좌 질문은 채팅에서 내부 데이터를 고르고 물어보세요. 화면에서 드래그한 글은 금액과 비율을 ○로 가려 채우고, 보내기를 눌러야 전송됩니다. 직접 입력한 내용은 그대로 전송되니 이름, 연락처, 계좌번호는 넣지 마세요.' },
   { q: 'Jev는 무엇인가요?', a: '차트 이미지를 읽고 정해진 선택지에서 답을 고르는 TypeSafe 모델입니다. 1분 차트 이미지와 최근 90분 뉴스, 시황·수급·해외 선물·장전 요약, 최근 판단 결과와 매매일지를 참고합니다. 매수 후보 한 종목이나 대기를 고르고, 신뢰도도 함께 알려 줍니다. 판단마다 근거 질문 7개의 답을 기록하고 신뢰도 구간별 적중률을 매일 확인합니다. 신뢰도는 수익 확률이 아니며, 주문은 승인된 규칙과 보호 조건을 통과해야 실행됩니다.' },
   { q: '장기투자는 무엇을 사나요?', a: '기준 구성은 국내 상장 ETF 6종입니다. 미국 지수(나스닥100, S&P500)와 테마(반도체, 양자, 우주) ETF를 사고, 매수에 쓸 대기 자금은 저수지 ETF(예를 들어 KOFR)에 둡니다. 여운봉 매매법은 나스닥100과 채권 혼합 ETF를 씁니다.' },
   { q: 'macOS가 아니어도 되나요?', a: '자동 실행 등록은 macOS launchd 기준입니다. 매매 프로그램과 대시보드는 Python이라 다른 환경에서도 돌릴 수 있지만 일정 등록은 직접 바꿔야 합니다.' },

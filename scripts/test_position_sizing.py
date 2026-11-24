@@ -16,6 +16,20 @@ def test_buy_factor_shrinks_with_holdings_and_against_the_market():
     assert ps.buy_factor(on, {}, '코스피', False, 0, 20_000_000)[0] == 1.0  # unknown regime: no cut
 
 
+def test_the_market_shares_are_settings():
+    # user 2026-11-24: '시황 축소 비율도 설정할 수 있게' (횡보장 · 반대 방향)
+    on = {'size_holding_on': 0, 'size_market_on': 1, 'size_market_flat_pct': 90, 'size_market_against_pct': 70}
+    assert ps.buy_factor(on, VIEW, '코스피', False, 0, 1)[0] == 0.7
+    assert ps.buy_factor(on, VIEW, '코스닥', True, 0, 1)[0] == 0.9
+    assert ps.buy_factor(on, VIEW, '코스피', True, 0, 1)[0] == 1.0  # the same direction stays whole
+    assert ps.buy_factor({**on, 'size_market_on': 0}, VIEW, '코스피', False, 0, 1)[0] == 1.0  # off: the shares do nothing
+    import strategy_settings as s
+    assert (s.DEFAULTS['size_market_flat_pct'], s.DEFAULTS['size_market_against_pct']) == (75, 50)  # as before
+    assert s.problems({**s.DEFAULTS, 'size_market_against_pct': 20}) and s.problems({**s.DEFAULTS, 'size_market_flat_pct': 101})
+    assert s.problems({**s.DEFAULTS, 'size_market_against_pct': 60.5})  # whole percents
+    assert s.problems({**s.DEFAULTS, 'size_market_against_pct': 70, 'size_market_flat_pct': 100}) == []
+
+
 def test_regime_trim_once_after_the_market_turns(tmp_path):
     db = sqlite3.connect(':memory:')
     db.execute('CREATE TABLE fills (symbol TEXT, side TEXT, quantity INTEGER)')

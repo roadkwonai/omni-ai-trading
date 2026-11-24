@@ -12,17 +12,42 @@
   <a href="https://roadkwonai.github.io/omni-ai-trading/"><strong>소개 페이지 보기 →</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://roadkwonai.github.io/omni-ai-trading/reports/"><strong>리포트 목록 보기 →</strong></a> &nbsp;&middot;&nbsp;
   <a href="https://github.com/roadkwonai/omni-ai-trading/releases"><strong>릴리스 노트 →</strong></a> &nbsp;&middot;&nbsp;
-  <a href="https://youtu.be/c4FZw6AYRAg"><strong>소개 영상 보기 →</strong></a>
+  <a href="https://youtu.be/JjL6to4mxN4"><strong>노후·장기투자 영상 →</strong></a> &nbsp;&middot;&nbsp;
+  <a href="https://youtu.be/c4FZw6AYRAg"><strong>Jev 트레이딩 영상 →</strong></a>
 </p>
 
 <a id="서비스-소개-영상"></a>
 <p align="center">
-  <a href="https://youtu.be/c4FZw6AYRAg"><img src="assets/readme-video.jpg" alt="Omni AI Trading 서비스 소개 영상(3분 33초) — 단타는 Jev가, 장기투자는 거장 원칙으로. 누르면 YouTube에서 재생됩니다" width="720"></a>
+  <a href="https://youtu.be/JjL6to4mxN4"><img src="assets/readme-video-longterm.jpg" alt="Omni AI Trading 노후·장기투자 편(4분 4초) — 내 노후는 내가 지킨다. 누르면 YouTube에서 재생됩니다" width="49%"></a>
+  <a href="https://youtu.be/c4FZw6AYRAg"><img src="assets/readme-video.jpg" alt="Omni AI Trading Jev 트레이딩 편(3분 33초) — 단타는 Jev가, 장기투자는 거장 원칙으로. 누르면 YouTube에서 재생됩니다" width="49%"></a>
 </p>
-<p align="center"><sub><strong>서비스 소개 영상 · 3분 33초</strong> — 두 엔진, AI는 의견·규칙이 주문, 종합 현황, Jev 실시간 판단, 안전장치, 장기투자, 복기와 리포트를 실제 화면으로 보여 줍니다. 실계좌 금액은 가렸습니다.</sub></p>
+
+| 영상 | 내용 |
+| --- | --- |
+| [**노후·장기투자 편**](https://youtu.be/JjL6to4mxN4) · 4분 4초 | 투자 권유를 AI 검색으로 확인하고, 쓸 시점에 따라 돈을 나눠 정한 규칙으로 길게 운용합니다. 첫 장면의 문자는 가상의 예시이며 화면은 모의·가상 계좌입니다(2026년 11월 24일 기준). |
+| [**Jev 트레이딩 편**](https://youtu.be/c4FZw6AYRAg) · 3분 33초 | 두 엔진, AI는 의견·규칙이 주문, 종합 현황, Jev 실시간 판단, 안전장치, 장기투자, 복기와 리포트를 실제 화면으로 보여 줍니다. 실계좌 금액은 가렸습니다. |
 
 <details>
-<summary><strong>영상 챕터</strong> (누르면 그 장면부터 재생)</summary>
+<summary><strong>노후·장기투자 편 챕터</strong> (누르면 그 장면부터 재생)</summary>
+
+| 시각 | 내용 |
+| --- | --- |
+| [0:00](https://youtu.be/JjL6to4mxN4?t=0) | 도착한 문자 — 원금 보장, 매달 5% |
+| [0:13](https://youtu.be/JjL6to4mxN4?t=13) | 왜 지금 — 노후 소득과 리딩방 피해 |
+| [0:36](https://youtu.be/JjL6to4mxN4?t=36) | 나만의 AI 에이전트 — 묻고, 나누고, 규칙대로, 기록 |
+| [0:56](https://youtu.be/JjL6to4mxN4?t=56) | 보내기 전에 묻기 — AI 검색과 공식 확인처 |
+| [1:28](https://youtu.be/JjL6to4mxN4?t=88) | 모르는 말 바로 묻기 — 끌어서 질문, 내부 데이터 |
+| [1:48](https://youtu.be/JjL6to4mxN4?t=108) | 돈부터 나누기 — 쓸 시점과 손실 구간 |
+| [2:11](https://youtu.be/JjL6to4mxN4?t=131) | 정한 규칙으로 길게 — 국면, 타점, 저수지, 적립식 |
+| [2:51](https://youtu.be/JjL6to4mxN4?t=171) | 폭락 뉴스가 뜬 날 — 정한 선까지 기다림 |
+| [3:15](https://youtu.be/JjL6to4mxN4?t=195) | 이유가 남는 투자 — 왜 샀나와 리포트 |
+| [3:31](https://youtu.be/JjL6to4mxN4?t=211) | 지키는 선 — 가상 계좌와 한도 |
+| [3:49](https://youtu.be/JjL6to4mxN4?t=229) | 마무리 |
+
+</details>
+
+<details>
+<summary><strong>Jev 트레이딩 편 챕터</strong> (누르면 그 장면부터 재생)</summary>
 
 | 시각 | 내용 |
 | --- | --- |
@@ -40,7 +65,7 @@
 </details>
 
 <p align="center">
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.5"><img src="https://img.shields.io/badge/release-v0.1.5-ff6600?style=flat-square" alt="Release v0.1.5"></a>
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.6"><img src="https://img.shields.io/badge/release-v0.1.6-ff6600?style=flat-square" alt="Release v0.1.6"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1c20?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-1a1c20?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/broker-NH%20%EB%82%98%EB%AC%B4%20PLUG-ff6600?style=flat-square" alt="NH 나무 PLUG OpenAPI">
@@ -62,6 +87,7 @@
   <a href="#투자-철학과-기법">투자 철학</a> &middot;
   <a href="#두-엔진과-적립식">두 엔진과 적립식</a> &middot;
   <a href="#매일의-감사와-리포트">리포트</a> &middot;
+  <a href="#다른-결정에-활용하기">다른 결정에 활용하기</a> &middot;
   <a href="#기반-기술">기반 기술</a> &middot;
   <a href="#연동-서비스">연동</a> &middot;
   <a href="#주요-기능">주요 기능</a> &middot;
@@ -96,9 +122,28 @@
 
 한국의 노후 소득 격차는 큽니다. 금융 정보를 접할 기회가 많아졌어도 자신의 상황을 점검하고 오래 지킬 계획을 만드는 데는 도움이 필요합니다.
 
+#### 한 번 내리면 되돌리기 어려운 결정
+
+<img src="docs/images/brand/pause-and-check.jpg" alt="휴대전화를 내려놓고 노트를 보며 함께 확인하는 어머니와 딸" width="360" align="right">
+
+퇴직할 무렵에는 큰돈이 걸린 결정이 겹칩니다. 잘못 고른 사람을 탓하기에 앞서, **미리 확인하고 작게 시험하고 돈을 나눠 둘 시간과 도구**가 있어야 합니다.
+
+<br clear="all">
+
+| 결정 | 확인한 사실 | Omni가 돕는 일 | 하지 않는 일 |
+| --- | --- | --- | --- |
+| 투자 권유에 돈을 보낼 때 | 2025년 불법 투자리딩방 사기는 6,853건, 피해액은 6,581억 원으로 2024년(8,104건, 7,104억 원)보다 줄었습니다. [경찰청 자료 보도](https://v.daum.net/v/WPn7aTKpAv) | AI 검색으로 근거와 공식 확인처를 찾습니다. | 사기인지 판정하지 않습니다. |
+| 퇴직 후 가게를 준비할 때 | 60대에 처음 창업한 사람의 35%는 한 해 영업이익이 1천만 원에 못 미쳤습니다(2022년 조사). 5년 안에 자영업을 그만둔 비율은 31%로 20\~50대와 비슷하지만, 60대는 그 뒤 상당수가 임시·일용직에 그치거나 일을 그만뒀습니다. 창업 자금이 퇴직금이었는지는 조사하지 않았습니다. [한국은행 이슈노트 2025-12호](https://www.bok.or.kr/portal/bbs/P0002353/view.do?nttId=10091405&menuNo=200433) | 공공 자료를 찾고 생활비와 멈출 기준을 점검표에 정리합니다. | 성공을 예측하지 않습니다. |
+| 퇴직금을 받을 때 | 2025년 퇴직연금을 받기 시작한 계좌 가운데 83.5%가 일시금을 택했고, 금액으로는 61.6%가 연금이었습니다. [퇴직연금 통계 보도](https://bravo.etoday.co.kr/view/atc_view/20517) | 오래 둘 돈만 따로 정해 적립하고, 비중과 판단 이유를 기록합니다. | 세금과 수령 방식은 조언하지 않습니다. |
+
+<p align="center">
+  <img src="docs/images/figures/first-business.png" alt="60대의 첫 창업. 평균 준비 9개월, 1인당 한 해 매출 중앙값 3천만 원, 5년 안에 그만둔 비율 31%" width="49%">
+  <img src="docs/images/figures/old-age-income.png" alt="고령층의 상대적 소득 빈곤율(2022년). 66세 이상 한국 39.7%와 OECD 평균 14.8%, 66~75세 29.8%와 13.1%, 76세 이상 54.0%와 17.2%" width="49%">
+</p>
+
 | 무엇을 조사했나 | 확인한 결과 |
 | --- | --- |
-| 노후 소득 격차 | OECD 2025년 보고서에서 66세 이상 상대적 소득 빈곤율은 한국 39.7%, OECD 평균 14.8%였습니다. 가구 규모를 보정한 가처분소득이 자국 중위값의 절반 미만인 비율입니다. [OECD 비교표](https://www.oecd.org/en/publications/pensions-at-a-glance-2025_e40274c1-en/full-report/old-age-income-poverty_3cd946d7.html) |
+| 노후 소득 격차 | OECD 2025년 보고서의 2022년 자료에서 66세 이상 상대적 소득 빈곤율은 한국 39.7%, OECD 평균 14.8%였습니다. 76세 이상은 한국 54.0%, OECD 평균 17.2%입니다. 가구 규모를 보정한 가처분소득이 자국 중위값의 절반 미만인 비율입니다. [OECD 비교표](https://www.oecd.org/en/publications/pensions-at-a-glance-2025_e40274c1-en/full-report/old-age-income-poverty_3cd946d7.html) |
 | 금융이해력과 실천 | OECD/INFE 2023년 보고서에서 금융이해력 목표선인 70점에 도달한 비율은 한국 48%, 조사에 참여한 OECD 회원국 평균 39%였습니다. 별도로 한국은행·금융감독원의 2024년 국내 조사에서 성인 평균은 65.7점이었고, 재무상황 점검은 43.4점, 장기 재무목표 설정은 42.5점이었습니다. 뒤의 두 수치는 항목별 점수입니다. [OECD/INFE 국제조사, 그림 2.2](https://www.oecd.org/content/dam/oecd/en/publications/reports/2023/12/oecd-infe-2023-international-survey-of-adult-financial-literacy_8ce94e2c/56003a32-en.pdf) · [국내 조사](https://www.bok.or.kr/portal/bbs/B0000502/view.do?menuNo=201265&nttId=10091152) · [금융위원회 참고표](https://www.fsc.go.kr/comm/getFile?fileNo=8&fileTy=ATTACH&srvcId=BBSTY1&upperNo=87218) |
 | 노후 준비 방법 | 국가데이터처의 2025년 사회조사에서 19세 이상 71.5%가 노후를 준비하고 있거나 준비되어 있다고 답했습니다. 준비한 사람이 주된 방법으로 가장 많이 꼽은 것은 국민연금이었습니다. [2025년 사회조사](https://www.kostat.go.kr/board.es?act=view&bid=219&list_no=439196&mid=a10301060100) |
 
@@ -292,6 +337,25 @@ flowchart LR
 지정학·해외 이슈는 별도 규칙이 아니라 90분 뉴스, 해외 선물·원자재·환율 입력으로 Jev 판단에 들어갑니다.
 
 ### 장기투자의 철학: 노후에 필요한 돈을 오늘부터 관리하는 방법
+
+<img src="docs/images/brand/mascot-envelopes.png" alt="동전을 세 봉투에 나누어 담는 부엉이 Omni" width="200" align="right">
+
+**언제 쓸 돈인지부터 나눕니다.** 기간은 설명을 위한 예시이며 개인 사정에 따라 다릅니다.
+
+<br clear="all">
+
+| 쓸 시점 | 두는 곳 | Omni가 하는 일 |
+| --- | --- | --- |
+| 1\~2년 안 | 예금처럼 바로 꺼낼 수 있는 곳 | 다루지 않습니다. 투자할 돈에서 먼저 뺍니다. |
+| 3\~7년 뒤 | 가격 변동이 작은 자산 | 장기투자 엔진이 맡는 돈이 아닙니다. |
+| 8년 넘게 | 장기투자 자금 | 적립과 비중 조정을 계획하고 왜 사고팔았는지 기록합니다. |
+
+<p align="center">
+  <img src="docs/images/figures/holding-loss.png" alt="S&P 500을 보유했을 때 손실이었던 구간의 비율. 1년 16.3%, 3년 13.7%, 5년 12.1%, 10년 6.9%, 15년과 20년 0%" width="49%">
+  <img src="docs/images/figures/sequence-risk.png" alt="3억 원에서 해마다 1,500만 원을 꺼낼 때 20년 뒤 남는 돈. 하락이 먼저면 4,380만 원, 나중이면 2억 7,570만 원" width="49%">
+</p>
+
+오래 보유할수록 손실로 끝난 구간은 줄었지만 **10년을 보유해도 손실이 난 구간이 있었고**, 월말 기준 최대 낙폭은 −50.9%였습니다(S&P 500 배당 포함, 달러, 1988\~2026년, 직접 계산. 구간이 겹치고 환율·세금·물가는 반영하지 않음). 평균 수익률이 같아도 은퇴 직후에 하락하면 타격이 더 큽니다. 오른쪽 도표는 설명을 위해 가정한 값입니다. 두 도표 모두 앞으로의 수익을 보장하지 않습니다.
 
 주식시장을 매일 이겨야 한다는 목표로는 몇 년, 몇십 년에 걸친 노후 준비를 이어 가기 어렵습니다. 노후처럼 긴 목표를 위해서는 언제 쓸 돈인지, 얼마를 꾸준히 모을지, 어느 정도의 변동을 감당할지부터 정해야 합니다. 시장이 급락하거나 특정 자산의 비중이 커졌을 때도 그 기준을 유지할 방법이 필요합니다. Omni에 장기투자를 핵심 기능으로 넣은 이유입니다. [자산 배분과 리밸런싱 안내](https://www.investor.gov/introduction-investing/getting-started/asset-allocation)
 
@@ -560,6 +624,32 @@ flowchart LR
 | 금 · 매월 1일 | 주간·월간 감사, 기간 매매일지 | 낙폭과대·장기투자 감사, 월·분기·반기·연 매매일지 |
 
 리포트는 생성·게시·링크 발송 상태를 각각 기록합니다. 일별·기간 매매일지와 장전 상세 분석은 원본 템플릿을 검사한 뒤 링크를 보냅니다. 푸시가 켜져 있으면 검사 전 초안도 공개 주소에 올라갈 수 있어, 공개 전 실계좌 금액·수량을 포함한 본문과 표를 확인해야 합니다. [운영 일정과 자동화](#운영-일정과-자동화) · [리포트 발행](docs/report-pages.md)
+
+## 다른 결정에 활용하기
+
+<img src="docs/images/brand/mascot-extend.png" alt="투자 노트의 점검표를 작은 가게 쪽으로 옮기는 부엉이 Omni" width="220" align="right">
+
+내 투자 데이터는 그대로 두고 **기준을 적고, 근거를 찾고, 사람이 승인하고, 결과를 복기하는 방식**만 가져다 씁니다.
+
+<br clear="all">
+
+<p align="center"><img src="docs/images/figures/working-loop.png" alt="기준 적기, 근거 찾기, 승인하기, 기록하기, 복기하기를 거쳐 다시 기준으로 돌아오는 다섯 단계" width="100%"></p>
+
+| 구분 | 내용 |
+| --- | --- |
+| 가져다 쓰는 것 | 일하는 순서와 승인 절차, 질문 묶음, 점검표와 검사 도구, 변경 이력과 재발 확인 |
+| 가져다 쓰지 않는 것 | 계좌·체결·시세 데이터, 종목 판단과 매매 규칙 |
+| 실제로 만든 사례 | **창업 준비 점검**. AI 검색 질문 8개와 8절로 된 점검표로 공공 자료, 생활비와 비상금, 멈출 기준을 확인합니다. 주문과 매매 기록은 쓰지 않고, 사업이 잘될지 판단하지 않습니다. [사용법](docs/ai-search.md#창업-준비-점검) |
+| 다음으로 넓힐 곳 | 부모님 자금을 챙기는 가족(각자 설치), 금융교육과 소비자 상담(기관 기준과 승인 필요), 구매·재무·IT 운영(업무 규칙과 시스템 연결 필요) |
+
+```text
+$ startup_template.py --check 점검표.md
+- 출처 링크가 없습니다: 하루 30그릇이면 남는다
+- 비상금 금액을 창업 자금과 따로 적으세요.
+- 멈출 기준에 날짜와 숫자를 함께 적으세요.
+```
+
+가상 사례에서 세 항목을 일부러 빼고 실제로 검사한 결과입니다. 다른 조직에 도입한 사례는 아직 없고, 시간을 얼마나 아꼈는지도 측정하지 않았습니다.
 
 ## 기반 기술
 
@@ -978,6 +1068,54 @@ cp .env.example .env && chmod 600 .env   # 키 이름은 .env.example 참고, �
 ## AI 검색
 
 대시보드 상단 **AI 검색**에서 종목·시장 이슈의 기사와 공시 원문을 찾을 수 있습니다. **투자 AI 채팅**에는 뉴스가 주식시장에 미칠 영향, 투자 용어, 대시보드 사용법을 물어보세요. 웹 답변에는 Liner가 찾은 원문을, 서비스 사용법 답변에는 참고한 프로젝트 가이드를 표시합니다.
+
+| 순서 | 맡는 곳 | 하는 일 |
+| --- | --- | --- |
+| 1. 원문 찾기 | **Liner Search API** | 기사와 공시의 제목, 발행일, 원문 링크를 찾습니다. |
+| 2. 뜻과 영향 묻기 | **Liner Search Agent API** | 출처가 달린 답변을 받고 궁금한 점을 이어서 묻습니다. |
+| 3. 출처 열어 보기 | 사용자 | 중요한 내용은 원문에서 직접 확인합니다. |
+| 4. 내 기록과 비교하기 | 내 컴퓨터 | 내부 데이터를 선택해 물으면 Liner로 보내지 않고 대시보드에서 답합니다. |
+
+### 보던 화면에서 바로 묻기
+
+<p align="center">
+  <img src="docs/images/screens/ai-ask-drag.jpg" alt="전략 구조 화면에서 추세형이라는 글자를 드래그하자 AI에게 묻기 버튼이 나타난 화면" width="49%">
+  <img src="docs/images/screens/ai-ask-answer.jpg" alt="작은 채팅창에서 추세형을 설명하는 답변을 보는 화면. 뒤에는 보던 전략 구조 화면이 그대로 있음" width="49%">
+</p>
+
+모르는 말이 나오면 **글자를 드래그해 그 자리에서 묻습니다.** 오른쪽 아래 작은 채팅창이 열려 보던 화면을 떠나지 않아도 됩니다. 화면 값은 예시이고 답변은 2026년 11월 24일에 받은 실제 답변입니다.
+
+| 묻는 방법 | 하는 일 |
+| --- | --- |
+| 글자 드래그 | 화면의 글자를 선택하면 옆에 **AI에게 묻기** 버튼이 뜹니다. 데이터 표와 도식 안의 글자는 드래그할 수 없습니다. |
+| 카드 이름 | 종합 현황, 트레이딩 현황, 장기투자의 상태 카드 아래에서 이름을 누릅니다. |
+| 화면 안내 | 각 탭의 **화면 안내**에서 화면 전체나 용어를 골라 묻습니다. |
+| 화면별 추천 질문 | 작은 창을 열면 지금 화면에 맞는 질문 3개가 보입니다. |
+
+- 어느 방법으로 묻든 질문을 **채우기만** 합니다. 보내기를 누르기 전에는 전송도 요금도 없습니다. 서비스에 적어 둔 설명이 있으면 요청 없이 먼저 보여 줍니다.
+- 드래그한 글의 금액, 수량, 비율과 6자리 이상 숫자는 ○로 바꿔 채웁니다. 직접 적은 내용은 그대로 전송되니 확인하고 보내세요.
+- 작은 창에서 **크게**를 누르면 넓은 AI 검색 창으로 옮깁니다. 대화, 검색 결과, 진행 중인 요청을 두 창이 함께 씁니다.
+
+[작은 창으로 묻기](docs/ai-search.md#작은-창으로-묻기) · [화면에서 바로 묻기](docs/ai-search.md#화면에서-바로-묻기)
+
+### 돈을 보내기 전에 근거부터
+
+<p align="center"><img src="docs/images/screens/ai-search-offer.jpg" alt="원금 보장과 월 5% 수익을 약속하는 투자 권유를 두고 확인할 점과 공식 확인처를 안내하는 AI 채팅 화면" width="760"></p>
+
+투자 권유를 받으면 들은 말을 그대로 입력해 보세요. 추천 질문의 **노후 자금·투자 권유** 분류에 권유, 사칭 대화방, 정식 등록 여부, 앱 설치 요구, 퇴직금을 묻는 질문 7개가 있습니다. 위 화면은 2026년 11월 24일에 받은 실제 답변입니다. 답변은 물을 때마다 달라질 수 있습니다. AI 검색은 사기인지 판정하지 않습니다. 질문에 이름·연락처·계좌번호를 넣지 마세요. [투자 권유 확인](docs/ai-search.md#투자-권유-확인)
+
+### 투자 지식 쌓기
+
+**투자가 처음인 사람도 화면을 보다가 모르는 것을 바로 물으며 투자 지식을 쌓을 수 있습니다.** 무엇을 물을지 모르겠다면 추천 질문을 누르세요. 질문 약 100개를 9개 분류로 나눠 두었고, 화면에 보이는 추천 태그를 누르면 바로 전송됩니다. 답변에 이어서 질문하거나, 도움이 된 답변을 마크다운으로 복사해 공부 노트에 모을 수도 있습니다.
+
+| 순서 | 이렇게 물어보세요 |
+| --- | --- |
+| 1. 용어부터 | "ETF와 일반 펀드는 어떻게 다른가요?" |
+| 2. 화면의 숫자 | "VWAP과 거래량 배율은 어떤 정보를 주나요?" |
+| 3. 투자 원칙 | "존 보글은 왜 저비용 인덱스 펀드를 강조했나요?" |
+| 4. 내 기록 복기 | "매매일지에서 진입 근거와 청산 결과를 어떻게 복기하나요?" |
+
+답변은 공부를 돕는 참고 자료입니다. 중요한 내용은 출처의 원문에서 확인하세요.
 
 채팅의 **내부 데이터**를 선택하고 "이번 주 Jev 수익률과 최대 낙폭은?" 또는 "실계좌 1의 현재 보유 종목과 잔고는?"이라고 물을 수 있습니다. 실계좌 잔고는 NH 나무 PLUG에서 읽기 전용으로 조회하고, 마지막 응답을 받은 한국시간을 표시합니다. 내부 조회의 질문과 답변은 대시보드의 대화 안에서 처리합니다.
 

@@ -4,6 +4,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 | 릴리스 | 날짜 | 노트 |
 | --- | --- | --- |
+| v0.1.6 · AI에게 묻기와 노후·장기투자 안내 | 2026-11-24 | [2026-11-24-v0.1.6-ask-ai-and-retirement.md](2026-11-24-v0.1.6-ask-ai-and-retirement.md) |
 | v0.1.5 · 장기투자 현황과 대시보드 개선 | 2026-11-23 | [2026-11-23-v0.1.5-longterm-dashboard.md](2026-11-23-v0.1.5-longterm-dashboard.md) |
 | v0.1.4 · 기획서와 서비스 소개 보완 | 2026-11-21 | [2026-11-21-v0.1.4-planning-and-landing.md](2026-11-21-v0.1.4-planning-and-landing.md) |
 | v0.1.3 · 개장 즉시 진입과 인버스 규칙 강화 | 2026-11-20 | [2026-11-20-v0.1.3-opening-and-inverse.md](2026-11-20-v0.1.3-opening-and-inverse.md) |

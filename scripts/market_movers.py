@@ -349,6 +349,15 @@ def refresh_cases():
         print(json.dumps({'oversold_series_error': type(exc).__name__}), flush=True)
 
 
+def fill_index(now):
+    try:
+        import oversold_cases
+        if filled := oversold_cases.fill_index_series(now):
+            print(json.dumps({'index_series_filled': filled}), flush=True)
+    except Exception as exc:
+        print(json.dumps({'index_series_error': type(exc).__name__}), flush=True)
+
+
 def running(now):
     """Inside the ranking service's day: 09:00 to 15:05 on the day's exchange clock (16:05 on 수능 day)."""
     from session_times import shifted
@@ -408,6 +417,7 @@ def main():
             print(json.dumps({'time': now.isoformat(timespec='seconds'), 'scanned': len(rows),
                               'candidates': list(candidates)}, ensure_ascii=False), flush=True)
             shadow_round(read, universe, lambda line: print(line, flush=True))
+            fill_index(datetime.now(KST))
             import watchlist
             if candidates and watchlist.due(datetime.now(KST)):
                 try:

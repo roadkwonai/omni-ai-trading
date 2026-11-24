@@ -13,7 +13,7 @@ import streamlit as st
 MODES = ('system', 'dark', 'light')
 LABELS = {'system': ('시스템 테마', 'brightness_auto'), 'dark': ('다크 테마', 'dark_mode'), 'light': ('라이트 테마', 'light_mode')}
 STREAMLIT = {'system': 'System', 'dark': 'Dark', 'light': 'Light'}  # the values Streamlit's frontend stores
-LIGHT = (':root{--om-ink:#0f172a;--om-ink-2:#334155;--om-muted:#475569;--om-card-end:rgba(241,245,249,.92)}'
+LIGHT = (':root{--om-ink:#0f172a;--om-ink-2:#334155;--om-muted:#475569;--om-card-end:rgba(241,245,249,.92);--om-panel:#ffffff}'
          # Graphviz labels drawn on the page itself (clusters, edges); filled nodes keep their own dark fill and light text
          '.stGraphVizChart g.cluster>text,.stGraphVizChart g.edge text{fill:#334155}'
          # accent-coloured card text (amber, green …) is too pale on a light card: darken it, keep the hue

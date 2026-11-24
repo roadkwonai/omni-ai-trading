@@ -209,3 +209,26 @@ def test_account_price_cap_limits_buys_only(tmp_path,monkeypatch):
  with pytest.raises(LiveOrderBlocked,match='price cap'):x.execute(FakeReader(),g,{},'krstockOrderCashBuy',FIELDS)
  with pytest.raises(Reached):x.execute(FakeReader(),g,{},'krstockOrderCashSell',FIELDS)
  assert len(reads)==2  # one accounts.json read per order
+
+
+def test_the_broker_is_asked_only_when_the_settled_cash_is_short_and_a_failure_keeps_the_refusal(tmp_path, monkeypatch):
+ monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+ monkeypatch.setattr(x, 'halt_flag_set', lambda *_: False)
+ monkeypatch.setattr(x, 'datetime', type('Clock', (), {'now': staticmethod(lambda _: NOW)}))
+ snapshots = __import__('nh_live_broker').collect_snapshots(FakeReader(), A, NOW, sleep=lambda _: None)
+ snapshots['balance'] = {**snapshots['balance'], 'Output_0': {'orr_pbl_amt1': 1000, 'tot_aet_amt': 1000000, 'tot_byn_amt': 0}}
+ monkeypatch.setattr(x, 'collect_snapshots', lambda *_, **__: dict(snapshots))
+ monkeypatch.setattr(x, '_transport', lambda *a, **k: {'rsp_cd': '00048', 'rsp_msg': '매수주문이 완료되었습니다', 'Output_0': {'mkt_orr_no': 42}})
+ class Reader(FakeReader):
+  answer = {'status': 'ok', 'data': {'rsp_cd': '00221', 'Output_0': {'csh_orr_pbl_amt': 187000}}}
+  def call_tool(self, name, args):
+   if args.get('operationId') == 'krstockInquiryBuyableQuantity':
+    assert args['input'] == {'ost_dit_cd': '1', 'act_no': A, 'iem_cd': '114800', 'nmn_pr_tp_cd': '01', 'orr_pr': 1400}
+    if isinstance(self.answer, Exception): raise self.answer
+    return self.answer
+   return super().call_tool(name, args)
+ for i, answer in enumerate((TimeoutError(), {'status': 'error', 'error': 'IGW42902'}, {'status': 'ok', 'data': {'rsp_cd': '00221'}})):
+  reader = Reader(); reader.answer = answer
+  with pytest.raises(LiveOrderBlocked, match='insufficient'):
+   x.execute(reader, LiveOrderGuard(A, tmp_path / f'g{i}'), {}, 'krstockOrderCashBuy', FIELDS)
+ assert x.execute(Reader(), LiveOrderGuard(A, tmp_path / 'ok'), {}, 'krstockOrderCashBuy', FIELDS)

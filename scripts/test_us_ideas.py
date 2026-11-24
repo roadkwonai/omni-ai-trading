@@ -90,13 +90,13 @@ def test_scheduled_runs_the_universe_on_the_quarters_third_friday_and_the_week_o
     monkeypatch.setattr(U, 'run_weekly', lambda root, today: done.append(('weekly', today)) or {})
     at = lambda m, d, h, mi: datetime(2026, m, d, h, mi, tzinfo=U.KST)
     assert U.third_friday(date(2026, 11, 20)) and not U.third_friday(date(2026, 11, 13)) and not U.third_friday(date(2026, 12, 18))
-    assert U.scheduled(tmp_path, at(11, 13, 7, 0)) == 'not_due' and done == []  # a Friday, not the third
-    assert U.scheduled(tmp_path, at(11, 20, 7, 0)) == 'universe+weekly' and [k for k, _ in done] == ['universe', 'weekly']
+    assert U.scheduled(tmp_path, at(11, 13, 10, 0)) == 'not_due' and done == []  # a Friday, not the third
+    assert U.scheduled(tmp_path, at(11, 20, 10, 0)) == 'universe+weekly' and [k for k, _ in done] == ['universe', 'weekly']
     db = U.connect(tmp_path)
     with db:
         db.execute("INSERT INTO runs VALUES ('2026-11-20', 'weekly', 'x', '{}')")
-    assert U.scheduled(tmp_path, at(11, 20, 7, 30)) == 'already'  # the 07:00 run did this week's screen
-    assert U.scheduled(tmp_path, at(11, 13, 7, 30)) == 'weekly' and done[-1] == ('weekly', date(2026, 11, 13))
+    assert U.scheduled(tmp_path, at(11, 20, 10, 30)) == 'already'  # the 10:00 run did this week's screen
+    assert U.scheduled(tmp_path, at(11, 13, 10, 30)) == 'weekly' and done[-1] == ('weekly', date(2026, 11, 13))
 
 
 def test_criteria_explain_each_screen_and_decide_it():

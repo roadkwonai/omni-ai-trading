@@ -774,7 +774,7 @@ def step(reader, account, credentials, record, *, execute_orders=False, root, no
 def _step(reader, account, credentials, record, *, execute_orders, root, now, key, may_cancel, replacement_only=()):
     from etf_universe import SYMBOLS
     from nh_guarded_live import execute
-    from nh_live_broker import collect_snapshots
+    from nh_live_broker import collect_snapshots, orderable_cash
     from nh_live_buy_control import buy_allowed
     from nh_live_shadow import effective_rules
     from accounts import live_price_cap
@@ -852,7 +852,7 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
     day = now.strftime('%Y%m%d')
     stop_basis = stop_percent_for_positions(source, root, owned, effective_rules(record)['stop_loss_pct'])
     info['stop_basis'] = stop_basis
-    quotes = {}
+    quotes = info['quotes'] = {}  # kept in the record: the (bid, ask) each stop, buy and sell of this cycle was judged on
     for code in owned:  # per-symbol stop from the broker's average price; latched for the rest of the day
         quotes[code] = bid_ask(reader, code)
         price = positive(avg.get(code))  # NH may send the average price as text
@@ -958,7 +958,7 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
         from accounts import DEFAULT_BUDGET, live_limits
         summary = snapshots['balance'].get('Output_0') or {}
         capital = int((record.get('budget') or {}).get('capital_krw') or DEFAULT_BUDGET['live']['capital_krw'])
-        invested, cash = positive(summary.get('tot_byn_amt')) or 0, positive(summary.get('orr_pbl_amt1')) or 0
+        invested, cash = positive(summary.get('tot_byn_amt')) or 0, positive(orderable_cash(summary)) or 0
         room = min(capital - int(invested), int(cash))
         qty = min(qty, live_limits(record=record)['order_max_krw'] // price, max(room, 0) // price) if price else 0
         plan['capital_room'] = max(room, 0)

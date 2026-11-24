@@ -170,7 +170,10 @@ def select(read, candidates, now):
         price, previous = quote_data.get('stck_prpr'), quote_data.get('stck_prdy_clpr')
         if type(price) in (int, float) and type(previous) in (int, float) and previous > 0:
             market[name] = {'price': price, 'change_pct': round((price / previous - 1) * 100, 2)}
-    news = headlines7(now)
+    try:
+        news = headlines7(now)
+    except (OSError, ValueError, ET.ParseError):  # user 2026-11-24: the pick goes on without market news and Jev is told so
+        news = []
     criteria = {'NONE': 'no stock is suitable to trade today',
                 **{code: f"{s['name']} ({s.get('index')}): {', '.join(s.get('reasons') or [])}" for code, s in stocks.items()}}
     answer = _jev7_question(bars, news, 'watchlist', criteria,

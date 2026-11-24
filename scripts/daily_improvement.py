@@ -5,7 +5,7 @@ every round trip of the day with its entry route, exit, best/worst point and the
 route and exit reason; how often each restriction held a buy back; order-guard refusals with the day's buy total;
 same-day re-entries; late entries; orders sized below the tranche; runner errors and stops; Jev call outcomes and
 their hit rate by confidence band over the last N days (signal_calibration); every add's result and a size hint
-(add_sizing); what blocked strength picks and untraded new listings did afterwards (blocked_outcomes); the
+(add_sizing); Jev's entry probabilities summed by direction (direction_mass); what blocked strength picks and untraded new listings did afterwards (blocked_outcomes); the
 vibe virtual book; the last N trading days; and the settings in force.
 
   PYTHONPATH=agent:scripts .venv/bin/python scripts/daily_improvement.py [--day YYYY-MM-DD] [--days 10]
@@ -17,7 +17,7 @@ import json
 import sqlite3
 import sys
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from sqlite_ro import day_rows, ro_connect
@@ -188,6 +188,65 @@ def signal_calibration(root, day, days=10):
             return out
     except sqlite3.Error:
         return {}
+
+
+def news_gap_outcomes(root, day, days=10):
+    """뉴스 없는 판단 비교 (user 2026-11-24): Jev's entry and holding answers given with no fresh market headline
+    (model_inputs state.news_status) beside the rest: how many, how many settled, 30-minute hit rate and mean directional
+    move. Neighbouring answers overlap, so compare after 10 trading days. Observation only, no rule."""
+    try:
+        with ro_connect(Path(root) / 'market-research.sqlite3') as db:
+            dates = [r[0] for r in db.execute("SELECT DISTINCT substr(time,1,10) FROM model_inputs WHERE substr(time,1,10) <= ? "
+                                               "ORDER BY 1 DESC LIMIT ?", (day, days))]
+            out = {}
+            for label, since in (('today', day), (f'last_{len(dates)}_days', dates[-1] if dates else day)):
+                table = defaultdict(dict)
+                for question, missing, answers, settled, hit, move in db.execute(
+                        "SELECT m.question, json_extract(m.inputs, '$.state.news_status') IS NOT NULL, COUNT(DISTINCT m.digest), COUNT(o.r30), "
+                        "AVG(o.direction * o.r30 > 0), AVG(o.direction * o.r30) FROM model_inputs m LEFT JOIN decision_outcomes o "
+                        "ON o.input_digest = m.digest AND o.engine = 'jev' AND o.status = 'settled' AND o.r30 IS NOT NULL "
+                        "WHERE m.engine = 'jev' AND m.question IN ('candidate', 'holding') AND substr(m.time,1,10) BETWEEN ? AND ? "
+                        "GROUP BY 1, 2", (since, day)):
+                    table[question]['no_fresh_news' if missing else 'fresh'] = {
+                        'answers': answers, 'settled': settled,
+                        **({'hit_rate_30m': round(hit, 2), 'avg_move_30m_pct': round(move, 3)} if settled else {})}
+                out[label] = dict(table)
+            return out
+    except sqlite3.Error:
+        return {}
+
+
+MASS_MIN, MASS_GAP = 0.5, timedelta(minutes=30)
+
+
+def direction_mass_summary(root, day, days=10):
+    """방향 합계 관찰 (user 2026-11-24): Jev's entry probabilities summed by direction (position_paths.direction_mass). For
+    answers whose long or inverse sum reached MASS_MIN: how many, on how many days, how many had no single choice that
+    high (`split`), and the KODEX 200 move 30 minutes later in that direction. Answers come every minute and their 30-minute windows
+    overlap, so `separate` counts only answers at least 30 minutes apart; judge by that. Observation only, no rule."""
+    try:
+        with ro_connect(Path(root) / 'market-research.sqlite3') as db:
+            dates = [r[0] for r in db.execute('SELECT DISTINCT substr(time,1,10) FROM direction_mass WHERE substr(time,1,10) <= ? ORDER BY 1 DESC LIMIT ?', (day, days))]
+            rows = db.execute('SELECT time, "long", inverse, top_probability, k200_30 FROM direction_mass WHERE substr(time,1,10) BETWEEN ? AND ? ORDER BY time',
+                              (dates[-1] if dates else day, day)).fetchall()
+    except sqlite3.Error:
+        return {}
+    out = {}
+    for label, part in (('today', [r for r in rows if r[0][:10] == day]), (f'last_{len(dates)}_days', rows)):
+        out[label] = {'answers': len(part)}
+        for side, index, sign in (('long', 1, 1), ('inverse', 2, -1)):
+            picked, apart, last = [r for r in part if r[index] >= MASS_MIN], [], None
+            settled = [r for r in picked if r[4] is not None]
+            for r in settled:
+                at = datetime.fromisoformat(r[0])
+                if last is None or at - last >= MASS_GAP:
+                    apart.append(r)
+                    last = at
+            stats = lambda found: {'n': len(found), **({'avg_move_30m_pct': round(sum(sign * r[4] for r in found) / len(found), 3),  # noqa: E731
+                                                        'hit_rate_30m': round(sum(sign * r[4] > 0 for r in found) / len(found), 2)} if found else {})}
+            out[label][side] = {'n': len(picked), 'days': len({r[0][:10] for r in picked}),
+                                'split': sum(r[3] is None or r[3] < MASS_MIN for r in picked), 'settled': stats(settled), 'separate': stats(apart)}
+    return out
 
 
 def add_sizing(rows, day, days, settings, events, calibration):
@@ -388,6 +447,8 @@ def build(day, days=10):
         'jev_calls_30m': jev_calls(root, day),
         'signal_calibration': (calibration := signal_calibration(root, day, days)),
         'add_sizing': add_sizing(rows, day, days, settings, events, calibration),
+        'direction_mass': direction_mass_summary(root, day, days),
+        'news_gap': news_gap_outcomes(root, day, days),
         'blocked_outcomes': blocked_outcomes(root, day, days),
         'ipo_shadow': ipo_shadow_summary(root, day, days),
         'vibe_legacy_settled_excluded': unverified_calls(root, day),

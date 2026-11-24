@@ -68,10 +68,13 @@ def card(container, label, value, tone='off', icon=None, sub=None, help=None, pu
     container.markdown(html(label, value, tone, icon, sub, help, pulse, signed_sub), unsafe_allow_html=True)
 
 
-def row(items, columns=None):
-    """items: dicts of card() arguments; one row of equal columns."""
+def row(items, columns=None, ask=None):
+    """items: dicts of card() arguments; one row of equal columns. ask: a key that adds 'AI에게 묻기' chips below the row."""
     for col, item in zip(st.columns(columns or len(items)), items):
         card(col, **item)
+    if ask:
+        import ask_ai
+        ask_ai.card_questions(items, ask)
 
 
 # ── meaning → tone/icon ─────────────────────────────────────────────────────

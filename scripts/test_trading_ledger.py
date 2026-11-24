@@ -432,6 +432,12 @@ class StrengthShadowTests(unittest.TestCase):
   self.assertEqual((cooled['event'],cooled['symbol'],cooled['source']),('pick_cooldown','009150','watchlist_strength'))  # a refused pick rests (11-19)
   self.assertEqual(t.sanitize({**e,'symbol':None,'strength_reason':'pick_cooldown'})['strength_reason'],'pick_cooldown')
   self.assertNotIn('blocked',t.sanitize({**e,'blocked':'anything else'}))
+  seen={'time':'2026-11-24T09:21:47+09:00','event':'ipo_seen','symbol':'498150','why':'below_base','price':5700.0,'base':7000}
+  kept=t.sanitize(seen)
+  self.assertEqual((kept['symbol'],kept['why'],kept['price'],kept['base']),('498150','below_base',5700.0,7000))  # 11-24: only the symbol was kept
+  self.assertEqual(t.sanitize({**seen,'why':'pass'})['why'],'pass')
+  bad=t.sanitize({**seen,'why':'made up','price':-1,'base':True})
+  self.assertFalse({'why','price','base'}&set(bad))
   self.assertEqual(t.sanitize({**e,'blocked':'add_count_limit'})['blocked'],'add_count_limit')
 
 
@@ -613,3 +619,13 @@ def test_ingest_never_opens_an_existing_ledger_outside_sqlite(tmp_path):
                       if Path(path) == database else real_open(path, *a, **k)):
         assert t.ingest(source, database) == 1
     keep.close()
+
+
+def test_the_judged_quote_reaches_the_ledger():
+    import trading_ledger
+    quote = {'bid': 189000, 'ask': 189100, 'first_bid': 189300, 'avg': 178100.0, 'peak': 193200, 'quote_time': '09:34:00'}
+    base = {'time': '2026-11-24T09:34:01+09:00', 'symbol': '005930', 'cycle_id': 'a' * 32}
+    for event in ('holding_quote', 'v2_risk_exit', 'manual_exit', 'split_take_profit'):
+        kept = trading_ledger.sanitize({**base, 'event': event, **quote})
+        assert {k: kept[k] for k in quote} == quote
+    assert 'bid' not in trading_ledger.sanitize({**base, 'event': 'holding_quote', 'bid': -1, 'quote_time': 'x'})

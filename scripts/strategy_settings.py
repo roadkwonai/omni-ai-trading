@@ -70,7 +70,9 @@ DEFAULTS = {
     'scale_interval_min': 5,      # minimum time since the last fill for price-step adds
     'scale_max_adds': 2,          # adds after the first buy per position, every add path (user 2026-11-17; 2 = 3 tranches)
     'size_holding_on': 1,         # buys shrink past half of the per-symbol limit (position_sizing, user 2026-11-17)
-    'size_market_on': 1,          # buys shrink against the index regime: 횡보장 0.75, against 0.5
+    'size_market_on': 1,          # buys shrink against the index regime, to these shares (settings, user 2026-11-24):
+    'size_market_flat_pct': 75,   # ... in a 횡보장
+    'size_market_against_pct': 50,  # ... against the buy (long in a 하락장, inverse in a 상승장)
     'regime_trim_on': 1,          # a held position sells half once when its index regime turns against it
     'add_conf_sizing_on': 1,      # an engine-decision add must beat the last buy (add_reason)
     'add_size_pct': 50,           # an engine-decision add buys this % of a tranche (100 = a full tranche)
@@ -111,6 +113,10 @@ DEFAULTS = {
     'oversold_v2_hold_days': 3,         # otherwise sold at the flatten of this session (weekends/holidays not counted)
     # user 2026-11-17: a fast stop this % under the average buy price, then buy again at a held low (v2_reentry.py)
     'oversold_v2_stop_pct': 2.0,
+    # user 2026-11-24 (삼성전자, "시황 보고 판단해서 매도"): off by default, the 2026-11-13 rule (stop, target or sessions only)
+    'oversold_v2_jev_sell_on': 0,       # in profit, a Jev holding SELL at sell_confidence sells
+    'oversold_v2_trail_at_pct': 0.0,    # once the best bid is +this % over the average (0 = off) ...
+    'oversold_v2_trail_pct': 2.0,       # ... sell at this % under that high
     'oversold_v2_reentry_max': 2,       # re-buys after a stop per position (0 = off)
     'oversold_v2_reentry_hold_min': 20, # the low since the stop must hold this many minutes ...
     'oversold_v2_reentry_bounce_pct': 1.0,  # ... and the price be this % off it
@@ -124,7 +130,7 @@ DEFAULTS = {
     'flatten_hhmm': 1440,
 }
 SWITCH_KEYS = ('direction_switch', 'reentry_guard', 'reentry_allow', 'careful_reentry_on', 'losing_streak_guard', 'averaging_down_guard', 'opposite_guard', 'direction_confirm',
-               'rising_check', 'ipo_add_guard', 'ipo_slot_on', 'strength_slot_on', 'oversold_on', 'oversold_lev_on', 'oversold_v2_on',
+               'rising_check', 'ipo_add_guard', 'ipo_slot_on', 'strength_slot_on', 'oversold_on', 'oversold_lev_on', 'oversold_v2_on', 'oversold_v2_jev_sell_on',
                'scale_signal_add_on', 'scale_step_add_on', 'scale_profit_rebuy_on', 'add_conf_sizing_on', 'size_holding_on',
                'size_market_on', 'regime_trim_on')
 LIMITS = {
@@ -145,7 +151,7 @@ LIMITS = {
     'ipo_slot_on': (0, 1), 'ipo_daily_max': (1, 10), 'ipo_time_stop_min': (0, 390),
     'strength_slot_on': (0, 1), 'strength_slot_max': (1, 5), 'strength_slot_daily': (1, 10),
     'scale_signal_add_on': (0, 1), 'scale_step_add_on': (0, 1), 'scale_profit_rebuy_on': (0, 1),
-    'scale_interval_min': (1, 60), 'scale_max_adds': (0, 100), 'size_holding_on': (0, 1), 'size_market_on': (0, 1), 'regime_trim_on': (0, 1), 'add_conf_sizing_on': (0, 1), 'add_size_pct': (10, 100), 'partial_sell_conf': (0.5, 0.95), 'partial_sell_pct': (10, 90),
+    'scale_interval_min': (1, 60), 'scale_max_adds': (0, 100), 'size_holding_on': (0, 1), 'size_market_on': (0, 1), 'size_market_flat_pct': (25, 100), 'size_market_against_pct': (25, 100), 'regime_trim_on': (0, 1), 'add_conf_sizing_on': (0, 1), 'add_size_pct': (10, 100), 'partial_sell_conf': (0.5, 0.95), 'partial_sell_pct': (10, 90),
     'oversold_on': (0, 1), 'oversold_stock_drop_pct': (1.0, 30.0), 'oversold_etf_drop_pct': (0.5, 15.0), 'oversold_lev_on': (0, 1),
     'oversold_lev_drop_pct': (1.0, 30.0), 'oversold_atr_mult': (0.0, 5.0), 'oversold_calm_min': (1, 25), 'oversold_rebound_pct': (0.0, 5.0),  # calm: the runners read 30 one-minute bars
     'oversold_size_pct': (50, 1000), 'oversold_tp_pct': (0.3, 15.0), 'oversold_recover_pct': (20, 100), 'oversold_stop_pct': (0.1, 5.0), 'oversold_market_drop_pct': (0.0, 15.0),
@@ -155,6 +161,7 @@ LIMITS = {
     'oversold_v2_index_drop_pct': (3.0, 20.0),
     'oversold_v2_capit_drop_pct': (2.0, 15.0), 'oversold_v2_prior5_pct': (0.0, 20.0), 'oversold_v2_rel_max_pct': (0.5, 15.0),
     'oversold_v2_add_on': (0, 1), 'oversold_v2_half_tp_pct': (2.0, 30.0),
+    'oversold_v2_jev_sell_on': (0, 1), 'oversold_v2_trail_at_pct': (0.0, 30.0), 'oversold_v2_trail_pct': (0.5, 15.0),
     'oversold_v2_stop_pct': (1.0, 25.0), 'oversold_v2_tp_pct': (3.0, 45.0), 'oversold_v2_hold_days': (1, 10),
     'oversold_v2_size_pct': (10, 1000), 'oversold_v2_veto_conf': (0.5, 1.0), 'oversold_v2_vibe_veto': (-1.0, 0.0),
     'oversold_v2_boost_pct': (100, 200), 'oversold_v2_max_new': (1, 6),
@@ -185,7 +192,8 @@ LABELS = {
     'scale_signal_add_on': '새 매수 판단으로 보유 종목 추가 매수',
     'scale_step_add_on': '가격 단계 도달 시 보유 종목 추가 매수',
     'scale_profit_rebuy_on': '일부 익절 후 재매수',
-    'scale_interval_min': '가격 단계 추가 매수 최소 간격(분)', 'scale_max_adds': '종목당 추가 매수 최대 횟수(첫 매수 제외)', 'add_conf_sizing_on': '추가 매수는 직전보다 나은 조건일 때만 (1=켬)', 'add_size_pct': '추가 매수 크기 (새 판단·가격 단계, 분할 1회 대비 %)', 'partial_sell_conf': '엔진 일부 매도 시작 신뢰도', 'partial_sell_pct': '엔진 일부 매도 비율 %', 'size_holding_on': '매수 비중: 보유가 종목당 한도 절반을 넘으면 줄이기 (1=켬)', 'size_market_on': '매수 비중: 시황 방향 배율 (같음 100%·횡보 75%·반대 50%, 1=켬)', 'regime_trim_on': '시황 역전 시 보유 절반 매도 (포지션당 1번, 1=켬)',
+    'scale_interval_min': '가격 단계 추가 매수 최소 간격(분)', 'scale_max_adds': '종목당 추가 매수 최대 횟수(첫 매수 제외)', 'add_conf_sizing_on': '추가 매수는 직전보다 나은 조건일 때만 (1=켬)', 'add_size_pct': '추가 매수 크기 (새 판단·가격 단계, 분할 1회 대비 %)', 'partial_sell_conf': '엔진 일부 매도 시작 신뢰도', 'partial_sell_pct': '엔진 일부 매도 비율 %', 'size_holding_on': '매수 비중: 보유가 종목당 한도 절반을 넘으면 줄이기 (1=켬)', 'size_market_on': '매수 비중: 시황 방향 배율 (같은 방향은 100%, 1=켬)',
+    'size_market_flat_pct': '매수 비중: 횡보장 크기 %', 'size_market_against_pct': '매수 비중: 반대 방향 크기 % (하락장 일반 매수·상승장 인버스)', 'regime_trim_on': '시황 역전 시 보유 절반 매도 (포지션당 1번, 1=켬)',
     'entry_cutoff_hhmm': '신규 매수 마감 시각', 'flatten_hhmm': '장 마감 정리 시각',
     'oversold_on': '낙폭과대 반등 매매', 'oversold_stock_drop_pct': '낙폭과대: 개별주 낙폭 % (전일 대비 저가)',
     'oversold_etf_drop_pct': '낙폭과대: ETF 낙폭 %', 'oversold_lev_drop_pct': '낙폭과대: 2배 ETF 낙폭 %',
@@ -201,6 +209,8 @@ LABELS = {
     'oversold_v2_vibe_veto': '선별 v2: 리서치 거부 (vibe 점수 이하)', 'oversold_v2_boost_pct': '선별 v2: 리서치 강한 동의 시 크기 %',
     'oversold_v2_index_drop_pct': '선별 v2: 지수 폭락 % (저가)', 'oversold_v2_capit_drop_pct': '선별 v2: 투매 지수 낙폭 %',
     'oversold_v2_prior5_pct': '선별 v2: 투매 직전 5일 지수 하락 %', 'oversold_v2_rel_max_pct': '선별 v2: 시장보다 더 빠진 한도 %p',
+    'oversold_v2_jev_sell_on': '선별 v2: 수익 중 Jev 매도 판단으로 팔기 (1=켬)',
+    'oversold_v2_trail_at_pct': '선별 v2: 고점 되밀림 매도 시작 % (평균가 대비, 0=끔)', 'oversold_v2_trail_pct': '선별 v2: 고점에서 되밀림 %',
     'oversold_v2_stop_pct': '선별 v2: 손절 (평균 매입가 대비 %)', 'oversold_v2_tp_pct': '선별 v2: 나머지 익절 %',
     'oversold_v2_hold_days': '선별 v2: 보유 거래일', 'oversold_v2_size_pct': '선별 v2: 매수 크기 (1·2차 합계, 분할 1회 대비 %)',
     'oversold_v2_max_new': '선별 v2: 하루 매수 종목 수',
@@ -240,7 +250,7 @@ def problems(values):
         if values[key] != int(values[key]) or int(values[key]) % 100 >= 60:
             issues.append(f'{LABELS[key]}이 올바른 시각(예: 1430)이 아닙니다.')
     for key in ('swing_max_days', 'scale_interval_min', 'scale_max_adds', 'ipo_daily_max', 'strength_slot_max', 'strength_slot_daily', 'ipo_time_stop_min',
-                'add_size_pct', 'oversold_calm_min', 'oversold_hold_days', 'oversold_size_pct', 'oversold_v2_hold_days', 'oversold_v2_size_pct',
+                'add_size_pct', 'size_market_flat_pct', 'size_market_against_pct', 'oversold_calm_min', 'oversold_hold_days', 'oversold_size_pct', 'oversold_v2_hold_days', 'oversold_v2_size_pct',
                 'oversold_v2_max_new', 'oversold_v2_reentry_max', 'oversold_v2_reentry_hold_min'):
         if values[key] != int(values[key]):
             issues.append(f'{LABELS[key]}는 정수여야 합니다.')

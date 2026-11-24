@@ -67,6 +67,27 @@ STRATEGY = (
     '매매일지에서 진입 근거와 청산 결과를 어떻게 복기하나요?',
 )
 
+# Money that is hard to get back: check an offer before sending, and split a retirement payout by when it is needed.
+OFFER = (
+    '원금을 보장하고 월 5% 수익을 준다는 투자 권유를 받았습니다. 보내기 전에 확인할 점과 공식 확인처를 알려 주세요.',
+    '유명인이 추천하는 투자 대화방이 사칭인지 어디에서 어떻게 확인하나요?',
+    '금융회사나 투자자문업체가 정식으로 등록된 곳인지 어디에서 확인하나요?',
+    '투자 앱을 설치하거나 원격 제어를 허용해 달라고 하면 무엇을 의심해야 하나요?',
+    '이미 투자금을 보냈는데 사기가 의심됩니다. 가장 먼저 무엇을 해야 하나요?',
+    '퇴직금을 한꺼번에 받을 때와 연금으로 받을 때 무엇을 비교해야 하나요?',
+    '퇴직 후 곧 쓸 돈과 오래 둘 돈은 어떤 기준으로 나누나요?',
+)
+# Outside trading: general questions before starting a business, recorded with scripts/startup_template.py.
+STARTUP = (
+    '퇴직 후 음식점을 창업하기 전에 확인할 공공 자료는 무엇인가요?',
+    '가맹사업 정보공개서에서 먼저 볼 항목은 무엇인가요?',
+    '가게를 열려는 동네의 상권 정보는 어디에서 어떻게 확인하나요?',
+    '업종별 생존율과 폐업 통계는 어디에서 보고 어떻게 읽나요?',
+    '월세와 인건비가 있는 가게의 손익분기점을 수식 기호 없이 예를 들어 계산해 주세요.',
+    '창업 자금과 생활비, 비상금을 나눠 두는 방법을 예로 설명해 주세요.',
+    '작은 가게를 언제 정리할지 월 적자와 날짜를 기준으로 정하는 예를 수식 기호 없이 보여 주세요.',
+    '폐업할 때 드는 비용과 확인할 공공 지원은 무엇인가요?',
+)
 
 def glossary() -> dict[str, str]:
     from guides import GUIDES
@@ -81,24 +102,32 @@ def glossary() -> dict[str, str]:
 def groups() -> dict[str, tuple[str, ...]]:
     return {
         '서비스 사용법': USAGE,
-        '서비스 용어': tuple(f'이 서비스에서 ‘{term}’은 무슨 뜻인가요?' for term in glossary()),
+        '서비스 용어': tuple(f'이 서비스에서 ‘{term}’의 뜻은 무엇인가요?' for term in glossary()),
         'Jev·투자 성과': JEV,
         '투자 거장': INVESTORS,
         '투자 기초': INVESTING,
         '시장·데이터': MARKET,
         '전략·위험 관리': STRATEGY,
+        '노후 자금·투자 권유': OFFER,
+        '창업 준비': STARTUP,
     }
 
 
 GUIDE_SECTIONS = {
     'docs/ai-search.md': {
-        '빠른 시작': ('AI 검색 사용법', 'AI 검색 가이드', 'AI 검색 처음'),
+        '빠른 시작': ('AI 검색', 'AI 검색 사용법', 'AI 검색 가이드', 'AI 검색 처음'),
         '웹 검색과 최근 주요 뉴스': ('AI 검색 결과', '뉴스 별점', '시장 영향 분석', '형광펜'),
         '투자 AI 채팅과 출처': ('AI 채팅', '마크다운 복사', 'AI 답변 출처'),
         '내부 데이터 읽기': ('내부 조회', '내부 데이터', '원장 조회'),
         '추천 질문': ('다른 질문', '추천 태그'),
-        '화면 배치와 스크롤': ('AI 검색 화면', '채팅 스크롤', '모달 스크롤'),
-        '최근 검색·질문': ('검색 이력', '채팅 이력'),
+        '투자 공부 순서': ('투자 공부', '투자 초보'),
+        '투자 권유 확인': ('투자 권유', '리딩방', '투자 사기'),
+        '창업 준비 점검': ('창업 준비', '창업 점검', '폐업'),
+        '작은 창으로 묻기': ('작은 창', '플로팅', 'AI에게 묻기', '채팅창'),
+        '화면에서 바로 묻기': ('드래그', '화면에서 묻기', '용어 묻기', '카드 묻기'),
+        '화면 배치와 스크롤': ('AI 검색 화면', '채팅 스크롤', '모달 스크롤', '패널 접기', '카드 접기'),
+        '지난 대화': ('대화 이력', '이전 대화', '지난 답변', '대화 기록'),
+        '다시 요청하기': ('검색 이력', '채팅 이력'),
         '진행 상태와 오류': ('AI 검색 로딩', '경과 시간', 'AI 검색 오류'),
         '키 설정과 요금': ('AI 검색 요금', 'Liner 키'),
     },
@@ -107,7 +136,7 @@ GUIDE_SECTIONS = {
         '탭 한눈에 보기': ('탭 목록', '대시보드 기능'),
         '가이드 팝업과 도식': ('가이드 센터', '화면 안내', '가이드 팝업'),
         '시장 상황': ('장전 분석', '투자자 수급', '외국인 수급', '프로그램매매'),
-        '트레이딩 현황': ('체결 기록', '매수 판단', '진입 차단', '판단 근거', '모의계좌'),
+        '트레이딩 현황': ('체결 기록', '매수 판단', '진입 차단', '판단 근거', '대기했는지', '모의계좌'),
         '매매일지': ('매매 복기', '매수·매도 차트', '일별 거래 내역'),
         '성과 비교': ('엔진 비교', 'Jev 수익률', 'Jev 성과', '최대 낙폭', '투자 성능', 'CSV로 받을', '일별 기록', 'CSV 내려받기', 'CSV로 내려받'),
         '장기투자': ('목표 비중', '가상 장부', '장기투자 설정'),
@@ -120,7 +149,7 @@ GUIDE_SECTIONS = {
         '진입 경로': ('매수 조건', '매수 진입', '관심종목 강도'),
         '낙폭과대 반등 (0번 경로)': ('낙폭과대', '선별 v2', '낙주매매'),
         '청산 프로필': ('추적 손절', '분할 익절', '방어형', '추세형'),
-        '장 마감과 이월·스윙': ('이월', '종가매매', '마감 정리'),
+        '장 마감과 이월·스윙': ('이월 보유', '이월 조건', '종가매매', '마감 정리'),
         '제한 규칙': ('재진입 제한', '연속 손실', '물타기'),
     },
     'docs/longterm.md': {
@@ -165,7 +194,7 @@ def find_guides(question: str) -> list[dict[str, str]]:
     hits = []
     for term, explanation in glossary().items():
         keyword = normalized(term)
-        if keyword and keyword in query:
+        if keyword in query and (len(keyword) > 2 or f'‘{term}’' in question):  # '상관' is also in '상관없이'
             hits.append((len(keyword) + 12, {'문서': 'streamlit_namuh/guides.py', '항목': term, '본문': explanation}))
 
     jev_performance = 'jev' in query and any(word in query for word in ('성과', '성능', '수익', '낙폭', '승률'))
@@ -176,7 +205,7 @@ def find_guides(question: str) -> list[dict[str, str]]:
     for relative, allowed in GUIDE_SECTIONS.items():
         candidates = []
         for title, aliases in allowed.items():
-            keywords = [term for alias in (title, *aliases) if (term := normalized(alias)) in query]
+            keywords = [term for alias in (title, *aliases) if len(term := normalized(alias)) > 2 and term in query]
             score = max(map(len, keywords), default=0)
             if title == '성과 비교' and jev_performance:
                 score += 15

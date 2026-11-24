@@ -331,3 +331,29 @@ def test_section_three_shows_each_masters_view_and_the_check_requires_it_from_th
     bad = views(yeo={'view': '목표가 30,000원', 'action': '몰빵', 'vs_engine': ''})
     found = ' '.join(R.json_problems({**good_json(), 'master_views': bad}, nav, day='2026-11-19'))
     assert '가격' in found and 'action' in found and 'vs_engine' in found
+
+
+def test_the_report_data_carries_every_headline_with_its_link_and_time(decided):
+    # 2026-11-24: links and times came out empty (the record calls them link and published), and 12 rows cut two topics
+    rows = [{'topic': f't{i}', 'title': f'n{i}', 'publisher': 'p', 'link': f'https://x/{i}', 'published': '2026-11-23T20:00:00+00:00', 'source': 's'} for i in range(18)]
+    with L.connect(decided) as db:
+        db.execute("UPDATE decisions SET indicators=? WHERE kind='news'", (json.dumps({'rows': rows}),))
+    got = R.news_rows(decided, DAY.isoformat())
+    assert len(got) == 18 and got[17]['url'] == 'https://x/17' and got[0]['time'] == '2026-11-24 05:00'
+
+
+def test_the_reservoir_and_the_yeo_etf_are_valued_as_what_the_book_really_holds(decided, monkeypatch):
+    # 2026-11-24: CD금리(357870) at 58,420 was priced as KOFR (112,530): '+92.6%'; 0261H0 read as a 관심목록 sleeve worth 0
+    L.save_settings(decided, {'books': {'actual': {'strategy': 'yeo_method'}}})
+    fills = [{'symbol': '357870', 'after': 82, 'avg': 58_420.0}, {'symbol': '0261H0', 'after': 256, 'avg': 9_852.0}, {'symbol': '005930', 'after': 3, 'avg': 1.0}]
+    monkeypatch.setattr(L, 'journal_rows', lambda root: fills)
+
+    def fetch(symbol, years=2):
+        return {DAY: 58_430.0} if symbol.startswith('357870') else fake_fetch(symbol, years)
+    facts = R.data(DAY.isoformat(), root=decided, reports=decided / 'reports', fetch=fetch, context=False)
+    res = facts['tp_rebalance']['assets']['RES']
+    assert res['close'] == 58_430.0 and abs(res['gain']) < 0.001 and facts['account']['reservoir'] == '357870'
+    assert facts['account']['sleeve'] == {'005930': [3, 1.0]} and facts['account']['yeo'] == {'NDXMIX': [256, 9_852.0]}
+    assert not any(x['active'] for x in facts['levels'] if x['kind'] == 'rule')  # the master modules do not run this book
+    text = R.report_md(facts)
+    assert 'TIGER CD금리투자KIS(합성)' in text and 'KODEX 미국나스닥100미국채혼합50' in text and '규칙(이 장부 미적용)' in text

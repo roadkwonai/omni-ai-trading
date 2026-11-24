@@ -10,6 +10,9 @@ from datetime import datetime
 from pathlib import Path
 from etf_universe import SYMBOLS as ETF_SYMBOLS
 from etf_universe import CODE_PATTERN
+IPO_REASONS = ('ipo_daily_limit', 'ipo_off', 'ipo_too_early', 'ipo_already_held', 'no_new_listing', 'listing_unconfirmed', 'ipo_quote_unavailable',
+               'ipo_bars_unavailable', 'below_base', 'below_open', 'off_high', 'trend_not_rising', 'volume_not_rising', 'pick_cooldown')
+MARKET_SOURCE = re.compile(r'NH KRX 1-minute completed bars(?: \(Kiwoom KRX: [0-9A-Z]{6}(?:, [0-9A-Z]{6}){0,39}\))?')  # nh_paper_isolated.bars_source
 from src.tools.private_db import private_file
 
 ROOT = Path.home() / '.vibe-trading/nhplug/etf-experiment'
@@ -17,7 +20,7 @@ EVENTS = ROOT / 'events.jsonl'
 DATABASE = ROOT / 'trading-ledger.sqlite3'
 SYMBOLS = set(ETF_SYMBOLS.values()) | {'005930', '035420', '035720'}
 CHOICES = {'WAIT', 'HOLD', 'SELL', 'SAMSUNG', 'NAVER', 'KAKAO'} | set(ETF_SYMBOLS)
-EVENT_TYPES = {'started', 'stopped', 'decision', 'market_context', 'jev_shadow', 'jev_error', 'jev_holding_decision', 'error', 'submitted', 'sell_submitted', 'order_status', 'buy_unfilled', 'roundtrip_verified', 'order_limit', 'v2_started', 'v2_stopped', 'v2_error', 'v2_submitted', 'v2_cancel_submitted', 'v2_order_status', 'v2_holding_decision', 'v2_holding_decision_error', 'v2_entry_gate', 'v2_risk_exit', 'v2_risk_exit_error', 'v2_execution_gate', 'v2_news_error', 'manual_exit', 'split_add', 'split_take_profit', 'strategy_settings', 'vibe_exit', 'exit_plan', 'overnight_hold', 'watchlist_strength', 'new_listing', 'direction_switch', 'oversold_scan', 'oversold_signal', 'oversold_v2_gate', 'oversold_v2_signal', 'strength_shadow',
+EVENT_TYPES = {'holding_quote', 'started', 'stopped', 'decision', 'market_context', 'jev_shadow', 'jev_error', 'jev_holding_decision', 'error', 'submitted', 'sell_submitted', 'order_status', 'buy_unfilled', 'roundtrip_verified', 'order_limit', 'v2_started', 'v2_stopped', 'v2_error', 'v2_submitted', 'v2_cancel_submitted', 'v2_order_status', 'v2_holding_decision', 'v2_holding_decision_error', 'v2_entry_gate', 'v2_risk_exit', 'v2_risk_exit_error', 'v2_execution_gate', 'v2_news_error', 'manual_exit', 'split_add', 'split_take_profit', 'strategy_settings', 'vibe_exit', 'exit_plan', 'overnight_hold', 'watchlist_strength', 'new_listing', 'direction_switch', 'oversold_scan', 'oversold_signal', 'oversold_v2_gate', 'oversold_v2_signal', 'strength_shadow',
                'oversold_atr_status', 'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown', 'ipo_seen'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
 
 REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_reentry_no_session', 'careful_reentry_jev_wait',
@@ -77,6 +80,12 @@ def sanitize(event):
             value = event.get(key)
             if type(value) in (int, float) and 0 <= value < 1e9:
                 result[key] = value
+    if event['event'] in ('holding_quote', 'v2_risk_exit', 'manual_exit', 'split_take_profit'):  # the quote it was judged on
+        for key in ('bid', 'ask', 'first_bid', 'avg', 'peak'):
+            if type(event.get(key)) in (int, float) and 0 < event[key] < 1e9:
+                result[key] = event[key]
+        if isinstance(event.get('quote_time'), str) and re.fullmatch(r'[0-2]\d:[0-5]\d:[0-5]\d', event['quote_time']):
+            result['quote_time'] = event['quote_time']
     if type(event.get('permitted')) is bool: result['permitted'] = event['permitted']
     # 2026-11-12 audit: plan profile, split tranche, stop reason and internal error text were being dropped
     if event.get('profile') in ('defensive', 'trend', 'ipo', 'inverse_quick', 'inverse_crash', 'oversold'): result['profile'] = event['profile']
@@ -112,8 +121,13 @@ def sanitize(event):
             result['turnover_pct'] = event['turnover_pct']
         if type(event.get('sessions')) is int and 0 <= event['sessions'] <= 10:
             result['sessions'] = event['sessions']
-    if event.get('ipo_reason') in ('ipo_daily_limit', 'ipo_off', 'ipo_too_early', 'ipo_already_held', 'no_new_listing', 'listing_unconfirmed', 'ipo_quote_unavailable',
-                                   'ipo_bars_unavailable', 'below_base', 'below_open', 'off_high', 'trend_not_rising', 'volume_not_rising', 'pick_cooldown'):
+    if event['event'] == 'ipo_seen':  # each listing's own verdict (nh_paper_isolated.ipo_candidate)
+        if event.get('why') in (*IPO_REASONS, 'pass'):
+            result['why'] = event['why']
+        for key in ('price', 'base'):
+            if type(event.get(key)) in (int, float) and 0 < event[key] < 1e8:
+                result[key] = event[key]
+    if event.get('ipo_reason') in IPO_REASONS:
         result['ipo_reason'] = event['ipo_reason']
     if event.get('bar_problem') in ('quote_error', 'bar_response_invalid', 'bars_missing', 'insufficient_bars', 'stale_bars', 'other'):
         result['bar_problem'] = event['bar_problem']
@@ -191,7 +205,7 @@ def sanitize(event):
         result['recent_range_pct'] = {k:v for k,v in ranges.items() if k in CHOICES and type(v) in (int,float) and 0 <= v < 1e6}
     if event.get('model') in {'gpt-6-luna', 'jev-1.14.0'}:
         result['model'] = event['model']
-    if event.get('market_source') == 'NH KRX 1-minute completed bars':
+    if isinstance(event.get('market_source'), str) and MARKET_SOURCE.fullmatch(event['market_source']):
         result['market_source'] = event['market_source']
     bars = event.get('market_bars')
     if bars is not None:

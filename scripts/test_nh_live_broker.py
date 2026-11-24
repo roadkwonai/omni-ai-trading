@@ -257,3 +257,59 @@ def test_snapshots_pass_their_sleep_to_the_page_gap():
     waits = []
     collect_snapshots(reader, A, NOW, sleep=waits.append, symbol=None)
     assert any(w > 0.5 for w in waits)  # the page gap went through the given sleep
+
+
+class TwoPageBalance(FakeReader):
+    """NH gives the balance totals only once every holding is read: 0 on the first page, real on the last (11-23 live-1)."""
+    last = {'orr_pbl_amt1': 0, 'tot_aet_amt': 1500255, 'tot_byn_amt': 178700, 'tot_eal_amt': 177500, 'nas_amt': 1500255, 'tot_eal_pls': -1200}
+
+    def call_tool(self, tool, args):
+        response = super().call_tool(tool, args)
+        if tool == 'call_api' and args['operationId'] == 'krstockInquiryBalance':
+            data = response['data']
+            if 'cts' not in args:
+                data.update(rsp_cd='00218', rsp_msg='계속 조회시 다음(연속조회) 버튼을 누르시기 바랍니다.',
+                            Output_0={**dict.fromkeys(self.last or TwoPageBalance.last, 0), 'orr_pbl_amt1': 1322754},
+                            _nh_pagination={'complete': False, 'cts': 'next', 'cts_flag': 'Y'})
+            elif self.last is None:
+                del data['Output_0']
+            else:
+                data['Output_0'] = dict(self.last)
+        return response
+
+
+def test_a_paged_balance_takes_its_totals_from_the_last_page(tmp_path, monkeypatch):
+    monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+    monkeypatch.setattr('nh_live_broker.PAGE_GAP', 0)
+    snapshots = collect_snapshots(TwoPageBalance(), A, NOW, sleep=lambda _: None)
+    summary = snapshots['balance']['Output_0']
+    assert summary['orr_pbl_amt1'] == 1322754  # the cash is on the first page
+    assert (summary['tot_aet_amt'], summary['tot_byn_amt'], summary['tot_eal_amt']) == (1500255, 178700, 177500)
+    guard = LiveOrderGuard(A, tmp_path / 'guard')
+    assert guard.reserve('krstockOrderCashBuy', FIELDS, now=NOW, **snapshots)  # was refused: 'capital limit exceeded'
+    other = LiveOrderGuard(A, tmp_path / 'full')  # what is already held still counts against the capital
+    with pytest.raises(LiveOrderBlocked, match='capital limit'):
+        other.reserve('krstockOrderCashBuy', FIELDS, now=NOW, capital=179000, **snapshots)
+
+
+def test_a_paged_balance_without_final_totals_blocks_buys(tmp_path, monkeypatch):
+    monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+    monkeypatch.setattr('nh_live_broker.PAGE_GAP', 0)
+    reader = TwoPageBalance()
+    reader.last = None
+    snapshots = collect_snapshots(reader, A, NOW, sleep=lambda _: None)
+    assert 'tot_aet_amt' not in snapshots['balance']['Output_0']  # unknown, never the first page's 0
+    with pytest.raises(LiveOrderBlocked, match='unverified'):
+        LiveOrderGuard(A, tmp_path / 'guard').reserve('krstockOrderCashBuy', FIELDS, now=NOW, **snapshots)
+
+
+def test_orderable_cash_counts_a_sale_that_has_not_settled():
+    # 2026-11-24 실계좌 1 after selling 005930: what NH lets it buy with no unpaid balance was 1,509,321
+    from nh_live_broker import orderable_cash
+    summary = {'orr_pbl_amt1': 1322755, 'orr_pbl_amt4': 1509321, 'nxt2_dd_dca': 1509321}
+    assert orderable_cash(summary) == 1509321
+    assert orderable_cash({**summary, 'nxt2_dd_dca': 1400000}) == 1400000  # never above the money settled by D+2
+    assert orderable_cash({'orr_pbl_amt1': 433910, 'orr_pbl_amt4': 433892, 'nxt2_dd_dca': 433910}) == 433892
+    for bad in ({'orr_pbl_amt4': 0}, {'orr_pbl_amt4': None}, {'orr_pbl_amt4': '1509321'}, {'nxt2_dd_dca': None}):
+        assert orderable_cash({**summary, **bad}) == 1322755  # unsure: the settled cash, as before
+    assert orderable_cash({}) is None and orderable_cash(None) is None

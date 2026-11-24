@@ -154,9 +154,9 @@ class RotationTests(unittest.TestCase):
             self.assertEqual((sum('google' in c for c in calls), sum('bing' in c for c in calls)), (1, 1))
             calls.clear()
             naver_titles.append('반도체 수출')
-            rows = etf_news.headlines7(NOW + timedelta(minutes=4))  # the next fetch starts at Naver, one request for all topics
+            rows = etf_news.headlines7(NOW + timedelta(minutes=4))  # the next fetch starts at Naver, its two lists for all topics
             self.assertEqual({r['source'] for r in rows}, {'naver_finance_news'})
-            self.assertEqual((len(calls), rows[0]['published']), (1, '2026-11-11T01:30:00+00:00'))
+            self.assertEqual((len(calls), rows[0]['published']), (2, '2026-11-11T01:30:00+00:00'))
             calls.clear()
             etf_news.headlines7(NOW + timedelta(minutes=8))  # ... then Google again, never Bing first
             self.assertIn('google', calls[0])
@@ -180,7 +180,36 @@ class RotationTests(unittest.TestCase):
         calls, patcher = self.serve({'google': down, 'bing': down, 'naver': down})
         with patcher, self.assertRaises(OSError):
             etf_news.headlines7(NOW)
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)  # Google, Naver's two lists, Bing
+
+    def test_the_search_asks_google_for_the_last_two_hours_and_bing_for_its_shortest_range(self):
+        # user 2026-11-24: 'when:1d' is relevance-ranked over a day and left out the newest stories (13:12 no Jev call)
+        calls, patcher = self.serve({'google': lambda url: feed('무관한 기사'), 'naver': lambda url: naver('무관한 기사'),
+                                     'bing': lambda url: bing('코스피 코스닥 반도체')})
+        with patcher:
+            etf_news.headlines7(NOW)
+        google, bings = ([c for c in calls if host in c] for host in ('google', 'bing'))
+        self.assertTrue(len(google) == 3 and all('when%3A2h' in c for c in google))
+        self.assertTrue(bings and all('when' not in c and 'interval%3D%227%22' in c for c in bings))
+
+    def test_naver_reads_main_and_flash_news_and_keeps_either_when_the_other_fails(self):
+        def lists(main, flash):
+            def answer(url):
+                body = flash if 'category=flashnews' in url else main
+                if body is None:
+                    raise OSError('offline')
+                return body
+            return answer
+        main, flash = naver('코스피 마감'), naver('코스피 마감', '코스닥 속보')  # the same story in both lists counts once
+        for pair, expected in (((main, flash), ['코스피 마감', '코스닥 속보']), ((None, flash), ['코스피 마감', '코스닥 속보']),
+                               ((main, None), ['코스피 마감'])):
+            with self.subTest(pair=expected):
+                _, patcher = self.serve({'naver': lists(*pair)})
+                with patcher:
+                    self.assertEqual([row[0] for row in etf_news._naver()], expected)
+        _, patcher = self.serve({'naver': lists(None, None)})
+        with patcher, self.assertRaises(OSError):
+            list(etf_news._naver())
 
 
 if __name__ == '__main__':
@@ -221,13 +250,13 @@ def test_jev_market_headlines_only_backfills_topics_missing_a_recent_article():
     rows = [{'title': title, 'topic': topic, 'published': (now - timedelta(minutes=age)).isoformat()}
             for title, topic, age in [('시장 보충 불필요', 'market', 31),
                                       ('시장 정확히 30분', 'market', 30),
-                                      ('코스닥 정확히 60분', 'kosdaq150', 60),
-                                      ('반도체 시간 초과', 'semiconductor', 60.01),
+                                      ('코스닥 정확히 90분', 'kosdaq150', 90),
+                                      ('반도체 시간 초과', 'semiconductor', 90.01),
                                       ('주제 미확인 보충 제외', None, 40),
                                       ('미래 기사 제외', 'semiconductor', -1)]]
     actual = etf_news.jev_market_headlines(rows, now)
     assert [(n['title'], n['news_role']) for n in actual] == [
-        ('시장 정확히 30분', 'priority'), ('코스닥 정확히 60분', 'topic_fallback')]
+        ('시장 정확히 30분', 'priority'), ('코스닥 정확히 90분', 'topic_fallback')]
     assert all('news_role' not in row for row in rows)
 
 
@@ -236,8 +265,8 @@ def test_jev_backfill_checks_missing_topics_from_alternate_sources_and_caches_re
 
     now = datetime(2026, 11, 23, 12, 46, tzinfo=ZoneInfo('Asia/Seoul'))
     rows = [{'title': topic, 'topic': topic, 'source': src, 'published': (now - timedelta(minutes=age)).isoformat()}
-            for topic, src, age in [('market', 'naver_finance_news', 35), ('kosdaq150', 'google_news_rss', 65),
-                                    ('semiconductor', 'naver_finance_news', 76)]]
+            for topic, src, age in [('market', 'naver_finance_news', 35), ('kosdaq150', 'google_news_rss', 95),
+                                    ('semiconductor', 'naver_finance_news', 106)]]
     calls = []
 
     def items(source, topic, query, shared, *, timeout):
@@ -245,7 +274,7 @@ def test_jev_backfill_checks_missing_topics_from_alternate_sources_and_caches_re
         calls.append((source, topic))
         if (source, topic) == ('google_news_rss', 'semiconductor'):
             return [('반도체 장중 시황', '매체', now - timedelta(minutes=31), '')]
-        return [('코스닥 이전 기사', '매체', now - timedelta(minutes=61), '')]
+        return [('코스닥 이전 기사', '매체', now - timedelta(minutes=91), '')]
 
     with patch.dict(etf_news._JEV_TOPIC_CACHE, {}, clear=True), patch.object(etf_news, '_items', side_effect=items):
         improved, stats = etf_news.supplement_jev_topics(rows, now)
@@ -292,3 +321,55 @@ class NewsBackoffTests(unittest.TestCase):
     def test_no_recent_story_is_not_refetched_every_call(self):
         old = datetime(2026, 11, 19, 7, 0, tzinfo=ZoneInfo('Asia/Seoul'))
         self.run_twice(lambda source: [('코스피 코스닥 반도체 증시', 'pub', old, '')], ValueError)
+
+
+class NoFreshNewsTests(unittest.TestCase):
+    """User 2026-11-24: no fresh market story, or every feed down, must not stop Jev; it is told so and older stories of the
+    day go along as background only."""
+
+    def cache(self, rows, seen=(), error=None):
+        import json, os, tempfile
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = folder.name + '/c.json'
+        with open(path, 'w') as out:
+            json.dump({'fetched': NOW.isoformat(), 'rows': rows, 'seen': list(seen), 'error': error, 'next': 0}, out)
+        patcher = patch.dict(os.environ, {'VIBE_TRADING_NEWS_CACHE': path})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return path
+
+    def story(self, title, minutes):
+        from datetime import timedelta
+        return {'title': title, 'topic': 'market', 'source': 's', 'published': (NOW - timedelta(minutes=minutes)).isoformat()}
+
+    def test_earlier_stories_of_the_day_carry_their_age_and_stop_at_three_hours(self):
+        self.cache([self.story('최근', 90), self.story('둘째', 120)],
+                   [self.story('첫째', 91), self.story('둘째', 120), self.story('끝', 180), self.story('넘음', 181), {'title': '시각 없음'}])
+        told = etf_news.no_fresh_news(NOW)
+        self.assertEqual(told['news_status'], 'none_recent')
+        self.assertEqual([(r['title'], r['age_min']) for r in told['earlier_news_headlines']], [('첫째', 91), ('둘째', 120), ('끝', 180)])
+        self.assertIn('background', told['news_note'])
+
+    def test_yesterdays_story_is_not_earlier_news(self):
+        from datetime import timedelta
+        night = NOW.replace(hour=1)
+        self.cache([], [{**self.story('어제', 0), 'published': (night - timedelta(minutes=100)).isoformat()}])
+        self.assertEqual(etf_news.no_fresh_news(night)['earlier_news_headlines'], [])
+
+    def test_a_failed_fetch_is_told_apart_from_a_quiet_hour(self):
+        self.cache([], error='OSError')
+        self.assertEqual(etf_news.no_fresh_news(NOW)['news_status'], 'unavailable')
+
+    def test_a_fetched_story_is_remembered_after_it_leaves_the_recent_window(self):
+        from datetime import timedelta
+        import os
+        os.remove(self.cache([]))
+        with patch.object(etf_news, '_fetch7', return_value=[self.story('오전 속보', 10)]):
+            etf_news.headlines7(NOW)
+        later = NOW + timedelta(minutes=100)
+        with patch.object(etf_news, '_fetch7', side_effect=OSError('offline')), self.assertRaises(OSError):
+            etf_news.headlines7(later)
+        told = etf_news.no_fresh_news(later)
+        self.assertEqual((told['news_status'], [(r['title'], r['age_min']) for r in told['earlier_news_headlines']]),
+                         ('unavailable', [('오전 속보', 110)]))

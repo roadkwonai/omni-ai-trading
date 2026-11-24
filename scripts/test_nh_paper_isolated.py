@@ -338,6 +338,49 @@ class IsolatedTests(unittest.TestCase):
                 self.assertNotIn('private',repr(events.call_args))
             db.close()
 
+    def test_no_market_news_still_asks_jev_for_entries_and_holdings(self):
+        # user 2026-11-24: no fresh story (or every feed down) stopped every Jev call 13:12~13:19; the judgment goes on without it
+        from xml.etree.ElementTree import ParseError
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None): return NOW
+        class Reader:
+            def call_tool(self, tool, params): return {'status':'ok','data':{}}
+        def pages(broker, operation, fields, block):
+            return {'Output_0': []} if operation == 'krstockInquiryDailyOrderExecution' else {'Output_0': {}, 'Output_1': []}
+        bars = [{'bsop_time':'115800','stck_prpr':'1400'} for _ in range(6)]
+        wait = {'model':'jev-1.14.0','chart_sha256':'a'*64,'response_time':NOW.isoformat(),
+                'candidate':{'type':'choice','choice':'WAIT','confidence':0.9}}
+        sell = {'model':'jev-1.14.0','chart_sha256':'a'*64,'response_time':NOW.isoformat(),
+                'holding':{'type':'choice','choice':'SELL','confidence':0.95}}
+        for failure, name in ((ValueError('no recent news'),'ValueError'), (TimeoutError('private'),'TimeoutError'),
+                              (OSError('private'),'OSError'), (ParseError('private'),'ParseError')):
+            with self.subTest(failure=name), tempfile.TemporaryDirectory() as temp:
+                root=Path(temp)/'shared-etf-paper'; root.mkdir()
+                (root/'ai-modes.json').write_text(json.dumps({'version':1,'jev':True,'decision':False}))
+                db=p.connect_journal(root/'orders.sqlite3',p.account_hash(ALT))
+                with patch.object(p,'datetime',Clock), patch.object(p,'paper_pages',side_effect=pages), \
+                     patch.object(p,'valid_bars',return_value=bars), patch.object(p,'fresh_etf7_bars',return_value=True), \
+                     patch('etf_news.headlines7',side_effect=failure), patch.object(p,'investor_flows',return_value=None), \
+                     patch.object(p,'jev7',return_value=wait) as entry, patch.object(p,'jev_holding7',return_value=sell) as holding, \
+                     patch.object(p,'slot_entry',return_value=None, create=True), \
+                     patch.object(p,'journal_event') as events, patch.object(p,'submit') as submit:
+                    p.cycle(db,Reader(),object(),ALT,root,True,NOW,etf7=True)
+                    self.assertTrue(p.holding_action(Reader(),root,'229200',100,100,etf7=True,modes={'decision':False,'jev':True}))
+                submit.assert_not_called()
+                self.assertEqual((entry.call_args.args[1], holding.call_args.args[1]), ([], []))
+                said=[c for c in events.call_args_list if c.args[1]=='v2_news_error']
+                self.assertEqual([c.kwargs['error_type'] for c in said],[name]*2)
+                self.assertNotIn('private',repr(said))
+                gates=[c.kwargs['reason'] for c in events.call_args_list if c.args[1]=='v2_entry_gate']
+                self.assertEqual(gates,['jev_wait'])  # the strength and new-listing paths were looked at, as on any Jev WAIT
+                db.close()
+
+    def test_a_jev_error_records_its_internal_message_only(self):
+        self.assertEqual(p.internal_detail(ValueError('ETF Jev response unavailable')), {'detail': 'etf jev response unavailable'})
+        for hidden in (ValueError('account 12345678'), OSError('HTTP Error 429: x'), ValueError('한글'), ValueError('')):
+            self.assertEqual(p.internal_detail(hidden), {})
+
     def test_etf7_preclose_review_and_protective_exit(self):
         at = NOW.replace(hour=14, minute=51)
         class Clock(datetime):
@@ -2371,6 +2414,57 @@ class MultiSymbolTests(unittest.TestCase):
         self.assertTrue(p.is_v2(plan))
         self.assertEqual((plan['hold_days'], plan['target_basis']['added']), (3, True))
 
+    def _v2_plan(self, peak=None):
+        basis = {'variant': 'v2', 'entry_price': 1300, 'stop_price': 1274, 'stop_pct': 2.0, 'half_tp_pct': 8.0,
+                 'target_pct': 15.0, 'hold_days': 3, 'size_mult': 0.5}
+        p.save_exit_plan(self.root, '069500', None, 'oversold', target=15.0, basis=basis)
+        plans = p.exit_plans(self.root)
+        p.write_exit_plans(self.root, {'069500': {**plans['069500'], 'peak': peak}})
+
+    def _v2_cycle(self, settings, bid, **kwargs):
+        from strategy_settings import DEFAULTS
+        with patch('strategy_settings.read_settings', return_value=({**DEFAULTS, **settings}, 'custom')):
+            _, submit, _, events = self.run_cycle(self.root, self.db, {'069500': 1}, bids={'069500': bid}, **kwargs)
+        sold = [c.args[4:7] for c in submit.call_args_list if c.args[5] == 'SELL']
+        return sold, [c.kwargs.get('reason') for c in events.call_args_list if c.args[1] == 'v2_risk_exit']
+
+    def test_a_v2_position_in_profit_is_sold_on_a_confident_jev_sell_only_when_switched_on(self):  # user 2026-11-24
+        self.own(K200=1)  # bought at 1300
+        for on, bid, want in ((0, 1360, []), (1, 1360, [('069500', 'SELL', 1)]), (1, 1299, [])):  # at a loss its stop decides
+            self._v2_plan()
+            self.assertEqual((on, bid, self._v2_cycle({'oversold_v2_jev_sell_on': on}, bid, holding_sell=True)[0]), (on, bid, want))
+
+    def test_a_v2_position_leaves_after_falling_back_from_its_high(self):  # user 2026-11-24
+        self.own(K200=1)
+        for at, peak, bid, leaves in ((5, 1400, 1370, True), (5, 1400, 1373, False), (5, 1360, 1310, False), (0, 1400, 1340, False)):
+            self._v2_plan(peak)
+            sold, reasons = self._v2_cycle({'oversold_v2_trail_at_pct': at, 'oversold_v2_trail_pct': 2}, bid)
+            self.assertEqual((at, peak, bid, sold, reasons), (at, peak, bid, [('069500', 'SELL', 1)] if leaves else [],
+                                                             ['trailing_stop'] if leaves else []))
+
+    def test_every_holding_look_and_every_exit_records_the_quote_it_was_judged_on(self):
+        """11-24 09:34 the 삼성전자 trailing exit left no bid: whether the line was touched could not be checked later."""
+        from strategy_settings import DEFAULTS
+        self.own(K200=1)
+        self._v2_plan(1400)
+        on = {**DEFAULTS, 'oversold_v2_trail_at_pct': 5, 'oversold_v2_trail_pct': 2}
+        for bid, leaves in ((1373, False), (1370, True)):
+            with patch('strategy_settings.read_settings', return_value=(on, 'custom')):
+                _, _, _, events = self.run_cycle(self.root, self.db, {'069500': 1}, bids={'069500': bid})
+            looks = [c.kwargs for c in events.call_args_list if c.args[1] == 'holding_quote']
+            self.assertEqual([(e['symbol'], e['bid'], e['avg'], e['peak']) for e in looks], [('069500', bid, 1300, 1400)])
+            exits = [c.kwargs for c in events.call_args_list if c.args[1] == 'v2_risk_exit']
+            self.assertEqual([(e['reason'], e['bid'], e['first_bid'], e['peak']) for e in exits],
+                             [('trailing_stop', 1370, 1370, 1400)] if leaves else [])
+
+    def test_a_failed_quote_record_never_stops_an_exit(self):
+        from strategy_settings import DEFAULTS
+        self.own(K200=1)
+        self._v2_plan(1400)
+        with patch.object(p, 'holding_quote_record', side_effect=OSError('disk full')):
+            sold, _ = self._v2_cycle({'oversold_v2_trail_at_pct': 5, 'oversold_v2_trail_pct': 2}, 1370)
+        self.assertEqual(sold, [('069500', 'SELL', 1)])
+
     def test_the_add_rule_switch_holds_back_or_lets_through_an_add_that_is_not_better(self):
         from strategy_settings import DEFAULTS
         holdings = self.own(INV=1)
@@ -3575,3 +3669,78 @@ def test_every_ranked_strength_stock_gets_its_own_reason(tmp_path):  # user 11-2
     assert whys['005930'] == 'strength_change_out_of_range' and whys['180640'] == 'trend_not_rising'
     assert whys['128940'] == 'not_in_movers'
     assert p.strength_whys('180640', 'careful_reentry_chase')['180640'] == 'careful_reentry_chase'
+
+
+class KiwoomBarsTests(unittest.TestCase):
+    """User 2026-11-24 'NH 1분봉 우회': a chart NH does not give is read from Kiwoom (KRX); orders still need an NH quote."""
+    class Reader:
+        def __init__(self, status='error'): self.status, self.codes = status, []
+        def call_tool(self, tool, params):
+            self.codes.append(params['input']['iem_cd'])
+            return {'status': self.status, 'data': {}}
+
+    def setUp(self):
+        import kiwoom_data
+        self.rows = [{'bsop_date': '20261124', 'bsop_time': f'10{38 - n:02d}00', 'stck_oprc': '1000', 'stck_hgpr': '1010',
+                      'stck_lwpr': '990', 'stck_prpr': '1005', 'vol': '100'} for n in range(10)]
+        self.asked, self.clock = [], [1000.0]
+        for target, name, value in ((p, 'KIWOOM_BARS', True), (p, '_NH_BARS_REST', [0.0]), (p.time, 'sleep', lambda s: None),
+                                    (p.time, 'monotonic', lambda: self.clock[0]), (kiwoom_data, 'configured', lambda: True),
+                                    (kiwoom_data, 'krx_minute_rows', lambda code, prior=False, now=None: self.asked.append((code, prior)) or self.rows)):
+            patcher = patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_failed_chart_comes_from_kiwoom_in_nhs_shape(self):
+        read, cache = self.Reader(), {}
+        got = p.minute_bars(read, '069500', cache)
+        self.assertEqual((got['status'], got['source'], len(read.codes), self.asked), ('ok', 'kiwoom', 2, [('069500', False)]))
+        now = datetime(2026, 11, 24, 10, 40, 41, tzinfo=p.KST)
+        self.assertEqual(p.valid_bars(got['data'], '069500', now)[0]['bsop_time'], '103800')
+        self.assertEqual(len(p.opening_bars(got['data'], '069500', now)), 10)
+        self.assertIs(p.minute_bars(read, '069500', cache), got)  # kept for the cycle like an NH chart
+
+    def test_the_other_charts_do_not_wait_for_nh_again_until_it_had_a_minute(self):
+        read = self.Reader()
+        for code in ('069500', '114800', '229200'):
+            self.assertEqual(p.minute_bars(read, code, {})['source'], 'kiwoom')
+        self.assertEqual(read.codes, ['069500', '069500'])  # seven charts at two 8 s starts each would cost two minutes
+        self.clock[0] += 61
+        read.status = 'ok'
+        self.assertNotIn('source', p.minute_bars(read, '114800', {}))
+
+    def test_kiwoom_failing_too_is_the_failure_it_was(self):
+        import kiwoom_data
+        with patch.object(kiwoom_data, 'krx_minute_rows', side_effect=OSError):
+            self.assertEqual(p.minute_bars(self.Reader(), '069500', {})['status'], 'error')
+        with patch.object(kiwoom_data, 'krx_minute_rows', return_value=[]):
+            self.assertEqual(p.minute_bars(self.Reader(), '069500', {})['status'], 'error')
+        with patch.object(kiwoom_data, 'configured', return_value=False):
+            self.assertEqual(p.minute_bars(self.Reader(), '069500', {})['status'], 'error')
+        p._NH_BARS_REST[0] = self.clock[0] + 60
+        with patch.object(kiwoom_data, 'krx_minute_rows', side_effect=OSError):
+            self.assertNotIn('source', p.minute_bars(self.Reader('ok'), '069500', {}))  # NH is asked after all
+
+    def test_nh_answering_never_asks_kiwoom(self):
+        p.minute_bars(self.Reader('ok'), '069500', {}, prior=True)
+        self.assertEqual(self.asked, [])
+
+    def test_the_record_names_the_charts_that_came_from_kiwoom(self):
+        cache = {}
+        p.minute_bars(self.Reader('ok'), '069500', cache)
+        self.assertEqual(p.bars_source(cache), 'NH KRX 1-minute completed bars')
+        p.minute_bars(self.Reader(), '114800', cache, prior=True)
+        p.minute_bars(self.Reader(), '005930', cache)
+        label = p.bars_source(cache)
+        self.assertEqual(label, 'NH KRX 1-minute completed bars (Kiwoom KRX: 005930, 114800)')
+        from trading_ledger import MARKET_SOURCE
+        self.assertTrue(MARKET_SOURCE.fullmatch(label) and MARKET_SOURCE.fullmatch(p.bars_source({})))
+        self.assertFalse(MARKET_SOURCE.fullmatch(label + ' sk-secret') or MARKET_SOURCE.fullmatch('Kiwoom'))
+
+    def test_tests_and_imports_do_not_reach_kiwoom_by_default(self):
+        import os
+        import subprocess
+        import sys
+        out = subprocess.run([sys.executable, '-c', 'import pytest, nh_paper_isolated as p; print(p.KIWOOM_BARS)'], capture_output=True, text=True,
+                             cwd=Path(p.__file__).parent, env={**os.environ, 'PYTHONPATH': f"{Path(p.__file__).parent}:{Path(p.__file__).parents[1] / 'agent'}"})
+        self.assertEqual(out.stdout.strip(), 'False')

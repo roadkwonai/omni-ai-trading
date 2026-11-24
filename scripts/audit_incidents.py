@@ -71,6 +71,11 @@ REGISTRY = {
         'cause': '강도 후보 선정이 1주 가능 여부를 보지 않아 009150(847,000원)을 매 분 골랐고 주문 단계가 0주로 거절, 슬롯이 그 회차를 차지해 Jev 판단이 밀림(13:44~14:46)',
         'fix': 'nh_paper_isolated.strength_shares·strength_candidate(sized=), cool_refused_picks(거절된 강도·신규주 후보 SLOT_COOLDOWN_MIN 쉬기), intraday_audit.repeat_blocks',
         'guard': 'test_the_same_pick_refused_minutes_in_a_row_fires'},  # also test_a_pick_the_order_path_refuses_rests_instead_of_repeating_every_minute
+    'entry.jev_stopped': {
+        'title': 'Jev 진입 판단이 여러 회차 연속 실패함', 'since': '2026-11-24',
+        'cause': '13:12~13:19 60분 안 시황 기사가 없어 Jev 요청 전에 멈춤(7회차). Google 검색(when:1d)이 새 기사를 놓침',
+        'fix': 'etf_news(90분, when:2h, 네이버 속보, no_fresh_news), nh_etf_auto_v2._jev7_question, nh_paper_isolated(v2_news_error 뒤 계속)',
+        'guard': 'test_no_market_news_still_asks_jev_for_entries_and_holdings'},  # also test_jev_rechecks_market_headlines_at_dispatch...
     'nh.same_query_limit': {
         'title': 'NH 같은 조회 제한(IGW42903)이 반복됨', 'since': '2026-11-19',
         'cause': '모의 잔고가 오늘 매매 종목 0주 행까지 12행(쪽당 10행)이 되어 둘째 쪽을 바로 요청 → NH가 같은 조회를 약 1초에 1번만 받아 거절, 재시도로 회차마다 호출 3번·약 1초 지연(11:00~15:10 167건)',
@@ -81,6 +86,11 @@ REGISTRY = {
         'cause': '순위 계산기가 5분마다 60종목 현재가를 쉬지 않고 조회(약 2.6회/초)해 같은 순간 실행기 분봉과 합쳐 앱 키 초당 5회를 넘김: 자기 조회 157건 실패(순위에서 그 종목이 빠짐), 실행기·실계좌 미러·대시보드 호출 110건도 그 3초 안에 거절',
         'fix': 'market_movers.SCAN_GAP(조회 시작 간격 0.5초, 초당 2회)·RATE_LIMIT_WAIT(거절되면 1초 뒤 한 번 더), intraday_audit.nh_limits',
         'guard': 'test_nh_app_rate_limit_hits_in_the_window_fire'},  # also test_the_scan_paces_its_quotes_and_asks_again_after_a_rate_limit
+    'live.zero_total': {
+        'title': '실계좌 잔고 합계가 잘못됨(총자산 0원 등)', 'since': '2026-11-23',
+        'cause': 'NH는 총자산·총매수·총평가를 잔고 마지막 쪽에만 주는데 첫 쪽 합계(0)를 씀: 매매한 종목의 0주 행까지 2쪽이 된 14:42부터 총자산 0, 같은 값을 읽는 실계좌 가드는 새 매수를 capital limit exceeded로 막음',
+        'fix': 'nh_live_broker._pages·BALANCE_TOTALS(합계는 마지막 쪽, 없으면 미확인), live_fills.plausible(기록·읽기에서 거름)·balance-rejected.jsonl, intraday_audit.zero_totals',
+        'guard': 'test_a_rejected_live_balance_fires'},  # also test_a_paged_balance_takes_its_totals_from_the_last_page, test_an_impossible_balance_is_rejected_and_never_read
     'learning.error': {
         'title': '학습 관찰기가 실행 중인데 매 회차 실패', 'since': '2026-11-19',
         'cause': '오래 돈 프로세스가 다른 프로세스가 지운 원장 WAL 파일 핸들을 붙잡아 매 회차 sqlite3.DatabaseError(09:03~10:26, 새 프로세스는 정상)',

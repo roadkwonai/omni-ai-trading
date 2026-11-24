@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -86,3 +87,17 @@ def test_every_ops_tool_reads_the_runtime_vibe_trading_home_names(tmp_path):
     assert run(str(tmp_path)) == [str(nh), str(nh / 'audit-incidents.sqlite3'), str(nh / 'shared-etf-paper'),
                                   str(nh / 'shared-etf-paper'), str(nh / 'shared-etf-paper'), str(nh)]
     assert run('')[-1] == str(Path.home() / '.vibe-trading' / 'nhplug')  # unset means the default home, not './nhplug'
+
+
+def test_before_the_first_collection_yesterdays_premarket_brief_is_not_a_failure(tmp_path, monkeypatch):
+    """11-24 06:13: yesterday's 09:10 brief was counted as a failure, an hour and a half before launchd's 07:40 collection."""
+    import launchd_services
+    due = next(c[3] for c in pf.CHECKS if c[0] == 'premarket')
+    hour, minute, _ = launchd_services.SERVICES['premarket'][3][0]
+    assert due and f'{hour:02}:{minute:02}' < due <= '08:20'  # after the first collection, before the first scheduled check
+    monkeypatch.setattr(pf, 'PAPER', tmp_path)
+    (tmp_path / 'premarket-brief.json').write_text(json.dumps({'time': '2026-11-17T09:10:05+09:00', 'sections': {'night_futures': {'status': 'unavailable'}}}))
+    checks = [c for c in pf.CHECKS if c[0] == 'premarket']
+    with patch('trading_day_start.trading_day', return_value=(True, 'trading_day')):
+        assert pf.run(NOW.replace(hour=6, minute=13), checks)['results'][0]['ok'] is None
+        assert pf.run(NOW.replace(hour=8, minute=20), checks)['results'][0]['ok'] is False  # really missing by then

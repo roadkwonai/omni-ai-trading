@@ -8,7 +8,7 @@ NH tool errors). A redirect is one call: only the outermost request of a thread 
 
 Never stored: query strings, request or response bodies, headers, exception messages (they can echo URLs with keys).
 Stored: provider, host+path (digit-heavy segments masked), caller script, status code, elapsed ms, response bytes,
-exception class. Logging is best effort: a locked or broken DB drops the record and never raises into the caller.
+exception class; per second, how many calls started (7 days, for the per-second limits: api_load). Logging is best effort: a locked or broken DB drops the record and never raises into the caller.
 Disabled under pytest so tests never write the live log (see the 2026-11-17 journal incident).
 """
 from __future__ import annotations
@@ -44,7 +44,11 @@ CREATE TABLE IF NOT EXISTS calls (day TEXT, slot TEXT, provider TEXT, endpoint T
   PRIMARY KEY (day, slot, provider, endpoint, caller));
 CREATE TABLE IF NOT EXISTS failures (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, kind TEXT, status INTEGER, detail TEXT);
 CREATE INDEX IF NOT EXISTS failures_time ON failures (time);
+CREATE TABLE IF NOT EXISTS seconds (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, n INTEGER,
+  PRIMARY KEY (time, provider, endpoint, caller));
 """
+SECONDS_DAYS = 7
+LOCAL_START = 'MCP 시작 실패(로컬)'  # the NH MCP process did not start in time; no request reached NH
 LOCAL = {'127.0.0.1', 'localhost', '::1'}
 _lock = threading.Lock()
 _depth = threading.local()  # nested sends (redirect hops) inside one outer call
@@ -94,6 +98,7 @@ def _db():
             cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime('%Y-%m-%d')
             conn.execute('DELETE FROM calls WHERE day < ?', (cut,))
             conn.execute('DELETE FROM failures WHERE time < ?', (cut,))
+            conn.execute('DELETE FROM seconds WHERE time < ?', ((datetime.now(KST) - timedelta(days=SECONDS_DAYS)).strftime('%Y-%m-%d'),))
         except sqlite3.Error:  # the next process start prunes
             pass
     return conn
@@ -120,6 +125,10 @@ def record(provider, endpoint, ok, ms, status=None, size=None, error=None, bad=F
             if failed:
                 db.execute('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', (stamp, provider, endpoint, who,
                            'response' if bad else 'http' if status else 'network', status, mask(detail or error)))
+            if not (bad and ok is None):  # a call, not a problem() note: counted in the second it started
+                begun = (now - timedelta(milliseconds=ms or 0)).isoformat(timespec='seconds')
+                db.execute('INSERT INTO seconds VALUES (?,?,?,?,1) ON CONFLICT (time, provider, endpoint, caller) DO UPDATE SET n = n + 1',
+                           (begun, provider, endpoint, who))
     except Exception:  # noqa: BLE001 - logging must never break a trading process
         pass
 
@@ -149,7 +158,8 @@ def mcp_call(server, tool, arguments, started, result, error):
     name = (arguments or {}).get('operationId') if tool in ('call_api', 'call_api_guarded') else None
     endpoint, ms = f'mcp:{name or tool}', (time.monotonic() - started) * 1000
     if error is not None:
-        record('nh', endpoint, False, ms, error=type(error).__name__)
+        start = isinstance(error, RuntimeError) and 'initialize server session' in str(error)  # fastmcp's init timeout
+        record('nh', endpoint, False, ms, error=LOCAL_START if start else type(error).__name__)
     else:
         bad = bool(getattr(result, 'is_error', False))
         record('nh', endpoint, True, ms, bad=bad, detail=tool_error(result) if bad else None)

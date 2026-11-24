@@ -18,9 +18,8 @@ FOMC_PAGE = 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm'  #
 # series id: (label, unit)
 SERIES = {'T10Y2Y': ('10년−2년 금리차', '%p'), 'DGS10': ('미 10년 국채금리', '%'),
           'DFII10': ('미 10년 실질금리', '%'), 'BAMLH0A0HYM2': ('하이일드 스프레드', '%p')}
-# FRED release name: label (the releases that move rates and US equities)
-EVENTS = {'Consumer Price Index': 'CPI', 'Employment Situation': '고용',
-          'Gross Domestic Product': 'GDP', 'Personal Income and Outlays': 'PCE 물가', 'Producer Price Index': 'PPI'}
+# FRED release id: label (the releases that move rates and US equities)
+EVENTS = {10: 'CPI', 50: '고용', 53: 'GDP', 54: 'PCE 물가', 46: 'PPI'}
 STALE_DAYS = 10    # daily series lag a day or two; older than this is not today's picture
 MONTH_OBS = 21     # about one month of trading days
 CALENDAR_DAYS = 30  # about a month ahead: FOMC meets roughly every six weeks
@@ -54,13 +53,12 @@ def series(sid, today, get):
             'low_1y': min(year), 'high_1y': max(year), 'stale': (today - last_day).days > STALE_DAYS}
 
 
-def calendar(today, get, days=CALENDAR_DAYS):
-    rows = get('releases/dates', realtime_start=today.isoformat(), realtime_end=(today + timedelta(days=days)).isoformat(),
-               include_release_dates_with_no_data='true', sort_order='asc', limit=1000)['release_dates']
+def calendar(today, get, release, days=CALENDAR_DAYS):
+    """One release's dates in the window. One call per release: all releases at once takes FRED about 15 s (2026-11-24)."""
+    rows = get('release/dates', release_id=release, realtime_start=today.isoformat(), realtime_end='9999-12-31',
+               include_release_dates_with_no_data='true', sort_order='asc', limit=20)['release_dates']
     end = (today + timedelta(days=days)).isoformat()
-    found = {(r['date'], EVENTS[r['release_name']]) for r in rows
-             if r.get('release_name') in EVENTS and today.isoformat() <= r.get('date', '') <= end}
-    return [{'date': d, 'label': label} for d, label in sorted(found)]
+    return [{'date': d, 'label': EVENTS[release]} for d in sorted({r['date'] for r in rows if today.isoformat() <= r.get('date', '') <= end})]
 
 
 MONTHS = {m: i + 1 for i, m in enumerate(('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'))}
@@ -104,10 +102,12 @@ def collect(today, get=None, key=None, page=None):
             out['series'][sid] = series(sid, today, get)
         except Exception as exc:
             out['errors'].append(f'{sid}: {type(exc).__name__}')
-    try:
-        out['events'] = sorted(out['events'] + calendar(today, get), key=lambda e: (e['date'], e['label']))
-    except Exception as exc:
-        out['errors'].append(f'calendar: {type(exc).__name__}')
+    for release, label in EVENTS.items():
+        try:
+            out['events'] += calendar(today, get, release)
+        except Exception as exc:
+            out['errors'].append(f'calendar {label}: {type(exc).__name__}')
+    out['events'].sort(key=lambda e: (e['date'], e['label']))
     return out
 
 

@@ -222,22 +222,20 @@ def run(root, reader, *, watch=False, clock=lambda: datetime.now(KST), sleeper=c
             except (TypeError, ValueError, OverflowError):
                 return 'clock_unavailable'
             if watch:
-                if waiting_day is not None and (now.date() != waiting_day or (root / 'STOP').exists()):
-                    return 'outside_session' if now.date() != waiting_day else 'stopped'
+                # STOP is the paper runner's file in this folder: a runner restart (STOP, then delete) must never end the
+                # observer (11/17 09:36 after the open, 11/24 09:07 while it waited for 09:10: no regime view until 09:58)
+                if waiting_day is not None and now.date() != waiting_day:
+                    return 'outside_session'
                 if wait := until_open(now):  # started pre-open: wait for the bell instead of quitting
                     sleeper(min(30, wait))
                     continue
                 if now.weekday() >= 5 or not '09:00' <= now.strftime('%H:%M') < '15:00':
                     return 'outside_session'
                 if now.strftime('%H:%M') < '09:10':
-                    if (root / 'STOP').exists():
-                        return 'stopped'
                     waiting_day = now.date()
                     opening = now.replace(hour=9, minute=10, second=0, microsecond=0)
                     sleeper(min(30, (opening - now).total_seconds()))
                     continue
-                # STOP is the paper runner's file in this folder: after the open a runner restart (STOP, then delete)
-                # must not end the observer (11/17 09:36 it did and the regime view went stale for hours)
                 waiting_day = None
             try:
                 due = claim_attempt(root / 'regime-last-attempt.json', now)

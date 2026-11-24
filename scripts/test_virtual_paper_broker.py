@@ -190,3 +190,29 @@ def test_an_order_that_does_not_fill_keeps_why_in_the_history(tmp_path):
         day = broker.clock().strftime('%Y%m%d')
         row = broker.call_tool('call_api', {'operationId': 'krstockInquiryDailyOrderExecution', 'input': {'orr_dt': day}})['data']['Output_0'][0]
     assert row['tot_cns_qty'] == 0 and '50,100' in row['note'] and '50,000' in row['note']
+
+
+def test_a_slow_answer_is_judged_by_the_time_it_arrived(tmp_path):
+    # 2026-11-24 10:30: NH took 5.8 s, so a quote stamped on arrival looked more than 5 s ahead of the clock read before the call
+    from datetime import timedelta
+    start, waited = datetime.now(KST).replace(hour=10, minute=30, second=0, microsecond=0), [timedelta(0)]
+
+    class Slow(Read):
+        stamp = None
+
+        def call_tool(self, tool, params):
+            waited[0] += timedelta(seconds=5.8)
+            response = super().call_tool(tool, params)
+            response['data']['Output_0']['hoga_bsop_hour'] = self.stamp or (start + waited[0]).strftime('%H:%M:%S')
+            return response
+    read = Slow()
+    broker = VirtualBroker(tmp_path / 'v.sqlite3', read, clock=lambda: start + waited[0])
+    read.stamp = (start + timedelta(seconds=6)).strftime('%H:%M:%S')  # the stamp is NH's clock, about the arrival time
+    assert broker.quote('005930') == (50_000, 50_100)
+    read.stamp = (start - timedelta(seconds=150)).strftime('%H:%M:%S')  # an old quote is still refused
+    try:
+        broker.quote('005930')
+    except ValueError as exc:
+        assert 'stale' in str(exc)
+    else:
+        raise AssertionError('an old quote was accepted')

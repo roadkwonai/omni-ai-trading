@@ -258,13 +258,13 @@ def jev(bars, news):
     return {'model': result.get('model'), 'candidate': answer, 'chart_sha256': hashlib.sha256(image).hexdigest()}
 
 
-def _etf7_inputs(bars, news):
+def _etf7_inputs(bars, news, news_required=True):
     from etf_universe import SYMBOLS as universe
     import re
     # The 7 ETFs are always present; scanner candidates are added under their 6-digit stock codes.
     if (not isinstance(bars, dict) or not set(universe) <= set(bars)
             or any(name not in universe and not (isinstance(name, str) and re.fullmatch(r'[0-9][0-9A-Z]{5}', name)) for name in bars)
-            or not isinstance(news, list) or not news):
+            or not isinstance(news, list) or (news_required and not news)):
         raise ValueError('ETF market inputs unavailable')
     for name in bars:
         rows = bars[name]
@@ -351,10 +351,10 @@ def holding_decision7(bars, news, symbol, avg, bid, *, stock_context=None):
 
 
 def _jev7_question(bars, news, question, criteria, position=None, investor=None, instructions=None, extra_state=None):
-    from etf_news import JEV_NEWS_MAX_MINUTES, JEV_NEWS_PRIORITY_MINUTES, jev_market_headlines, supplement_jev_topics
+    from etf_news import JEV_NEWS_MAX_MINUTES, JEV_NEWS_PRIORITY_MINUTES, jev_market_headlines, no_fresh_news, supplement_jev_topics
     from etf_universe import SYMBOLS as universe
     from nh_jev_compare import plt
-    _etf7_inputs(bars, news)
+    _etf7_inputs(bars, news, news_required=False)
     import jev_context
     chart_bars, intraday = jev_context.context(bars)  # the last hour and the session so far (user 2026-11-18)
     key = old.dotenv_values(old.ENV, interpolate=False).get('JEV_API_KEY')
@@ -409,8 +409,8 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
     with regular_request():
         checked_at = datetime.now(old.KST)
         fresh_news = jev_market_headlines(news, checked_at)
-        if not fresh_news:
-            raise ValueError('ETF news expired before Jev request')
+        if not fresh_news:  # user 2026-11-24: judged without it and told so (news_status also marks the recorded input)
+            state.update(no_fresh_news(checked_at))
         if backfill:
             covered = {item.get('topic') for item in fresh_news}
             backfill['missing_after'] = [topic for topic in backfill['missing_before'] if topic not in covered]

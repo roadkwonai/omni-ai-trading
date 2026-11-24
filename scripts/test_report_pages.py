@@ -395,3 +395,96 @@ def test_live_account_columns_are_hidden_too():
     out = rp.hide_live(html_in)
     assert '+9,996원' in out and '-1,413원' not in out and '•••원' in out and '11-02 ~ 11-10' in out
     assert rp.hide_live(out) == out
+
+
+SOURCED = """# 2026-11-20 매매일지
+
+> 외국인 순매도의 절반이 삼성전자(−6,318억, 토스증권 잠정)였다. 코스피는 −4.4% 내렸다.
+
+## 8. 시장·수급
+
+### 투자자·프로그램 수급 (순매수, 억 원)
+
+| 시장 | 외국인 | 기관 |
+|---|---|---|
+| 코스피 | -12,682 | -8,382 |
+
+### 기관 세부·기타법인 (토스증권, 순매수 억 원)
+
+| 시장 | 금융투자 | 연기금 |
+|---|---|---|
+| 코스피 | +9,061 | -1,234 |
+| 코스닥 | -12,682 | A -2,222, B +3,333 |
+
+_토스증권 외국인은 미등록 외국인을 포함해 위 네이버 합계와 다를 수 있습니다._
+
+### 매매 종목 수급 (그날 순매수)
+
+| 종목 | 외국인 |
+|---|---|
+| 하림 | +1,111주 |
+
+### 매매 종목 공매도·신용·대차 (토스증권)
+
+| 종목 | 공매도 |
+|---|---|
+| 삼성전자 | 77.7억 (12.34%) |
+
+_신용은 다음 영업일 값입니다._
+
+코스피 하락 739 종목이 손익을 갈랐다(−4.4%). 기관의 −2,222억 매도와 외국인 −12,682억 매도가 겹쳤다. [기사 2,222억](https://n.example/2,222)
+
+## 9. 뉴스
+
+외국인이 **−14,696억 원**을 팔았고(삼성전자 **−6,000억**, 토스증권 잠정) 08:30에 시작했다. 상승 161·하락 739였다.
+
+매수 쪽은 기타법인 +4,274억·금융투자 +1,255억 원이었다. 개인은 +3,921억 원이다.
+
+- 스튜디오드래곤 +13.48%, 클리오 +4.2%(KRX 대비 괴리율, 키움)입니다. CJ ENM은 −3.33%입니다.
+- 야간선물 +3.12%, 08:30 프리마켓에서 SK하이닉스 +12.35%, 첫 체결 188,000 → 195,400였습니다. 반대 시나리오는 187,500원 아래입니다. 11/23 기관은 1,134억 원을 샀다.
+- 미국 프리마켓은 +0.7%였다.
+- 20261109 키움증권: 3Q 광고 반등 +20% 성공
+- [연기금 1조 원 매수](https://news.example.com/a-12억)
+- 키움 1분봉으로 진입가 대비 +1% 익절을 적용했다.
+- 포토스튜디오 매출 +5% 늘었다.
+
+```chart
+{"type": "bar", "title": "토스증권 순매수", "unit": "억", "data": [{"label": "외국인", "value": 4321}]}
+```
+"""
+
+
+def test_public_pages_leave_out_kiwoom_and_toss_figures(tmp_path):
+    """Kiwoom's and Toss's terms allow the operator's own use only (docs/report-pages-data-policy-plan.md, user 2026-11-24)."""
+    rt = runtime(tmp_path)
+    md = rt / 'nhplug/shared-etf-paper/reviews/journal-2026-11-20.md'
+    md.write_text(SOURCED)
+    md.with_suffix('.json').write_text(json.dumps({
+        'summary': '기관은 SK하이닉스(−2,086억, 토스증권)에 몰렸다. 손익은 −54,328원이다.',
+        'top_issues': [{'title': '외국인 매도', 'stars': 3, 'why': '삼성전자(−6,318억, 토스증권 잠정)', 'url': 'https://x.example/a?토스=−5억'}]}, ensure_ascii=False))
+    page, meta = rp.render('journal', '2026-11-20', md)
+    for leaked in ('6,318', '9,061', '1,234', '77.7', '12.34', '14,696', '6,000억', '4,274', '1,255', '13.48', '4.2%', '12.35', '2,086', '188,000', '195,400', '187,500', '−2,222억', '4321', '4,321'):
+        assert leaked not in page and leaked not in meta['text'] and leaked not in meta['summary'], leaked
+    for kept in ('-12,682', '+1,111주', '상승 161·하락 739', '3,921억', '−3.33%', '+0.7%', '08:30', '야간선물 +3.12%', '1,134억 원', '갈랐다(−4.4%)', '외국인 −12,682억 매도', '기사 2,222억', '키움증권: 3Q 광고 반등 +20%',
+                 '연기금 1조 원 매수', '+1% 익절', '+5% 늘었다', '하림', '매매 종목 공매도·신용·대차', rp.SOURCE_NOTE):
+        assert kept in page, kept
+    assert '−54,328원' in meta['summary'] and rp.public_text('https://x.example/a?토스=−5억') == 'https://x.example/a?토스=−5억'
+    assert rp.check(page) == []
+    assert md.read_text() == SOURCED  # the local report keeps everything
+
+
+def test_a_page_with_a_kiwoom_or_toss_figure_is_not_published():
+    ok = '<p>외국인 순매수 상위는 대시보드에서 봅니다.</p>'
+    assert not any('키움' in i for i in rp.check(ok))
+    for bad in ('<p>삼성전자 <b>−6,318억</b>(<i>토스증권</i> 잠정)</p>', '<h3>매매 종목 공매도 (토스증권)</h3><p>표</p>',
+                '<li>하나투어 +4.18%(괴리율, 키움)</li>', '<table><tr><td>금융투자</td><td>+9,061</td></tr></table>'):
+        assert any('키움·토스' in i for i in rp.check(bad)), bad
+        assert rp.hide_sources(rp.hide_sources(bad)) == rp.hide_sources(bad)
+
+
+def test_diagram_texts_lose_the_figures_too(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(rp, 'archify', lambda kind, source, out: seen.update(source=source))
+    md = '```archify-workflow\n{"meta": {"title": "흐름"}, "nodes": [{"label": "금융투자 +9,061억 순매수", "x": -12}]}\n```\n'
+    rp.blocks(md, '2026-11-20', tmp_path)
+    assert '9,061' not in seen['source'] and json.loads(seen['source'])['nodes'][0]['x'] == -12

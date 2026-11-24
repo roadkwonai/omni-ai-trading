@@ -6,6 +6,7 @@ import json
 import os
 import urllib.request
 import xml.etree.ElementTree as ET
+import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -13,11 +14,12 @@ from urllib.parse import quote
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
 
 
-# 'when:1d' restricts Google News to the last day; without it the relevance-ranked feed held one stale item per topic.
+# 'when:2h' restricts Google News to the last two hours (RECENT is 90 minutes). Over a day the relevance ranking left the newest
+# stories out: 2026-11-24 13:32 the market search held 2 stories within 90 minutes with 'when:1d' and 8 with 'when:2h'.
 FEEDS = (
-    ('market', '코스피 증시 when:1d', ('코스피', '코스닥', 'kospi', 'kosdaq', '나스닥', 'nasdaq', '증시')),
-    ('kosdaq150', '코스닥 when:1d', ('코스닥', 'kosdaq')),
-    ('semiconductor', '반도체 주가 when:1d', ('반도체', 'semiconductor')),
+    ('market', '코스피 증시 when:2h', ('코스피', '코스닥', 'kospi', 'kosdaq', '나스닥', 'nasdaq', '증시')),
+    ('kosdaq150', '코스닥 when:2h', ('코스닥', 'kosdaq')),
+    ('semiconductor', '반도체 주가 when:2h', ('반도체', 'semiconductor')),
 )
 RESTRICTED_PUBLISHERS = ('연합뉴스', 'yonhap')
 # Sources are used in turn (one per fresh fetch) and a blocked or empty one hands its missing topics to the next.
@@ -33,10 +35,11 @@ STALE_OK = timedelta(minutes=30)  # a network failure (429, timeout) reuses the 
 BACKOFF = timedelta(minutes=5)    # and nobody retries the feed for this long after a failure
 # Only recent headlines reach the engines (user 2026-11-18: "오래된 뉴스를 참고하고 판단하면 안돼"): 11/18 a third of Jev's calls
 # got only Bing items 2-10 hours old (its 24-hour window). A topic without a story this recent is left out; with none at all
-# the call fails closed (the runner waits). Overnight and premarket stories reach Jev through premarket_context instead.
+# headlines7 raises and Jev is told there is none (no_fresh_news). Overnight and premarket stories reach Jev through premarket_context instead.
 RECENT = timedelta(minutes=90)
+EARLIER = timedelta(hours=3)  # how long a fetched story stays available as background (no_fresh_news)
 JEV_NEWS_PRIORITY_MINUTES = 30
-JEV_NEWS_MAX_MINUTES = 60
+JEV_NEWS_MAX_MINUTES = 90  # user 2026-11-24: 60 (11-23) left every Jev entry call without news from 13:12
 
 
 def cache_path() -> Path:
@@ -52,7 +55,8 @@ def _read_cache() -> dict:
         data = json.loads(cache_path().read_text(encoding='utf-8'))
         return {'fetched': datetime.fromisoformat(data['fetched']), 'rows': list(data['rows']),
                 'retry_after': datetime.fromisoformat(data['retry_after']) if data.get('retry_after') else None,
-                'next': int(data.get('next') or 0) % len(SOURCES), 'error': data.get('error')}
+                'next': int(data.get('next') or 0) % len(SOURCES), 'error': data.get('error'),
+                'seen': list(data.get('seen') or [])}
     except (OSError, ValueError, KeyError, TypeError):
         return {}
 
@@ -60,8 +64,9 @@ def _read_cache() -> dict:
 def _write_cache(fetched: datetime, rows: list, retry_after: datetime | None = None, next_source: int = 0,
                  error: str | None = None) -> None:
     from config_store import write_json
+    seen = _earlier([*rows, *_read_cache().get('seen', [])], fetched, timedelta(seconds=-1))  # no_fresh_news reads these later
     try:
-        write_json(cache_path(), {'fetched': fetched.isoformat(), 'rows': rows, 'next': next_source, 'error': error,
+        write_json(cache_path(), {'fetched': fetched.isoformat(), 'rows': rows, 'seen': seen, 'next': next_source, 'error': error,
                                   'retry_after': retry_after.isoformat() if retry_after else None}, indent=None)
     except OSError:
         pass  # a cache that cannot be written only costs another fetch
@@ -74,6 +79,36 @@ def _still_recent(rows: list, now: datetime) -> list | None:
     except (KeyError, TypeError, ValueError):
         return None
     return kept or None
+
+
+def _earlier(rows, now, older_than):
+    """Each story once, newest first, published more than older_than and up to EARLIER before now."""
+    out = {}
+    for row in rows:
+        try:
+            age = now - datetime.fromisoformat(row['published'])
+            if older_than < age <= EARLIER:
+                out.setdefault(row['title'], (age, row))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return [row for _, row in sorted(out.values(), key=lambda x: x[0])]
+
+
+def no_fresh_news(now):
+    """What Jev is told when no market story is fresh enough (user 2026-11-24: its calls must not stop for that): whether the
+    feeds had none or failed, and today's earlier stories, kept apart from the recent ones and with their age."""
+    cached = _read_cache()
+    today, earlier = now.astimezone(KST).date(), []
+    for row in _earlier([*cached.get('rows', []), *cached.get('seen', [])], now, timedelta(minutes=JEV_NEWS_MAX_MINUTES)):
+        published = datetime.fromisoformat(row['published'])
+        if published.astimezone(KST).date() == today:
+            earlier.append({**{k: row[k] for k in ('title', 'topic', 'source') if k in row},
+                            'age_min': round((now - published).total_seconds() / 60)})
+    return {'news_status': 'unavailable' if cached.get('error') == 'OSError' else 'none_recent',
+            'news_note': (f'No market headline from the last {JEV_NEWS_MAX_MINUTES} minutes was available (news_status: none_recent = '
+                          'the feeds had none, unavailable = the feeds could not be read). Judge by the chart, flows and market '
+                          'context; earlier_news_headlines are older stories of today, background only and probably already in the price.'),
+            'earlier_news_headlines': earlier[:5]}
 
 
 def jev_market_headlines(rows, now):
@@ -149,11 +184,24 @@ def _rss(url: str, *, timeout=None):
 
 
 def _naver(*, timeout=None):
-    url = 'https://m.stock.naver.com/api/news/list?category=mainnews&pageSize=50&page=1'
-    data = json.loads(_read(url) if timeout is None else _read(url, timeout=timeout))
-    if not isinstance(data, list):
-        raise ValueError('news feed invalid')
-    for row in data:
+    # main news changes slowly; flash news carries the newest stories (2026-11-24). Either list alone is enough.
+    rows, seen, error = [], set(), None
+    for category in ('mainnews', 'flashnews'):
+        url = f'https://m.stock.naver.com/api/news/list?category={category}&pageSize=50&page=1'
+        try:
+            data = json.loads(_read(url) if timeout is None else _read(url, timeout=timeout / 2))
+            if not isinstance(data, list):
+                raise ValueError('news feed invalid')
+        except (OSError, ValueError) as exc:
+            error = error or exc
+            continue
+        rows += data
+    if error and not rows:
+        raise error
+    for row in rows:
+        if (key := (row.get('tit'), row.get('dt'))) in seen:
+            continue
+        seen.add(key)
         try:
             published = datetime.strptime(str(row.get('dt')), '%Y%m%d%H%M%S').replace(tzinfo=KST)
         except (TypeError, ValueError, AttributeError):
@@ -169,8 +217,8 @@ def _items(source: str, topic: str, query: str, shared: dict, *, timeout=None):
             shared['naver'] = list(_naver() if timeout is None else _naver(timeout=timeout))
         return shared['naver']
     if source == 'bing_news_rss':
-        url = ('https://www.bing.com/news/search?q=' + quote(query.replace(' when:1d', '')) +
-               '&format=rss&setlang=ko&cc=KR&qft=' + quote('interval="7"'))  # interval 7 = last 24 hours
+        url = ('https://www.bing.com/news/search?q=' + quote(re.sub(r' when:\d+[dh]', '', query)) +
+               '&format=rss&setlang=ko&cc=KR&qft=' + quote('interval="%s"' % ('8' if re.search(r' when:(?!1d)\d+d', query) else '7')))  # 7 = last 24 hours, 8 = last 7 days
     else:
         url = 'https://news.google.com/rss/search?q=' + quote(query) + '&hl=ko&gl=KR&ceid=KR:ko'
     return _rss(url) if timeout is None else _rss(url, timeout=timeout)

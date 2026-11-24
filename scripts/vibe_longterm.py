@@ -875,11 +875,11 @@ def dca_targets(want, yeo_cfg=None):
     return {k: v for k, v in (want or {}).items() if k != 'RES' and v > 0}
 
 
-def yeo_orders(plan, cfg, book_state, values, nav, cash, day):
+def yeo_orders(plan, cfg, book_state, values, nav, cash, day, res_price=None):
     """The 여운봉 저수지 매매법 for one book, shaped like plan_orders: (want, target, why, notes, planned KRW, new book state).
     No master module, no first-deployment spread and no monthly sell cap: the steps and the 70 : 30 rebalance are the rule."""
     ath = (plan.get('indicators') or {}).get('ath') or {}
-    planned, ystate, texts = yeo_method.plan(cfg, (book_state or {}).get('yeo'), ath, values, cash, day, (book_state or {}).get('yeo_owed'))
+    planned, ystate, texts = yeo_method.plan(cfg, (book_state or {}).get('yeo'), ath, values, cash, day, (book_state or {}).get('yeo_owed'), res_price)
     after = {k: values.get(k, 0) + planned.get(k, 0) for k in set(values) | set(planned)}
     want = {k: v / nav for k, v in after.items() if nav and v > 0 and k != 'RES'}
     want['RES'] = max(0.0, 1 - sum(want.values()))
@@ -913,12 +913,14 @@ the Jev engine's summary is a reference view of a different, intraday engine):
 You may call get_stock_news or get_market_data for the themes (US proxies: SOXX, QTUM, UFO) once each if useful.
 Reply with ONLY one JSON object:
 {{"market_view": "<Korean, two sentences: the long-term picture and why>",
-  "sources": ["<up to 5 news or data you relied on: publisher · date · title>"],
+  "sources": ["<up to 5 news or data you relied on: publisher · YYYY-MM-DD · title>"],
   "stories": {{"SEMI": {{"status": "intact|watch|broken", "tilt": -1|0|1, "reason": "<Korean, one sentence, no prices>"}},
               "QUANT": {{...}}, "SPACE": {{...}}}}}}
 status: intact = the reason to own it holds; watch = a real crack (demand, competition, regulation, earnings) that may
 heal; broken = the reason to own it is gone. tilt: +1 only for clearly improving fundamentals, -1 for deteriorating ones.
-A falling price alone is not a broken story. Do not write prices, targets or amounts."""
+A falling price alone is not a broken story. Do not write prices, targets or amounts.
+Rely on evidence dated within the last 30 days, first of all the headlines above, and put its date in sources. A theme with
+no new evidence keeps your previous call, and its reason says so; with none at all, sources is []."""
 
 
 def parse_story(text):
@@ -960,6 +962,24 @@ def story_context():
     return context
 
 
+NO_EVIDENCE, SOURCE_DAYS = '새 근거 없음', 30
+
+
+def recent_sources(sources, today):
+    """(sources dated in the last 30 days or NO_EVIDENCE, the dropped ones): an undated source cannot show it is recent
+    (user approval 2026-11-24). The record only: the judgement itself is not changed."""
+    def fresh(text):
+        for found in re.findall(r'20\d\d-\d\d-\d\d', text):
+            try:
+                if 0 <= (today - date.fromisoformat(found)).days <= SOURCE_DAYS:
+                    return True
+            except ValueError:
+                pass
+        return False
+    kept = [s for s in sources if fresh(s)]
+    return kept or [NO_EVIDENCE], [s for s in sources if s not in kept]
+
+
 STORY_SEEN = {}  # the last story check's inputs and sources (decide logs them)
 
 
@@ -981,7 +1001,9 @@ def story_check(ind, regime, previous, now, ask=None, macro='', news=''):
                               'previous_time': (previous or {}).get('time')}, sources=[])
     try:
         result = parse_story(ask(story_prompt(ind, regime, prev_stories, context, macro, news)))
-        STORY_SEEN['sources'] = result['sources']
+        STORY_SEEN['sources'], dropped = recent_sources(result['sources'], now.date())
+        if dropped:
+            STORY_SEEN['inputs']['old_sources'] = dropped
         return result['stories'], result['market_view'], 'llm'
     except Exception as exc:  # a failed check keeps the last known stories, then falls back to "intact"
         at = (previous or {}).get('time')
@@ -1017,7 +1039,7 @@ def decide(root, now, *, fetch=None, ask=None, macro=None, news=None):
     macro_text = longterm_macro.brief(macro_facts)
     import longterm_news  # 장기 관점 뉴스 (user approval 2026-11-18): a reference for the story check, never a rule input
     try:
-        news_facts = (news or (lambda at: longterm_news.collect(at, root)))(now)
+        news_facts = (news or (lambda at: longterm_news.collect(at, root, date.fromisoformat(str(ind['as_of'])[:10]))))(now)
     except Exception as exc:  # noqa: BLE001 - a news failure leaves only this input out
         news_facts = {'as_of': now.isoformat(), 'rows': [], 'error': type(exc).__name__}
     news_text = longterm_news.brief(news_facts)
@@ -1143,7 +1165,7 @@ def trade(root, read, now, execute=False):
                 values[k] = held.get(code_of(k), (0, 0))[0] * quotes[k][0]
         nav = cash + sum(values.values())
         weights = {k: v / nav for k, v in values.items()} | {k: weights.get(k, 0) for k in ASSETS if k not in values}
-        want, target, why, notes, planned, book = yeo_orders(plan, yeo_cfg, before, values, nav, cash, day)
+        want, target, why, notes, planned, book = yeo_orders(plan, yeo_cfg, before, values, nav, cash, day, quotes['RES'][0])
     else:
         want, target, why, notes, planned, book = plan_orders(plan, plan['active'], before, stories, values, nav, cash, day)
     if execute and not claim(db, f'trade:{day}', now):  # another run sent today's orders (or stopped after sending)
@@ -1327,7 +1349,7 @@ def account_shadow(saved, capital, modules, plan, stories, prices, day, yeo=None
     values = {k: book.qty.get(k, 0) * prices[k] for k in keys}
     nav = book.cash + sum(values.values())
     if yeo is not None:
-        want, _, why, notes, planned, bs = yeo_orders(plan, yeo, saved.get('state') or {}, values, nav, book.cash, day)
+        want, _, why, notes, planned, bs = yeo_orders(plan, yeo, saved.get('state') or {}, values, nav, book.cash, day, prices['RES'])
     else:
         want, _, why, notes, planned, bs = plan_orders(plan, modules, saved.get('state') or {}, stories, values, nav, book.cash, day)
     fill_whole(book, planned, prices)
@@ -1390,7 +1412,7 @@ def close(root, read, now, execute=False, accounts=None):
         waiting = longterm_dca.reserved(dca_state)  # as in trade(): the 적립식's money and its sleeve are not the engine's
         values = {k: book.qty.get(k, 0) * prices[k] for k in [*ASSETS, *(yeo_method.keys(yeo) if yeo else ())]}
         nav, cash = book.cash - waiting + sum(values.values()), book.cash - waiting
-        want, _, why, notes, planned, bs = (yeo_orders(plan, yeo, saved.get('state') or {}, values, nav, cash, day) if yeo else
+        want, _, why, notes, planned, bs = (yeo_orders(plan, yeo, saved.get('state') or {}, values, nav, cash, day, prices['RES']) if yeo else
                                             plan_orders(plan, modules, saved.get('state') or {}, stories, values, nav, cash, day))
         for k, krw in sorted(planned.items(), key=lambda item: item[1]):
             book.trade(k, krw, prices[k])

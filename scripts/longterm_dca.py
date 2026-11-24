@@ -398,7 +398,8 @@ def plan(cfg, state, now, ind, regime, want, values, cash, arrived=None, profile
         # pace above the base left waiting, so no 적립금 waits forever), a 여운봉 book what its buys fell short of the base
         behind = 0.0 if deposit else state['catch_krw'] if yeo else max(0.0, state['waiting_krw'] - today - cfg['amount_krw'])
         extra = behind * CATCH_SHARE if today < CAP * base else 0.0
-        room = (cash - (reserved(state) - state['waiting_krw']) - p['floor'] * value) if yeo else min(state['waiting_krw'], free + state['waiting_krw'])
+        own = cash - (reserved(state) - state['waiting_krw'])  # the reservoir ETF is reservoir too (user 2026-11-24), but only cash is spent
+        room = min(own, own + (values or {}).get('RES', 0) - p['floor'] * value) if yeo else min(state['waiting_krw'], free + state['waiting_krw'])
         if deposit:  # only the deposit's money, and still above a 여운봉 book's cash floor
             room = min(room, state['waiting_krw'])
         spend = max(0.0, min(today + extra, CAP * base, room))

@@ -188,7 +188,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibetrading.shared-e
 | 2 | `shared-etf-regime`, `market-movers`, `premarket`, `preflight` | 로그인 시 / 평일 08:50 / 평일 07:40\~09:10 / 평일 08:20·08:53 | 국면 관측, 순위 후보, 장전 자료, 장전 사전 점검(모두 읽기 전용) |
 | 3 | `shared-etf-learning`, `trading-backup`, `state-sync`, `discord-notify` | 로그인 시 / 평일 15:50 / 평일 16:55 / 로그인 시 | 학습 관찰·일지, 백업, 설정 정리본, 알림 |
 | 4 | `shared-etf-paper`, `trading-day-start` | 로그인 시 / 평일 08:55 | 공유 모의 실행기(`--execute` 모의 주문)와 거래일 준비 |
-| 5 | `vibe-longterm`, `us-ideas` | 평일 08:40 / 금 07:00·07:30 | 장기 엔진(dry-run), 미국 종목 아이디어 |
+| 5 | `vibe-longterm`, `us-ideas` | 평일 08:40 / 금 10:00·10:30 | 장기 엔진(dry-run), 미국 종목 아이디어 |
 | 별도 승인 | `live-follow-1`, `longterm-live-2` | 평일 08:58 / 평일 09:35 | 실계좌 미러, 장기투자 실계좌 |
 
 > [!WARNING]

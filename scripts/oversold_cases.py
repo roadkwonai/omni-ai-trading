@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
+from sqlite_ro import ro_connect  # noqa: E402
 
 KST = ZoneInfo('Asia/Seoul')
 ROOT = Path.home() / '.vibe-trading/nhplug/shared-etf-paper'
@@ -352,6 +353,27 @@ def refresh_series(db=DB, universe=UNIVERSE + GLOBAL, rng='1mo'):
     series = {s: bars for s, bars in series.items() if bars}
     write(db, [], series)
     return sum(map(len, series.values()))
+
+
+def fill_index_series(now, db=DB):
+    """The KOSPI and KOSDAQ series that lack the previous session, fetched again (market_movers, every round until they
+    have it); the symbols completed. 11-24: Yahoo had no 11-23 index bar at 08:50 and market_prior5 refuses a series that
+    missed a session. Today's forming bar is left out."""
+    import oversold_research as research
+    if not Path(db).exists():
+        return []
+    today, filled = now.date(), []
+    day = previous_session(today)
+    for symbol in (INDICES['kospi'], INDICES['kosdaq']):
+        with ro_connect(db) as conn:
+            last = conn.execute('SELECT max(day) FROM series WHERE symbol = ? AND day < ?', (symbol, today.isoformat())).fetchone()[0]
+        if last == day.isoformat():
+            continue
+        bars = [b for b in research.fetch(symbol, '1d', '1mo', volume=True) if b[0].date() < today]
+        if any(b[0].date() == day for b in bars):
+            write(db, [], {symbol: bars})
+            filled.append(symbol)
+    return filled
 
 
 def write(db, cases, series, replace=None):

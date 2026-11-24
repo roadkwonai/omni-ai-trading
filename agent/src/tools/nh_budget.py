@@ -8,11 +8,13 @@ an app key past five calls a second (IGW42902). Each process used to call on its
 of the last second: a trading process may start a call while fewer than RATE started; any other program only while
 fewer than RATE - RESERVE did, so a burst from the ranking service or the dashboard never takes the runner's slot.
 A caller past its share waits for a slot, up to its cap, and then goes anyway (NH's own refusal and the callers'
-retries stay as they were). Orders never wait. A broken or missing budget file lets the call through at once.
+retries stay as they were). NH also answers one account query (operation and account) only about once a second
+(IGW42903), so those are started SAME_GAP apart across processes (2026-11-24). Orders never wait. A broken or missing budget file lets the call through at once.
 """
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +28,10 @@ _wait_deadline = {'high': 1.0, 'low': 2.0}  # longest wait for a slot before the
 HIGH = frozenset({'nh_paper_isolated', 'nh_live_follow', 'longterm_live', 'nh_guarded_live', 'nh_live_auto',
                   'nh_live_position_watch', 'restart_runner'})
 TRIES = 50
+SAME_GAP = 1.1  # measured 2026-11-19: the same query 0.5 s later is refused, 0.7-1.0 s later answered (nh_live_broker.PAGE_GAP)
+SAME_FILE = 'nh-budget-same.json'  # its own file: programs still running older code read nh-budget.json as a list
+SAME_QUERIES = ('krstockInquiry',)
+_same_deadline = {'high': 1.2, 'low': 3.0}  # past it the call goes at once; a trading program does not queue behind a screen
 ORDERS = ('krstockOrder',)  # operationId prefix of order, modify and cancel calls
 
 
@@ -59,6 +65,33 @@ def _locked(path: Path, update):
         return kept
 
 
+def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
+    """Seconds waited so that this account query starts SAME_GAP after the last one of any program. The slot is reserved
+    under the lock, so two waiting programs get different ones. The key is a hash: no account number is written."""
+    try:
+        account = str((arguments.get('input') or {}).get('act_no'))
+        key = hashlib.sha256(f'{operation}:{account}'.encode()).hexdigest()[:16]
+        fd = os.open(path.with_name(SAME_FILE), os.O_RDWR | os.O_CREAT, 0o600)
+        with os.fdopen(fd, 'r+') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            now = clock()
+            text = stream.read()
+            starts = {k: float(v) for k, v in (json.loads(text) if text.strip() else {}).items() if abs(now - float(v)) < 10}
+            wait = max(0.0, starts.get(key, 0.0) + SAME_GAP - now)
+            if wait > _same_deadline[tier]:
+                wait = 0.0
+            else:
+                starts[key] = now + wait
+            stream.seek(0)
+            stream.truncate()
+            stream.write(json.dumps(starts))
+        if wait:
+            sleep(wait)
+        return wait
+    except Exception:  # noqa: BLE001 - spacing is a courtesy; it must never stop a call
+        return 0.0
+
+
 def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sleep=time.sleep, path=None) -> float:
     """Wait for a slot in the shared budget, then count this call; returns the seconds waited. Never raises."""
     if path is None and 'pytest' in sys.modules:
@@ -69,6 +102,7 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
         tier = 'high' if order or high_priority(caller or program()) else 'low'
         limit = RATE if tier == 'high' else RATE - RESERVE
         path = Path(path) if path is not None else _default_path()
+        same = _wait_same(name, arguments, tier, path, clock, sleep) if tool == 'call_api' and str(name).startswith(SAME_QUERIES) else 0.0
         started = clock()
         deadline = started + _wait_deadline[tier]
         for attempt in range(TRIES):  # bounded: a clock that never moves cannot hold a call
@@ -82,8 +116,8 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
                 return recent
             _locked(path, update)
             if pause[0] is None:
-                return round(max(0.0, now - started), 3)
+                return round(same + max(0.0, now - started), 3)
             sleep(min(max(pause[0], 0.01), max(0.0, deadline - now)))
-        return round(max(0.0, clock() - started), 3)  # unreachable: the last try always counts the call
+        return round(same + max(0.0, clock() - started), 3)  # unreachable: the last try always counts the call
     except Exception:  # noqa: BLE001 - the budget must never stop a call
         return 0.0

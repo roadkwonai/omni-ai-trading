@@ -233,3 +233,24 @@ def test_bars_context_reads_todays_rows_when_the_previous_session_is_mixed_in():
          patch.object(c, 'context', side_effect=lambda changes, *a, **k: seen.update(changes=changes) or {}):
         c.bars_context({'K200': rows}, today=date(2026, 11, 6))
     assert round(seen['changes']['069500'], 2) == -10.0
+
+
+def test_a_missing_index_session_is_fetched_during_the_day(tmp_path, monkeypatch):
+    """11-24: Yahoo had no 11-23 bar of ^KS11/^KQ11 at 08:50, so market_prior5 could not judge the five sessions all day."""
+    import sqlite3
+    import oversold_cases as m
+    import oversold_research
+    now = datetime(2026, 11, 24, 10, 0, tzinfo=m.KST)
+    monkeypatch.setitem(m._SESSIONS, now.date(), datetime(2026, 11, 23).date())
+    db, asked = tmp_path / 'c.sqlite3', []
+    bar = lambda d, c: (datetime(2026, 11, d, tzinfo=m.KST), c, c, c, c, 1)  # noqa: E731
+    m.write(db, [], {'^KS11': [bar(20, 100)], '^KQ11': [bar(20, 10), bar(23, 11)]})
+    answer = [[bar(20, 100)]]
+    monkeypatch.setattr(oversold_research, 'fetch', lambda s, i, r, volume=False: asked.append(s) or answer[0])
+    assert m.fill_index_series(now, db) == [] and asked == ['^KS11']           # still not there: nothing written, asked again later
+    answer[0] = [bar(20, 100), bar(23, 101), bar(24, 999)]
+    assert m.fill_index_series(now, db) == ['^KS11']
+    with sqlite3.connect(db) as conn:
+        assert [r[0] for r in conn.execute("SELECT c FROM series WHERE symbol='^KS11' ORDER BY day")] == [100, 101]  # today's open bar stays out
+    assert m.fill_index_series(now, db) == [] and asked == ['^KS11', '^KS11']  # complete: no more calls
+    assert m.fill_index_series(now, tmp_path / 'none.sqlite3') == []           # no library yet

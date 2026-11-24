@@ -27,9 +27,38 @@ SUPPORTED_QUESTIONS = (
     '지금 실행기 상태는?',
 )
 PERIODS = ('지난주', '이번주', '지난달', '이번달', '어제', '오늘')
+SAME_PERIOD = {'저번주': '지난주', '금주': '이번주', '저번달': '지난달', '금월': '이번달', '전날': '어제', '금일': '오늘'}
 UNSUPPORTED_PERIOD = re.compile(
-    r'\d{4}[-./년]|\d{1,2}월|\d{1,2}일|작년|다음[주달]|내일|최근\d|연초|올해|전체기간|지난거래일|직전거래일',
+    r'\d{4}[-./년]|\d{1,2}월|\d{1,2}일|\d{1,2}/\d{1,2}|작년|다음[주달]|내일|최근|연초|올해|지난거래일|직전거래일'
+    r'|전체(?:기간|수익|성과|손익|체결)|총수익|누적|그동안|지금까지|일주일|주간|월간|한달|개월|분기|반기|그제|그저께|이틀|사흘|[월화수목금]요일',
 )
+# questions about how something works or where it is, not about the stored numbers
+EXPLAIN = re.compile(
+    r'어디|어느(?:화면|탭|메뉴)|사용법|뜻|왜|이유|조건|역할|이란|의미|정의|설명|방법|원리|공식|전망|뉴스|기준(?:은|이|을|$)'
+    r'|확인하는법|조회하는법|보는법|비교할때|비교하려면|csv|내려받|어떻게(?!돼|되|됐|나왔|나와)',
+)
+WHAT = re.compile(r'무엇인가요|뭐야|뭐예요|뭔가요')  # a definition, unless a date or an account number makes it a lookup
+LEAD = rf"(?:그럼|지금|현재|혹시|{'|'.join(PERIODS)})*"  # what may come before an own-record word when nothing names its owner
+OWN = re.compile(r'계좌|모의|jev|제브(?!라)')
+# how such a question may end: "보유 종목은?" is ours, "보유 종목 배당 일정" is not
+END = (r'(?:은|는|이|가|도|을|를|의)?(?:총|모두|전부|좀|다|지금|현재)*(?:얼마\w{0,5}|어때\w{0,2}|어떤가요|어떻게(?:돼|되|됐|나왔|나와)\w{0,4}'
+       r'|(?:알려|보여|말해)\w{0,4}|조회\w{0,4}|확인\w{0,4}|뭐\w{0,4}|무엇\w{0,4}|있\w{0,4}|몇\w{0,6}|요)?')
+BARE_HOLDING = re.compile(LEAD + r'(?:(?:보유|들고있)(?:하고있는|하는|중인|중|한|는)?(?:종목|현황|주식|내역|목록)?(?:수|개수)?|포지션(?:현황)?'
+                          r'|(?:뭐|무엇을|어떤종목|무슨종목)(?:을|를)?(?:보유|들고)\w{0,6}|[^\s]{1,12}(?<![가이])몇주(?:를|나)?(?:보유|들고)\w{0,6})' + END)
+BARE_TRADE = re.compile(LEAD + r'(?:산|판|매수한|매도한|뭐|어떤종목|무슨종목)')
+RESULT_WORD = r'(?:수익률?|손익|성과|(?:최대)?낙폭|승률)'
+BARE_RESULT = re.compile(LEAD + rf'(?:공유)?(?:모의(?:계좌|투자)?)?(?:의)?{RESULT_WORD}(?:(?:과|와|이랑|하고|및|,|·){RESULT_WORD})*' + END)
+OTHERS = re.compile(r'외국인|기관|국민연금|주주|버핏|버크셔|etf|kodex|tiger|펀드|은행|금융')  # whose holdings or trades the records do not keep
+OTHER_BOOK = re.compile(r'장기투자|nxt|vibe|가상|퇴직연금|isa|irp|cma')
+NEWS_FILL = re.compile(r'체결강도|체결가|체결알림|체결통보|체결수수료|체결속도|체결방식|체결률|계약|협정|fta|mou|공시|외국인|기관|시간외')
+JEV_PART = re.compile(r'낙폭과대|낙주|선별|신규주|신규상장|인버스|레버리지|관심종목|강도|스윙|종가|코스닥|나스닥|장기투자')  # the ledger keeps the whole account
+RESULT = ('성과', '수익', '손익', '낙폭', '성능', '승률')
+NOT_PAPER = r'(?<!모의)(?<!모의 )'
+# read from the question itself: without its spaces "실계좌 1 5개" would be account 15
+NUMBER = re.compile(
+    NOT_PAPER + r'계좌\s*([1-9]\d?)(?!\d|\s*개)번?(?:\s*(?:,|와|과|이랑|랑|하고|·|및|\s)\s*(?:실?\s*계좌\s*)?([1-9])번?(?!\d|\s*[개주월일건위시분%]))?'
+    r'|(?<!\d)([1-9])번\s*(?:실\s*)?계좌')
+TAIL = re.compile(r'(?:은|는|도|을|를|이|가)?(?:요|얼마\S*|알려\S*|보여\S*)?$')
 Kind = Literal['performance', 'fills', 'positions', 'status', 'unsupported']
 
 
@@ -43,60 +72,89 @@ class InternalQuery:
 
 def resolve(question: str, *, previous: InternalQuery | None = None) -> InternalQuery | None:
     q = ''.join(question.casefold().split()).rstrip('?!.')
-    follow_up = q.removeprefix('그럼').removesuffix('는').removesuffix('은')
-    if previous and previous.kind in ('performance', 'fills') and follow_up in PERIODS:
-        return replace(previous, period=follow_up)
-    if previous and previous.kind in ('fills', 'positions'):
-        number = re.fullmatch(r'(?:실계좌|계좌)?([1-9][0-9]*)', follow_up)
-        if number:
-            return replace(previous, account=f'live-{number[1]}')
-        if follow_up in ('모의', '모의계좌'):
-            return replace(previous, account='paper')
-        if previous.kind == 'positions' and previous.account.startswith('live-') and follow_up in (
-            '잔고', '예수금', '총자산', '보유종목', '다시조회', '다시조회해줘', '새로고침',
-        ):
-            return previous
-    if any(word in q for word in (
-        '어디서', '어디에', '사용법', '뜻', '계산방법', '어떻게계산', '어떻게해석', '어떻게읽',
-        '어떻게확인', '어떻게비교', '확인방법', '확인하는법', '확인하는방법', '조회방법', '조회하는법',
-        '보는법', '비교할때', '무엇인가요', 'csv', '내려받',
-    )):
-        return None
+    for said, period in SAME_PERIOD.items():
+        q = q.replace(said, period)
+    if previous and previous.kind != 'unsupported' and (found := _follow_up(TAIL.sub('', q.removeprefix('그럼')), previous)):
+        return found
 
     periods = [value for value in PERIODS if value in q]
     period = periods[0] if periods else '오늘'
-    accounts = set(re.findall(r'실계좌([1-9][0-9]*)', q))
-    live = '실계좌' in q or ('실제체결' in q and '모의' not in q) or ('내계좌' in q and '모의' not in q)
+    accounts = {number for match in NUMBER.finditer(question) for number in match.groups() if number}
+    kodex = 'kodex200' in q or '069500' in q
+    if EXPLAIN.search(q) or (WHAT.search(q) and not (periods or accounts or re.match('지금|현재', q))) or ('차이' in q and not kodex):
+        return None
+
+    own = OWN.search(q)
+    mine = re.search(r'(?:^|\s)내(?:가|\s*(?:보유|종목|포지션|계좌))', question)
+    live = bool(accounts) or '실계좌' in q or (bool('실제체결' in q or (mine and '내계좌' in q)) and '모의' not in q)
     account = f'live-{next(iter(accounts))}' if accounts else 'live' if live else 'paper'
-    if '운영상태' in q or (any(word in q for word in ('실행기', '런치드')) and any(
-        word in q for word in ('상태', '돌고', '실행중', '켜져', '멈춰', '운영중')
-    )):
+    inherited = bool(previous and previous.account.startswith('live-') and not live and not own)
+    holding = any(word in q for word in ('보유현황', '보유종목', '보유하고있', '보유중', '들고있', '포지션')) or (
+        '보유' in q and '계좌' in q and any(word in q for word in ('몇주', '어떤종목', '있어', '알려', '보여')))
+    named = bool(accounts or own or mine)
+    if re.search(r'^(?:지금|현재)*운영상태', q) or ('실행기' in q or '런치드' in q) and any(
+        word in q for word in ('상태', '돌고', '실행중', '켜져', '멈춰', '멈췄', '운영중')
+    ):
         kind: Kind = 'status'
-    elif live and any(word in q for word in ('잔고', '잔액', '예수금', '총자산', '주문가능금액')):
+    elif live and any(word in q for word in ('잔고', '잔액', '예수금', '총자산', '주문가능금액', '평가금액')):
         kind = 'positions'
-    elif any(word in q for word in ('보유현황', '보유종목', '포지션')) or ('보유' in q and any(
-        word in q for word in ('계좌', '몇주', '어떤종목', '있어', '알려', '보여')
-    )):
+    elif holding and (named or not OTHERS.search(q) and BARE_HOLDING.fullmatch(q)):
         kind = 'positions'
-    elif any(word in q for word in ('체결', '거래내역', '매매내역')) and (
-        any(word in q for word in ('계좌', '내역', '기록', '종목', '보여', '알려')) or any(word in q for word in PERIODS)
+    elif '미체결' in q:
+        if not any(word in q for word in ('계좌', '내역', '있', '몇', '보여')):
+            return None
+        kind = 'unsupported'
+    elif any(word in q for word in ('체결', '거래내역', '매매내역')) and not NEWS_FILL.search(q) and (
+        periods or any(word in q for word in ('계좌', '내역', '기록', '종목', '보여', '알려'))
     ):
         kind = 'fills'
-    elif any(name in q for name in ('jev', '제브')) and any(word in q for word in ('성과', '수익', '손익', '낙폭', '성능', '승률')):
+    elif any(word in q for word in ('산종목', '판종목', '매수한종목', '매도한종목', '뭐샀', '뭐팔')) and not NEWS_FILL.search(q) and (
+        named or BARE_TRADE.match(q)
+    ):
+        kind = 'fills'
+    elif re.search(r'jev|제브(?!라)', q) and any(word in q.replace('낙폭과대', '') for word in RESULT):
+        whole = not JEV_PART.search(q) and (kodex or '비교' not in q.replace('성과비교', ''))
+        kind = 'performance' if whole else 'unsupported'
+    elif BARE_RESULT.fullmatch(q):
         kind = 'performance'
-    elif any(word in q for word in ('실계좌', '모의계좌', '내계좌')) and any(
-        word in q for word in ('잔고', '수익', '손익', '성과', '잔액', '예수금', '계좌번호')
+    elif ('실계좌' in q or '모의계좌' in q or (mine and '내계좌' in q)) and any(
+        word in q for word in ('잔고', '수익', '손익', '성과', '잔액', '예수금', '총자산', '평가', '계좌번호')
     ):
         kind = 'unsupported'
     else:
         return None
-    if len(periods) > 1 or len(accounts) > 1 or ('실계좌' in q and '모의계좌' in q):
+    if kind == 'unsupported' or len(periods) > 1 or len(accounts) > 1 or ('실계좌' in q and '모의계좌' in q):
         return InternalQuery('unsupported')
-    if UNSUPPORTED_PERIOD.search(q) or (kind in ('status', 'positions') and period != '오늘'):
+    if UNSUPPORTED_PERIOD.search(q) or OTHER_BOOK.search(q) or (kind in ('status', 'positions') and period != '오늘'):
         return InternalQuery('unsupported')
-    if kind == 'performance' and account != 'paper':
+    if kind == 'performance' and (account != 'paper' or inherited):
         return InternalQuery('unsupported')
-    return InternalQuery(kind, period, account, kind == 'performance' and ('kodex200' in q or '069500' in q))
+    if inherited and kind in ('fills', 'positions'):
+        account = previous.account
+    return InternalQuery(kind, period, account, kind == 'performance' and kodex)
+
+
+def _follow_up(q: str, previous: InternalQuery) -> InternalQuery | None:
+    """A short question that only changes what the previous internal answer was about."""
+    if q in ('다시조회', '다시조회해줘', '새로고침'):
+        return previous
+    if previous.kind in ('performance', 'fills') and q in PERIODS:
+        return replace(previous, period=q)
+    if previous.kind == 'performance':
+        if q in ('수익률', '손익', '최대낙폭', '낙폭'):
+            return previous
+        if re.fullmatch(r'kodex200(?:과|이랑|하고|도)?비교(?:해줘)?', q):
+            return replace(previous, compare_kodex=True)
+    if previous.kind in ('fills', 'positions'):
+        if number := re.fullmatch(r'(?:실계좌|계좌)?([1-9]\d?)번?(?:계좌)?(?:로)?(?:조회)?(?:해줘)?', q):
+            return replace(previous, account=f'live-{number[1]}')
+        if q in ('모의', '모의계좌'):
+            return replace(previous, account='paper')
+    if previous.kind == 'positions' and previous.account.startswith('live-') and q in (
+        '잔고', '예수금', '현금', '주문가능금액', '총자산', '보유평가금액', '평가금액', '보유종목',
+    ):
+        return previous
+    return None
 
 
 def bounds(period: str, today: date) -> tuple[str, str]:
@@ -116,6 +174,10 @@ def bounds(period: str, today: date) -> tuple[str, str]:
     else:
         start = today
     return start.isoformat(), end.isoformat()
+
+
+def _stamp(text: str | None) -> str:
+    return (text or '기록 없음')[:19].replace('T', ' ')
 
 
 def _revision(path: Path, *, wal: bool = False) -> tuple[tuple[int, int, int] | None, ...]:
@@ -182,8 +244,8 @@ def _performance(query: InternalQuery, root: Path, now: datetime) -> str:
             comparison = f'\n- 같은 기록일 기준 KODEX 200 등락률 {benchmark:+.2f}% · Jev와의 차이 {difference:+.2f}%p'
         else:
             comparison = '\n- KODEX 200의 같은 날짜 등락률 기록이 부족합니다.'
-    return (f'### Jev 성과 비교\n\n요청 기간 {start} ~ {end} · 기록 {rows[0]["day"]} ~ {rows[-1]["day"]}\n\n'
-            f'비교 원장 계산 시각 {rows[-1]["built"]} · 원장 출처 {sources}\n\n'
+    return (f'### Jev 성과 비교\n\n공유 모의계좌 전체 기준 · 요청 기간 {start} ~ {end} · 기록 {rows[0]["day"]} ~ {rows[-1]["day"]}\n\n'
+            f'비교 원장 계산 시각 {_stamp(rows[-1]["built"])} · 원장 출처 {sources}\n\n'
             f'- 손익 {result["pnl"]:+,.0f}원\n- 수익률 {result["ret"] * 100:+.2f}%\n'
             f'- 최대 낙폭 {result["mdd"] * 100:.2f}%\n- 이긴 날 {result["win_days"]}/{result["active"]}일\n'
             f'- 기록 일수 {result["days"]}일{comparison}\n\n수익률은 기간 손익을 일별 최대 투입금의 기간 평균으로 나눈 값입니다.')
@@ -203,14 +265,14 @@ def _positions(query: InternalQuery, root: Path, _now: datetime) -> str:
 
 
 def _live_positions(account_key: str, account: dict) -> str:
-    from nh_live_broker import read_linked_balance
+    from nh_live_broker import orderable_cash, read_linked_balance
     from src.config.loader import load_agent_config
     from src.tools.mcp import MCPServerAdapter
 
     config = load_agent_config().mcp_servers['nhplug_readonly']
     adapter = MCPServerAdapter('nhplug_readonly', config, interactive_oauth=False)
     balance, observed_at = read_linked_balance(adapter, account_key, account)
-    summary = balance['Output_0']
+    summary = {**balance['Output_0'], 'orr_pbl_amt1': orderable_cash(balance['Output_0'])}
     amounts = []
     for field, title in (('dca', '예수금'), ('orr_pbl_amt1', '주문가능금액'), ('tot_aet_amt', '총자산'),
                          ('tot_eal_amt', '보유 평가금액')):
@@ -243,6 +305,7 @@ def _live_positions(account_key: str, account: dict) -> str:
 
 def _fill_answer(query: InternalQuery, root: Path, now: datetime) -> str:
     from live_fills import NAME
+    from trading_journal import stock_names
 
     if query.account == 'live':
         return '**실계좌 번호를 지정해 주세요.** 예를 들어 “오늘 실계좌 1 체결 내역은?”이라고 질문하세요.'
@@ -254,12 +317,12 @@ def _fill_answer(query: InternalQuery, root: Path, now: datetime) -> str:
         return f'### {label}\n\n체결 원장을 확인할 수 없습니다.'
     start, end = bounds(query.period, now.date())
     rows = _fills(path, start, end, query.account, revision)
+    names = stock_names({symbol for _, symbol, *_ in rows})
     lines = []
     for stamp, symbol, side, qty, price in rows:
-        if not paper and 'T00:00:00' in stamp:
-            stamp = f'{stamp[:10]} (시각 미기록)'
+        stamp = f'{stamp[:10]} (시각 미기록)' if not paper and 'T00:00:00' in stamp else _stamp(stamp)
         side = {'BUY': '매수', 'SELL': '매도'}.get(side, side)
-        lines.append(f'- {stamp} · {symbol} · {side} {qty:,}주 · {price:,.0f}원')
+        lines.append(f'- {stamp} · {symbol} {names.get(symbol, "")}'.rstrip() + f' · {side} {qty:,}주 · {price:,.0f}원')
     time_basis = '모의 원장의 체결 확인 시각입니다.' if paper else '실계좌 항목의 시각은 원장에 기록된 주문 시각입니다.'
     return f'### {label}\n\n{start} ~ {end} · 최근 최대 20건\n\n{time_basis}\n\n' + (
         '\n'.join(lines) if lines else '해당 기간에 저장된 체결 기록이 없습니다.'
@@ -287,7 +350,8 @@ READERS = {'performance': _performance, 'positions': _positions, 'fills': _fill_
 def answer(query: InternalQuery, runtime: Path, now: datetime) -> str:
     reader = READERS.get(query.kind)
     if reader is None:
-        return '요청한 기간 또는 계좌의 내부 조회를 지원하지 않습니다. 대시보드에서 해당 계좌와 기간을 확인하세요.'
+        return ('요청한 기간·계좌·항목의 내부 조회를 지원하지 않습니다. 대시보드에서 확인하거나 '
+                '오늘·어제·이번 주·지난주·이번 달·지난달 중 한 기간과 계좌 하나를 골라 다시 질문하세요.')
     root = Path(runtime)
     try:
         if query.account.startswith('live-'):

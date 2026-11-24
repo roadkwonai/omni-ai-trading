@@ -33,14 +33,11 @@ def fake_get(calls=None, fail=(), stale=()):
             if sid in stale:
                 obs = obs[:200]
             return {'observations': obs}
-        if path == 'releases/dates':
-            return {'release_dates': [
-                {'release_id': 1, 'release_name': 'Employment Situation', 'date': '2026-12-04'},
-                {'release_id': 2, 'release_name': 'Consumer Price Index', 'date': '2026-12-10'},
-                {'release_id': 3, 'release_name': 'FOMC Press Release', 'date': '2026-11-19'},  # FRED lists it daily
-                {'release_id': 4, 'release_name': 'H.4.1 Factors Affecting Reserve Balances', 'date': '2026-11-19'},
-                {'release_id': 2, 'release_name': 'Consumer Price Index', 'date': '2026-12-10'},
-                {'release_id': 1, 'release_name': 'Employment Situation', 'date': '2027-01-08'}]}  # past the window
+        if path == 'release/dates':
+            if params['release_id'] in fail:
+                raise TimeoutError('slow host with a secret-looking query')
+            return {'release_dates': [{'release_id': params['release_id'], 'date': d} for d in
+                                      {50: ['2026-12-04', '2027-01-08'], 10: ['2026-12-10', '2026-12-10']}.get(params['release_id'], [])]}
         raise AssertionError(path)
     return get
 
@@ -56,7 +53,7 @@ def test_collect_reads_each_series_and_the_calendar():
     assert s['label'] == '하이일드 스프레드' and not s['stale']
     # watched releases only, one row each, FOMC from the Fed's page, in date order within 30 days
     assert [(e['date'], e['label']) for e in m['events']] == [('2026-12-04', '고용'), ('2026-12-09', 'FOMC'), ('2026-12-10', 'CPI')]
-    assert {p for p, _ in calls} == {'series/observations', 'releases/dates'}
+    assert {p for p, _ in calls} == {'series/observations', 'release/dates'}
 
 
 def test_fomc_days_are_announcement_days_of_scheduled_meetings():
@@ -76,6 +73,12 @@ def test_one_failure_drops_only_that_input_and_records_the_type_only():
     m = M.collect(TODAY, get=fake_get(fail={'DFII10'}), key='k', page=page)
     assert 'DFII10' not in m['series'] and len(m['series']) == len(M.SERIES) - 1
     assert m['errors'] == ['DFII10: TimeoutError']  # never the message (it may carry the request URL)
+
+
+def test_one_slow_release_drops_only_its_own_date():
+    # 2026-11-24: one call for every release took 13.9~15.6 s of its 20 s; per release each takes under a second
+    m = M.collect(TODAY, get=fake_get(fail={50}), key='k', page=page)
+    assert [e['label'] for e in m['events']] == ['FOMC', 'CPI'] and m['errors'] == ['calendar 고용: TimeoutError']
 
 
 def test_stale_series_are_flagged():

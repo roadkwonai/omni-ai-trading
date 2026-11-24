@@ -174,7 +174,7 @@ def status_line(settings, plan, regime, regime_state, now):
         *LF.status({'settings': settings, 'plan': plan}, now)[:3],  # 운영 스위치 · 모드 · 실행 방식 (전략 구조 → 장기투자와 같은 카드)
         {'label': '마지막 판단', 'value': (plan.get('time') or '—')[5:16].replace('T', ' '), 'tone': 'off', 'icon': 'history',
          'sub': '평일 08:45 판단 · 09:40 주문 · 15:40 기록'},
-    ])
+    ], ask='longterm')
 
 
 def today_sentence(plan, settings, state):
@@ -221,7 +221,7 @@ def kpis(nav, contributed):
                       'sub': '실제가 기본보다 나으면 + · 수수료 같고 세금 제외 · 실제는 호가 체결, 그림자는 종가+0.05%'})
     if 'actual' in latest:
         items.append({'label': '최대 낙폭 · 실제', 'value': pct(drawdowns(nav, contributed)['actual']), 'tone': 'off', 'icon': 'trending_down'})
-    sc.row(items)
+    sc.row(items, ask='longterm_kpi')
 
 
 # ---------- 개요 ----------

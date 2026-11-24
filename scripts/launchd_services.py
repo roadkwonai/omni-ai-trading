@@ -35,10 +35,17 @@ SERVICES = {
     # 1-minute buys and sells; its services return with that runner.
     # The long-term vibe engine (docs/vibe-longterm-plan.md 15): a dry run (plans only) until the user approves --execute;
     # defined here, loaded only after the user's approval.
-    'vibe-longterm': (['scripts/vibe_longterm.py', '--run'], 'vibe-longterm', False, (8, 40, WEEKDAYS)),
+    # at load too: launchd does not run a start missed while the Mac was off (11-23: login 08:41, no decision until a manual
+    # start at 08:59); a run waits for its windows, does each step once a day and ends on a holiday
+    'vibe-longterm': (['scripts/vibe_longterm.py', '--run'], 'vibe-longterm', True, (8, 40, WEEKDAYS)),
+    # 장중 상시 감시 of the long-term engine and 실계좌 2 (user 2026-11-24): reads records only, changes go to the long-term
+    # Discord channel until 16:00; at load too, for a Mac turned on after 08:40
+    'longterm-watch': (['scripts/longterm_watch.py', '--watch'], 'vibe-longterm', True, (8, 40, WEEKDAYS)),
+    # API 부하·분산 상시 감사 (user 2026-11-24): reads the call log only, new findings go to the realtime Discord channel, 15:40 report
+    'api-watch': (['scripts/api_load.py', '--watch'], 'shared-etf-paper', True, (8, 40, WEEKDAYS)),
     # US stock ideas for the long-term reports, reference only (docs/longterm-master-dca-ideas-plan.md 4, user 2026-11-18):
-    # Fridays 07:30 the screen; 07:00 the quarterly universe + 13F, acting only on the third Friday of Feb/May/Aug/Nov
-    'us-ideas': (['scripts/us_ideas.py', '--scheduled'], 'vibe-longterm', False, ((7, 0, (5,)), (7, 30, (5,)))),
+    # Fridays 10:30 the screen; 10:00 the quarterly universe + 13F, acting only on the third Friday of Feb/May/Aug/Nov
+    'us-ideas': (['scripts/us_ideas.py', '--scheduled'], 'vibe-longterm', False, ((10, 0, (5,)), (10, 30, (5,)))),
     'trading-backup': (['scripts/backup_trading_data.py'], 'shared-etf-paper', False, (15, 50, WEEKDAYS)),
     # 2026-11-17: the runtime data synced into the project (state/settings sanitized for git, state/backups archives)
     'state-sync': (['scripts/state_sync.py', 'export'], 'shared-etf-paper', False, (16, 55, WEEKDAYS)),

@@ -29,9 +29,10 @@ def place(name, view=None):
 UNITS = ['원', '만원', '10만원', '100만원', '1000만원', '억원']
 REFRESH = [15, 30, 60, 120]
 FONT_SCALES = [70, 75, 80, 85, 90, 100, 110, 120]
-DEFAULTS = {'status_blink': True, 'start_tab': TABS[0], 'refresh_s': 30, 'quotes_auto': False, 'money_unit': '만원', 'font_scale': 100, 'theme': 'system'}
+DEFAULTS = {'status_blink': True, 'start_tab': TABS[0], 'refresh_s': 30, 'quotes_auto': False, 'money_unit': '만원', 'font_scale': 100, 'theme': 'system',
+            'ask_selection': True}
 CHOICES = {'status_blink': (True, False), 'start_tab': TABS, 'refresh_s': REFRESH, 'quotes_auto': (True, False), 'money_unit': UNITS, 'font_scale': FONT_SCALES,
-           'theme': ('system', 'dark', 'light')}
+           'theme': ('system', 'dark', 'light'), 'ask_selection': (True, False)}
 
 
 def load(path):

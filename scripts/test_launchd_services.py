@@ -26,9 +26,11 @@ class RenderTest(unittest.TestCase):
         self.assertFalse(retired & set(L.SERVICES))  # user 2026-11-17: vibe moves to a long-term engine
         longterm = L.render('vibe-longterm')
         self.assertEqual((L.schedule_text('vibe-longterm'), longterm['ProgramArguments'][-1]), ('평일 08:40', '--run'))  # dry run
+        self.assertIs(longterm['RunAtLoad'], True)  # 11-23: a login at 08:41 missed the 08:40 start
+        self.assertEqual((L.schedule_text('api-watch'), L.render('api-watch')['ProgramArguments'][-1]), ('평일 08:40', '--watch'))
         ideas = L.render('us-ideas')  # user 2026-11-18: reference-only data, Fridays
-        self.assertEqual((L.schedule_text('us-ideas'), ideas['ProgramArguments'][-1]), ('금 07:00 · 금 07:30', '--scheduled'))
-        self.assertEqual([(i['Weekday'], i['Hour'], i['Minute']) for i in ideas['StartCalendarInterval']], [(5, 7, 0), (5, 7, 30)])
+        self.assertEqual((L.schedule_text('us-ideas'), ideas['ProgramArguments'][-1]), ('금 10:00 · 금 10:30', '--scheduled'))
+        self.assertEqual([(i['Weekday'], i['Hour'], i['Minute']) for i in ideas['StartCalendarInterval']], [(5, 10, 0), (5, 10, 30)])
         premarket = L.render('premarket')
         self.assertEqual(premarket['ProgramArguments'][-1], '--once')
         self.assertEqual({(d['Hour'], d['Minute']) for d in premarket['StartCalendarInterval']},
