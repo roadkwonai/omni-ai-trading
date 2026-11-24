@@ -625,24 +625,129 @@
 <li>진입하지 않은 이유(상위): jev_wait 222 · jev_low_confidence 52 · entry_window_closed 27 · jev_error 7 · entry_conditions_met 1</li>
 <li>제한 규칙이 막은 횟수: careful_reentry 73 · volume 58 · rising 112 · cutoff 27 · order_guard 10</li>
 </ul>
+<p>주문을 놓치거나 보호가 풀린 결함은 없었다. 결함 2종은 모두 판단 공백이었다.</p>
+<ul>
+<li><strong>NH 일시 오류 2건</strong>(09:12·09:13): 삼성전자 보유 판단이 3.5분 비었다. 실계좌 1 미러는 끊기지 않았다.</li>
+<li><strong>뉴스 공백 7건</strong>(13:12~13:19): 진입 판단이 멈췄다. 13:20·13:35 재시작으로 보완했고, 2단계는 11/25 시작부터 적용된다.</li>
+<li><strong>재시작 3회</strong>(09:07·13:20·13:35, 모두 사용자 승인): 감시 공백 10.2·10.9·31.9초. 보유 중 재시작은 09:07 한 번이다. 15:19는 정상 종료다.</li>
+<li><strong>국면 관찰기</strong>: 09:07 재시작의 STOP 파일을 읽고 멈춰 09:58에 고쳤다. 조회 전용이라 매매 영향은 없다.</li>
+<li><strong>장기투자 리포트</strong>: 08:50 예약 실행이 멈춰 12시 무렵에 쓰였다.</li>
+<li><strong>개선안 보고서</strong>: improvement-2026-11-24.md 4건(16:22 작성)을 참고했다.</li>
+<li>개선안의 삼성전자 '다음 날 종가 +7.27%'는 확정 종가 189,400원(+6.70%)과 다르다. 종가 확정 전 값으로 보인다.</li>
+</ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>덜 산 것이 문제는 아니었다.</strong> 상승은 시가 갭이 대부분이었고, Jev 진입 후보 51건의 30분 적중률은 29%(KODEX 200 대비 −0.18%p)였다. 대기 222회를 매수로 바꿨다면 벌었다는 근거가 없다. 갭 상승일에는 장중에 더 오른 업종을 후보로 봤는지 먼저 복기한다.</li>
+<li><strong>휴림로봇은 주도 업종 선두를 골랐지만 자리는 추격이었다.</strong> VWAP +3.42%, 하루 범위 74%였다. 절반 익절과 추적 손절로 이익을 지켰고, 남은 35주의 7,700원을 놓쳤다. 1건이라 규칙 문제로 보지 않는다.</li>
+<li><strong>삼성전자 되밀림 매도의 기회비용은 종가 기준 350원이었다.</strong> 15:00 가격(191,500원)으로는 2,450원을 놓친 것처럼 보인다. 비교 시점이 결론을 바꾼다.</li>
+<li><strong>실계좌 1의 •••원 차이는 지연이다.</strong> 휴림로봇 매수 지연(1분 54초) 하나가 •••원이다. 급등 종목일수록 60초 회차의 비용이 크다.</li>
+<li><strong>하락장 배율 50%의 신중함이 손실을 만들었다는 증거는 없다.</strong> 1주 매수가 막힌 두산은 장 마감까지 −0.16%(최저 −3.2%)였고, 삼성전기는 30분 뒤 +1.62%·−0.46%·+0.58%로 갈렸다.</li>
+</ol>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>모두 기록을 먼저 늘리는 제안이며 매매 규칙은 바꾸지 않는다. 적용은 사용자 승인 뒤다.</p>
+<ol>
+<li><strong>완료된 1분봉 2개를 버리는 시각 처리 — 그림자 기록부터</strong>(개선안 1)
+<ul>
+<li>근거: NH 표시 시각을 1분 당기면 고가·저가 43쌍 중 40쌍이 일치했다. 최근 강도 진입 11건 중 4건(실제 합계 −4,860원)이 새 봉에서는 그 회차에 막힌다.</li>
+<li>달라지는 것: 판단 자료가 약 2분 새로워진다. 좋은 진입(오늘 휴림로봇)도 막힐 수 있다.</li>
+<li>확인: 5거래일 이상 그림자 기록 뒤 별도 결정.</li>
+</ul>
+</li>
+<li><strong>강도 경로의 마지막 관문이 막은 종목의 사후 기록</strong>(개선안 2)
+<ul>
+<li>근거: 신중 재진입 73회·1주 초과 49회. 삼성전자에서 추격 금지 뒤 평균 −0.89%(3건), VWAP 아래 금지 뒤 +1.00%(4건)로 갈렸다.</li>
+<li>달라지는 것: 신중 재진입의 기준별 성적이 보인다. 손익 효과는 없다.</li>
+<li>확인: 10거래일·사유별 10건, KODEX 200 대비 값을 함께 본다.</li>
+</ul>
+</li>
+<li><strong>되밀림·추적 매도의 판정 호가·고점·기준선 기록</strong>(개선안 3)
+<ul>
+<li>근거: 오늘 매도 2건의 판정값이 남지 않아 감사가 확인하지 못했다.</li>
+<li>달라지는 것: 2·2.5·3% 폭을 같은 기준으로 비교한다.</li>
+<li>확인: 사후 10건. 15:00이 아니라 종가와 보유 만기 값을 함께 쓴다.</li>
+</ul>
+</li>
+</ol>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>일지 수집이 종가 확정 전에 끝난다(새로 확인).</strong>
+<ul>
+<li>증상: 15:30:57 수집으로 코스피 5,013.58(+6.48%)이 저장됐지만 마감은 5,006.03(+6.32%)이다. 11/23도 −3.01% 대 −3.31%였다.</li>
+<li>영향: 일지·기간 일지·엔진 참고 맥락의 지수와 수급이 실제와 다르다. <code>--rebuild</code>는 당일 값을 보존해 고치지 못한다.</li>
+<li>제안: 수집을 15:45 이후로 옮기거나 병합 때 지수·수급만 확정값으로 바꾼다. 3거래일 저장값을 네이버 종가와 대조한다.</li>
+</ul>
+</li>
+<li><strong>왕복 표와 개선안 수집기가 이월 청산·실계좌 왕복을 빼고 센다.</strong>
+<ul>
+<li>증상: 왕복 1건 +8,400원으로 나오고 삼성전자 +10,950원이 빠졌다.</li>
+<li>영향: 선별 v2·이월 성적이 경로·청산 표에 잡히지 않는다.</li>
+<li>제안: 오늘 닫힌 포지션을 carried 표시와 함께 넣는다(개선안 4와 같은 원인).</li>
+</ul>
+</li>
+<li><strong>실계좌 1 청산 지연 최대 2분 6초.</strong>
+<ul>
+<li>증상: 모의 체결 대조와 미러 회차가 각각 60초다.</li>
+<li>영향: 오늘 4건 합계 약 9,500원 불리했다. 11/19~11/24 짝지은 19건 평균은 −0.01%라 방향성 손해는 아니다.</li>
+<li>제안: 며칠 더 모은 뒤 주문 직후 재대조를 검토한다.</li>
+</ul>
+</li>
+<li><strong>대시보드와 실행기의 잔고·주문체결 조회가 같은 초에 겹친다.</strong>
+<ul>
+<li>증상: IGW42903 실행기 7건·대시보드 2건.</li>
+<li>영향: 보유가 있을 때 손절 평가가 늦어질 수 있다. 15:20 감사가 확인한 겹침은 보유 0인 시간이었다.</li>
+<li>제안: 15:53에 적용한 조회 간격 공유를 11/25 거절 건수로 확인한다.</li>
+</ul>
+</li>
+<li><strong>관심종목 잠정 수급이 외국인·개인 0으로 Jev에 간다.</strong>
+<ul>
+<li>증상: 14:55 9종목 모두 0(NH 응답의 미집계로 보인다).</li>
+<li>영향: 실제 순매수 0으로 읽힐 수 있다.</li>
+<li>제안: 0인 투자자 값은 빼고 '미집계'로 보낸다.</li>
+</ul>
+</li>
+</ol>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li>미국 반도체가 폭등한 다음 날 국내 대형 반도체는 시가에 상승이 거의 반영됐고, 장중에 더 오른 것은 로봇·자동차 소프트웨어·2차전지 쪽 종목이었다.</li>
+<li>큰 갭 상승일에 시가 뒤 추격한 판단은 30분 뒤 지수보다 나빴다. 지수가 오른 것과 장중에 더 오를 종목은 다른 질문이었다.</li>
+<li>하루 급등에도 코스피·코스닥 일봉 국면은 하락장(20일선 아래) 그대로다. 이 반등은 직전 이틀의 급락 뒤에 나왔다.</li>
+<li>로봇주는 엔비디아 투자심리, 삼성전자 로봇 인사, 개별 수주가 겹쳐 올랐고 휴림로봇은 이틀 연속 상한가였다.</li>
+<li>12:12~13:15 사이 새 시장 기사가 드물어 판단이 7회 멈췄다. 기사 수가 줄어드는 점심 시간대의 공백은 시장 신호가 아니다.</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>11/25 08:55</strong> 실행기 시작: 새 기사가 없어도 판단을 잇는 뉴스 2단계와 NH 조회 프로세스 재사용·간격 공유가 처음 돈다. <code>jev_error</code>와 IGW42903 건수를 본다.</li>
+<li><strong>11/25 09:40</strong> 장기투자 가상 계좌·실계좌 2: 다음 단계 몫을 현금으로 남기고 나머지를 저수지 ETF로 옮기는 설정이 처음 적용된다.</li>
+<li><strong>11/25 22:30</strong> 미국 3분기 GDP 2차 추정치·10월 PCE(<a href="https://www.tokenpost.kr/news/economy/443042" target="_blank" rel="noopener noreferrer">토큰포스트</a>, 시각은 검색 요약으로 확인).</li>
+<li><strong>11/26</strong> 한국은행 금통위: 3.00% → 3.25% 인상 전망 우세, 점도표가 관건(<a href="https://view.asiae.co.kr/article/2026112210490320195" target="_blank" rel="noopener noreferrer">아시아경제</a>).</li>
+<li><strong>갭 상승 이틀째</strong>: 외국인 순매수가 이어지는지, 로봇 묶음의 대장이 바뀌는지.</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://www.wikitree.co.kr/articles/1177381" target="_blank" rel="noopener noreferrer">위키트리 · 2026-11-24 · 코스피 5000선 탈환…삼성전자·SK하이닉스 급등 마감</a></li>
+<li><a href="https://www.etoday.co.kr/news/view/2652378" target="_blank" rel="noopener noreferrer">이투데이 · 2026-11-24 · 젠슨 황 귀환에 코스피 5000선 탈환⋯외인·기관 2조원 '사자'</a></li>
+<li><a href="https://www.etoday.co.kr/news/view/2652206" target="_blank" rel="noopener noreferrer">이투데이 · 2026-11-24 · 코스피 7% 급등하며 5000선 회복⋯올해 101번째 사이드카</a></li>
+<li><a href="https://www.etoday.co.kr/news/view/2652195" target="_blank" rel="noopener noreferrer">이투데이 · 2026-11-24 · 젠슨 황 돌아왔지만 中 규제는 그대로…삼성·SK 반도체 공급망 변수</a></li>
+<li><a href="https://www.etoday.co.kr/news/view/2652380" target="_blank" rel="noopener noreferrer">이투데이 · 2026-11-24 · 러 군용기 여러 대, 울릉도 영공 초근접 비행</a></li>
+<li><a href="https://news1.kr/finance/market-exr/6364512" target="_blank" rel="noopener noreferrer">뉴스1 · 2026-11-24 · 엔비디아·삼전發 훈풍에 로봇주 '불기둥'…휴림로봇 이틀째 '上'</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiW0FVX3lxTE1KU2IxWmduRmFGM1pVcEc5aTFfcXFjUmMzVWswaWJmNWVlWlRiOVpfQlNyME54TW5wRzBBdmcwY2c5Njh3NFA1YVlGUjVSSDg1bjZSLUxsazBvazg?oc=5" target="_blank" rel="noopener noreferrer">KBS 뉴스 · 2026-11-24 · 젠슨황 복귀에 반도체주 급등…코스피·코스닥 매수 사이드카</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiVkFVX3lxTE5VbEhvMkJIamE0LTFXaVJmdHVpazU0ZTB5RE1DOWxFcWZ1MXJFUkV2VDcwMVQ5N1pKSTlwMHZNc3RZU3pWRDZOUXRVY1YwOC1iZUl3MFlB?oc=5" target="_blank" rel="noopener noreferrer">지디넷코리아 · 2026-11-24 · 젠슨 황 11일만에 엔비디아 복귀…나스닥 6.5%상승 마감·코스피 5000선 터치</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiZ0FVX3lxTE45VXZKcERwZWZlUGMzOWNOX1NoNnNyYlFjZ0o1MUx3ODdFOUV2VHE2X2RKVXN1VHB4cW1kbGVMWFNib0VpQ3lXcVFyVGVlaFBkb1owWDk5NDlmb29jSmx4WllyUHF3bms?oc=5" target="_blank" rel="noopener noreferrer">뉴스1 · 2026-11-24 · 美국채 2년물 금리 4.66%로 상승…뉴욕증시 반등, 12월 인상 확률 98%</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTE9COUYwUG94cWdhM0M2MWplSFVVYk51bDlkc1ZxQzJoSVlTTTFabncwcnVaUURaMnBXeWlmUElmRnNteUFIS2x3V2FTVW5iZjRnbndIbUhyXy11dw?oc=5" target="_blank" rel="noopener noreferrer">한국경제 · 2026-11-24 · 글로벌 IB, 엔비디아 목표가·투자의견 줄상향</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTFB1YUZYNV85OEJoTXNPcVNyWWFCT081dTFQSDdienpIVFlQc3ZjNFViVVJUT2tuZzhtTnFQS2FiSmpyQWdxc1hMTnNsQjR2eWR2ajVvcHIyWWNpZw?oc=5" target="_blank" rel="noopener noreferrer">파이낸셜뉴스 · 2026-11-24 · 골드만삭스, '삼전닉스' 목표주가 또 내렸다</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMickFVX3lxTFBoRlhpbW1qalhYbkVYTzV2Z3czblBsUU93a1ZuTDRzYUk4d3BOaTRLTFFZQUVqaVVkU3BhajRibVMtRlI3Z2d4aVM1Z290TUxVc281cTJnZFI4Rmd0bmo5UThwUFY3WWhqR0hHMGx0bWVEUQ?oc=5" target="_blank" rel="noopener noreferrer">KB Think · 2026-11-24 · 비트코인, 젠슨 황 복귀에도 반등세 주춤</a></li>
+<li><a href="https://view.asiae.co.kr/article/2026112210490320195" target="_blank" rel="noopener noreferrer">아시아경제 · 2026-11-22 · 금통위poll 11월 금리 인상, 점도표 3.75% 주목</a></li>
+<li><a href="https://ebn.co.kr/news/articleView.html?idxno=1732813" target="_blank" rel="noopener noreferrer">이비엔 · 게시일 미확인 · 채권시장 전문가 54% 11월 기준금리 인상</a></li>
+<li><a href="https://www.tokenpost.kr/news/economy/443042" target="_blank" rel="noopener noreferrer">토큰포스트 · 게시일 미확인 · GDP 속보치 3.4% 수정 여부…BEA, 25일 10월 PCE 발표</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97570" target="_blank" rel="noopener noreferrer">iM증권 · 2026-11-04 · 삼성전자 STRESS TEST</a></li>
+</ul>
+<p>내부 자료: 매매일지 레코드, improvement-2026-11-24.md, operations-audit-2026-11-24.md, 장기투자 strategy-2026-11-24, longterm.sqlite3(조회 전용).</p>
 </article>
   </main>
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-24 16:51 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
+  <div class="wrap"><p>자동 생성 2026-11-24 16:52 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
 </footer>
 
 </body>
