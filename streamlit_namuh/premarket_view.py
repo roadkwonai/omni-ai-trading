@@ -15,8 +15,9 @@ from market_view import number, timestamp
 from premarket_template import STATUS  # one status vocabulary with the report skeleton
 
 LABELS = {'news': '뉴스', 'dart': '공시', 'futures': '해외 선물', 'night_futures': '코스피 야간선물',
-          'nxt_quotes': 'NXT 장전 호가', 'krx': 'KRX 일별 통계', 'nxt_gap': 'KRX/NXT 괴리율', 'listings': '상장 예정'}
-ENGINE_FIELDS = {'market': ('해외 일봉', 'global_daily'), 'news': ('뉴스', 'news'), 'dart': ('공시', 'disclosures')}
+          'nxt_quotes': 'NXT 장전 호가', 'krx': 'KRX 일별 통계', 'nxt_gap': 'KRX/NXT 괴리율', 'listings': '상장 예정', 'overnight_news': '장 마감 뒤 재료'}
+ENGINE_FIELDS = {'market': ('해외 일봉', 'global_daily'), 'news': ('뉴스', 'news'), 'dart': ('공시', 'disclosures'),
+                 'overnight_news': ('장 마감 뒤 재료(관심·선정 종목, 10:30까지)', 'overnight_material')}
 
 
 def engine_data_status(brief, context):
@@ -339,6 +340,24 @@ def render(root=None):
                      '매도호가': x.get('ask'), '호가 시각': x.get('quote_time')}
                     for x in data if isinstance(x, dict)]
             st.dataframe(rows, hide_index=True, alt='NXT 장전 호가')
+        elif key == 'overnight_news' and isinstance(data, dict) and data:
+            counts, nxt = data.get('counts') or {}, data.get('nxt') or {}
+            st.caption(f"{data.get('scanned', 0)}종목 확인 · 호재 {counts.get('호재', 0)} · 악재 {counts.get('악재', 0)} · 혼재 {counts.get('혼재', 0)} · "
+                       '제목을 규칙으로 나눈 참고 분류이며 매수 신호가 아닙니다.')
+            rows = [{'구분': r.get('direction'), '종목': r.get('name'), '코드': r.get('code'), '재료': '·'.join(dict.fromkeys(i['type'] for i in r['items'])),
+                     '프리마켓 등락 % (키움)': (nxt.get(r.get('code')) or {}).get('change_pct'), '제목': r['items'][0]['title'],
+                     '시각': r['items'][0]['time'][5:16].replace('T', ' '), '출처 링크': _link(r['items'][0].get('link'))}
+                    for r in data.get('rows') or [] if r.get('items')]
+            if rows:
+                st.dataframe(rows, hide_index=True, alt='장 마감 뒤 호재·악재 종목', column_config={'출처 링크': st.column_config.LinkColumn(display_text='기사 열기')})
+            if data.get('overseas'):
+                from premarket import OVERSEAS_TONE
+                st.markdown('##### 밤사이 해외 업종')
+                st.caption('기사 방향은 해외 업종 기사 제목(로이터)의 오름·내림이며 국내 종목의 호재·악재가 아닙니다.')
+                st.dataframe([{'해외 업종': s['signal'], '등락 %': s['move_pct'], '평소보다 큼': '예' if s['big'] else '', '기사 방향': OVERSEAS_TONE.get(s['news'], '—'),
+                               '관련 국내 종목': '·'.join(s['names']), '기사': s['items'][0]['title'] if s['items'] else '',
+                               '출처 링크': _link(s['items'][0].get('link')) if s['items'] else None} for s in data['overseas']],
+                             hide_index=True, alt='밤사이 해외 업종', column_config={'출처 링크': st.column_config.LinkColumn(display_text='기사 열기')})
         elif key == 'krx' and isinstance(data, list) and data:
             rows = [{'기준일': x.get('BAS_DD'), '종목': x.get('ISU_NM'), '코드': x.get('ISU_CD'),
                      '종가': x.get('TDD_CLSPRC'), '등락률 %': x.get('FLUC_RT'), '거래량': x.get('ACC_TRDVOL')}

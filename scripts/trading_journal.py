@@ -25,6 +25,7 @@ import json
 import re
 import sqlite3
 import statistics
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import defaultdict
@@ -189,7 +190,7 @@ def market(day):
 
 
 def headlines(query, day, limit=6, timeout=8):
-    """[{'title', 'publisher'}] of one Google News search restricted to `day` (Korean)."""
+    """[{'title', 'publisher'}] of one Google News search restricted to `day` (Korean); None when it could not be asked."""
     d = date.fromisoformat(day)
     url = ('https://news.google.com/rss/search?q=' + quote(f'{query} after:{d - timedelta(days=1)} before:{d + timedelta(days=1)}')
            + '&hl=ko&gl=KR&ceid=KR:ko')
@@ -197,7 +198,7 @@ def headlines(query, day, limit=6, timeout=8):
         with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'}), timeout=timeout) as response:
             root = ET.fromstring(response.read(400_000))
     except Exception:
-        return []
+        return None
     out = []
     for item in root.findall('./channel/item'):
         title, publisher = (item.findtext('title') or '').strip(), (item.findtext('source') or '').strip()
@@ -210,8 +211,24 @@ def headlines(query, day, limit=6, timeout=8):
     return out
 
 
+ISSUE_RETRY_WAIT = 30  # seconds before the topics Google refused (429) are asked once more
+
+
 def issues(day):
-    return {name: headlines(query, day) for name, query in ISSUES.items()}
+    found = {name: headlines(query, day) for name, query in ISSUES.items()}
+    failed = [name for name, items in found.items() if items is None]
+    if failed:
+        time.sleep(ISSUE_RETRY_WAIT)
+        found.update({name: headlines(ISSUES[name], day) for name in failed})
+    return {name: items or [] for name, items in found.items()}
+
+
+def refill_issues(record):
+    """Ask again for the topics stored without an article (a refused search looks the same); True when one was filled."""
+    kept = record.get('issues') or {}
+    found = {name: items for name in kept if not kept[name] and name in ISSUES and (items := headlines(ISSUES[name], record['day']))}
+    kept.update(found)
+    return bool(found)
 
 
 def engine_news(day, limit=15, lookups=10):
@@ -622,6 +639,7 @@ def merge(day, db=DB):
     """Attach the written perspective to a stored day (after the journal task wrote it). A day never collected is
     collected in full first: merging into a bare record would store a day without market, news or charts."""
     record = load(day, db) or build(day)
+    refill_issues(record)
     record['perspective'] = perspective(day)
     # The learning watcher stores the day at ~15:29, before the 16:15 improvement report exists; take it now.
     report = improvement_report(day)
@@ -813,6 +831,8 @@ def main():
         return
     if args.report:
         record = load(day) or build(day, network=not args.no_network)
+        if args.blank and not args.no_network and refill_issues(record):  # the writer starts here: the topics missed at the close
+            store(record)
         print(report_md({**record, 'perspective': None} if args.blank else record))
         return
     if args.merge:
@@ -837,7 +857,7 @@ def main():
 # ── the day's report ────────────────────────────────────────────────────────
 WEEKDAYS = T.WEEKDAYS
 ROUTE_EXITS = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market_rebound': '지수 반등 인버스 청산',  # 2026-11-20
-    'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리',
+    'take_profit': '익절', 'trailing_stop': '추적 손절', 'stop_loss': '손절', 'session_flatten': '장 마감 정리', 'fade_exit': '매수세 약화 익절',
                'jev_sell': 'Jev 매도 의견', 'manual_exit': '수동 정리', 'split_take_profit': '분할 익절'}
 
 
@@ -1135,20 +1155,9 @@ def stars_of(score):
 
 
 def stock_names(codes):
-    """{code: name} for codes the journal knows (case library, today's watchlist)."""
-    import oversold_cases
-    names = {c: n for c, n in oversold_cases.NAMES.items() if c in codes}
-    try:
-        from etf_universe import NAMES as ETF_NAMES, SYMBOLS
-        names |= {code: ETF_NAMES[key] for key, code in SYMBOLS.items() if code in codes and key in ETF_NAMES}
-    except Exception:
-        pass
-    try:
-        data = json.loads((ROOT / 'watchlist.json').read_text(encoding='utf-8'))
-        names |= {c: s.get('name') for c, s in (data.get('stocks') or {}).items() if c in codes and s.get('name')}
-    except (OSError, ValueError, AttributeError):
-        pass
-    return names
+    """{code: name} for the codes anything here can name (stock_names.py)."""
+    import stock_names as names
+    return {c: n for c, n in names.load(ROOT.parent).items() if c in codes}
 
 
 def rank_issues(record):

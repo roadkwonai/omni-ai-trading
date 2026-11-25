@@ -39,6 +39,7 @@ DEFAULTS = {
     # Weak market (하락장 and not a strong day; mirrored for inverse): take profit early (user 2026-11-12).
     'weak_half_pct': 1.0,         # sell half here at the latest
     'weak_all_pct': 2.0,          # sell the rest here at the latest
+    'fade_exit_pct': 0.8,         # a strength pick this % up in a 하락장·횡보장 is sold whole when its tape turns (0 = off)
     'entry_volume_ratio': 1.2,    # every entry path: last 5 one-minute volumes vs the 5 before; 0 = no volume check
     'direction_switch': 1,        # 1: when Jev picks the other direction in a market that backs it, close a losing opposite holding
     # Restriction switches (1 on, 0 off; user 2026-11-13: every restriction visible and releasable; restrictions.py lists them).
@@ -143,7 +144,7 @@ LIMITS = {
     'strength_top_n': (0, 10), 'strength_min_prob': (0.05, 0.6), 'strength_change_min': (0.0, 10.0), 'strength_change_max': (5.0, 29.0),
     'ipo_days': (0, 5), 'ipo_size_pct': (10, 100), 'ipo_near_high_pct': (0.5, 15.0), 'ipo_stop_pct': (1.0, 10.0),
     'ipo_half_pct': (1.0, 30.0), 'ipo_trail_pct': (0.5, 15.0),
-    'weak_half_pct': (0.3, 5.0), 'weak_all_pct': (0.5, 10.0), 'direction_switch': (0, 1), 'entry_volume_ratio': (0.0, 3.0),
+    'weak_half_pct': (0.3, 5.0), 'weak_all_pct': (0.5, 10.0), 'fade_exit_pct': (0.0, 5.0), 'direction_switch': (0, 1), 'entry_volume_ratio': (0.0, 3.0),
     'careful_reentry_on': (0, 1), 'careful_reentry_vwap_pct': (0.5, 10.0), 'careful_reentry_range_pct': (50, 100),
     'careful_reentry_conf': (0.3, 0.95), 'careful_reentry_size_pct': (10, 100),
     'reentry_guard': (0, 1), 'reentry_allow': (0, 1), 'losing_streak_guard': (0, 1), 'averaging_down_guard': (0, 1), 'opposite_guard': (0, 1), 'direction_confirm': (0, 1),
@@ -180,6 +181,7 @@ LABELS = {
     'ipo_near_high_pct': '신규주: 당일 고가 대비 허용 % 이내', 'ipo_stop_pct': '신규주: 손절 %',
     'ipo_half_pct': '신규주: 절반 익절 %', 'ipo_trail_pct': '신규주: 고점 대비 추적 손절 %',
     'weak_half_pct': '약세장: 절반 익절 % (늦어도)', 'weak_all_pct': '약세장: 전량 익절 % (늦어도)',
+    'fade_exit_pct': '하락·횡보장 강도 종목: 매수세가 꺾이면 전량 매도하는 수익 % (0=끔)',
     'direction_switch': '방향 전환 (1=켬, 0=끔)', 'entry_volume_ratio': '진입 거래량 배수 (최근 5분 ÷ 그 전 5분, 0=확인 안 함)',
     'careful_reentry_on': '신중 재진입 (불리한 국면의 같은 날 재진입)', 'careful_reentry_vwap_pct': '신중 재진입: VWAP 대비 최대 %',
     'careful_reentry_range_pct': '신중 재진입: 오늘 범위 위치 상한 %', 'careful_reentry_conf': '신중 재진입: Jev 재검토 매수 신뢰도',

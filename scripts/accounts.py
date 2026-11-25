@@ -30,8 +30,8 @@ BUDGET_LIMITS = {
     # PAPER_LIMITS (raised 2026-11-13 so they never stop a value the order limits allow)
     'paper': {'first_buy_krw': (100_000, 100_000_000), 'per_symbol_krw': (100_000, 5_000_000_000)},
     # Approved live caps (AGENTS.md): capital within the account's money (typo ceiling LIVE_CAPITAL_MAX), the account's
-    # 1-share price cap up to 2,000,000 KRW, 20,000 KRW daily loss per account.
-    'live': {'capital_krw': (10_000, LIVE_CAPITAL_MAX), 'order_price_max_krw': (1_000, LIVE_PRICE_HARD_CAP), 'daily_loss_krw': (1_000, 20_000)},
+    # 1-share price cap up to 2,000,000 KRW, a daily loss per account up to 30,000 KRW (user 2026-11-25; the default is 20,000).
+    'live': {'capital_krw': (10_000, LIVE_CAPITAL_MAX), 'order_price_max_krw': (1_000, LIVE_PRICE_HARD_CAP), 'daily_loss_krw': (1_000, 30_000)},
 }
 # Exit rules for a live account's virtual run (user decision 2026-11-12); defaults mirror the paper runner's fixed values.
 # The stop may only tighten the approved 2%.

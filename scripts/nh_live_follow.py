@@ -34,6 +34,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from etf_universe import is_code
+from sqlite_ro import ro_connect
 from tunables import setting
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
 
@@ -41,8 +42,16 @@ from src import file_lock
 
 KST = ZoneInfo('Asia/Seoul')
 CHECK_INTERVAL_SECONDS = 60
+ACCOUNT_LIST_WAIT = 10  # between two asks of the account list at the start
 EVIDENCE_MINUTES = 15  # how recent the engine's own pick must be for a buy beyond the chase limit
 PENDING_CANCEL_SECONDS = 60   # an acknowledged order still open after this is cancelled (execute mode)
+# user 2026-11-25 (모의–실계좌 1 차이 보완 1·2): the mirror followed a paper fill 45 s later (median) and an unfilled sell was
+# sold again 3~7 minutes later, 1,300~2,300원 lower
+SELL_CANCEL_SECONDS = 10   # the mirror's own unfilled sells; a buy keeps PENDING_CANCEL_SECONDS
+SELL_TICKS = 2             # a sell limit this many ticks under the bid: it fills at the best bid and survives a falling one
+ORDER_CHECK_SECONDS, OPEN_CHECK_SECONDS, BLOCK_CHECK_SECONDS = 4, 5, 10  # after an order, while one is open, after a refusal
+FAST_CYCLES = 24           # quick cycles in a row (an uncertain order must not read the broker every 5 s all day)
+LEDGER_POLL_SECONDS = 1.0
 SESSION_END = setting('live_session_end')  # can only move earlier
 
 
@@ -703,7 +712,59 @@ def stop_percent_for_positions(source, root, owned, default):
     return result
 
 
-def pending_step(reader, guard, credentials, account, snapshots, info, may_cancel):
+def cost_pct(code):
+    """Estimated round-trip commission and sell tax (%) of a live trade (paper_costs' rates; domestic ETFs pay no tax)."""
+    from etf_universe import SYMBOLS
+    from paper_costs import COMMISSION_PCT, SELL_TAX_PCT
+    return 2 * COMMISSION_PCT + (0 if code in SYMBOLS.values() else SELL_TAX_PCT)
+
+
+def loss_limit(record):
+    """The account's daily loss limit as the guard applies it (never above the approved one)."""
+    from src.tools.nhplug_live_guard import LIMIT, LIMIT_MAX
+    own = (record.get('budget') or {}).get('daily_loss_krw')
+    return min(own, LIMIT_MAX) if type(own) is int and own > 0 else LIMIT
+
+
+def loss_room(limit, loss, positions):
+    """KRW of today's loss limit still free: what is lost now and what the held positions would still lose at their stops are
+    taken off. positions: [(shares, bid, average, stop %)]; an unknown bid or average counts as the whole stop."""
+    room = Decimal(str(limit)) - Decimal(str(loss))
+    for shares, bid, average, pct in positions:
+        base = positive(average) or positive(bid)
+        if base:
+            base = Decimal(str(base))
+            stop = base * (1 - Decimal(str(pct)) / 100)
+            room -= max((Decimal(str(positive(bid) or base)) - stop) * shares, 0)
+    return max(room, Decimal(0))
+
+
+def loss_room_shares(room, price, stop_pct, code):
+    """Shares whose stop and costs together fit in `room` (user 2026-11-25: 안랩 435,000원 with 2,978원 left ended the day)."""
+    each = Decimal(str(price)) * Decimal(str(stop_pct + cost_pct(code))) / 100
+    return int(Decimal(str(room)) // each) if each > 0 else 0
+
+
+TICKS = ((2_000, 1), (5_000, 5), (20_000, 10), (50_000, 50), (200_000, 100), (500_000, 500))  # KRX; valid for an ETF too (5)
+
+
+def tick_size(price):
+    return next((tick for below, tick in TICKS if price < below), 1_000)
+
+
+def sell_limit(bid, ticks=SELL_TICKS):
+    """A limit `ticks` under the bid on the tick grid, never below the guard's floor (the bid itself when that is closer)."""
+    from src.tools.nhplug_live_guard import SELL_FLOOR_PCT
+    price = bid
+    for _ in range(ticks):
+        lower = (price - 1) // (tick := tick_size(price - 1)) * tick
+        if lower * 100 < bid * (100 - SELL_FLOOR_PCT) or lower <= 0:
+            break
+        price = lower
+    return price
+
+
+def pending_step(reader, guard, credentials, account, snapshots, info, may_cancel, sell_cancel_seconds=PENDING_CANCEL_SECONDS):
     """Reconcile this account's open live intents before anything new (shared by the Jev mirror and longterm_live):
     None when nothing is open; else the cycle's result (RECONCILE / RECONCILED / CANCEL_PENDING). An acknowledged order
     open PENDING_CANCEL_SECONDS is cancelled when may_cancel (also with the live-order switch off: it only lowers risk)."""
@@ -744,7 +805,8 @@ def pending_step(reader, guard, credentials, account, snapshots, info, may_cance
                 seen = db.execute('SELECT first_seen FROM observed_pending WHERE fingerprint=?', (fingerprint,)).fetchone()[0]
             # an own order left open is still cancelled after the live-order switch is turned off (it only lowers risk)
             if (may_cancel and state == 'acknowledged' and operation != 'krstockOrderCancel' and not has_cancel
-                    and not halt_flag_set('nhplug') and time.time() - seen >= PENDING_CANCEL_SECONDS):
+                    and not halt_flag_set('nhplug')
+                    and time.time() - seen >= (sell_cancel_seconds if operation == 'krstockOrderCashSell' else PENDING_CANCEL_SECONDS)):
                 fields = {'act_no': account, 'iem_cd': symbol, 'org_mkt_orr_no': number, 'all_pat_dit_cd': '1'}
                 info['intent'] = execute(reader, guard, credentials, 'krstockOrderCancel', fields)
                 return {'action': 'CANCEL_PENDING', 'symbol': symbol, 'execution': 'CANCEL_ACKNOWLEDGED_NOT_RECONCILED', **info}
@@ -846,7 +908,7 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
                     else f"no paper ledger for engine {record.get('engine')}")
 
     pending = pending_step(reader, guard, credentials, account, snapshots, info,
-                           execute_orders if may_cancel is None else may_cancel)
+                           execute_orders if may_cancel is None else may_cancel, SELL_CANCEL_SECONDS)
     if pending is not None:
         return pending
 
@@ -926,7 +988,13 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
                   and engine_supports(source, code, now)):
                 basis[code] = 'engine still picks it, below the paper first target'
             if code in basis:
-                mirrored[code] = can_buy[code] = limit + hand_held - waiting - have
+                stop = stop_percent_for_positions(source, root, [code], effective_rules(record)['stop_loss_pct'])[code]['pct']
+                room = loss_room(loss_limit(record), risk['loss'], [(n, (quotes.get(c) or (None,))[0], avg.get(c), stop_basis[c]['pct'])
+                                                                    for c, n in owned.items()])
+                wanted, fits = limit + hand_held - waiting - have, loss_room_shares(room, ask, stop, code)
+                info.setdefault('loss_room', {})[code] = {'room': int(room), 'stop_pct': stop, 'wanted': wanted, 'fits': fits}
+                if fits > 0:
+                    mirrored[code] = can_buy[code] = min(wanted, fits)
         if waiting:  # a hand buy buys its own shares only, without a paper fill or chase check (the guard's limits hold)
             can_buy[code] = can_buy.get(code, 0) + waiting
             basis.setdefault(code, 'manual buy request')
@@ -935,6 +1003,8 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
                   halted=risk['halted'], exits=exits, buy_paused=not buy_allowed(root), clock=clock,
                   **(dict(zip(('late', 'late_until'), v2_late_buys(source))) if source is not None else {}))
     plan.update(info)
+    if plan['action'] == 'WAIT' and (info.get('loss_room') or {}).get(plan.get('symbol'), {}).get('fits') == 0:
+        plan['reason'] = 'too little of the daily loss limit left for one share'
     if replacement_only and plan['action'] in CASH and (
             plan['action'] != 'SELL' or plan.get('symbol') not in replacement_only):
         return {**info, 'action': 'RECONCILED', 'pending': 0, 'reason': 'no current matching replacement sell'}
@@ -946,7 +1016,7 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
     if quote is None:
         plan.update(execution='NO_ORDER', execution_reason='quote unavailable')
         return plan
-    price = quote[1] if plan['action'] == 'BUY' else quote[0]
+    price = quote[1] if plan['action'] == 'BUY' else sell_limit(quote[0])
     want = {} if risk['halted'] else dict(target)
     for name in exits:
         want[name] = 0
@@ -1284,6 +1354,36 @@ def mirror_lag(root, key, event, now, notify=mac_notify):
     return result
 
 
+def paper_stamp(source):
+    """What tells a new fill in the paper ledger: None when it cannot be read (the mirror then keeps its minute)."""
+    try:
+        with ro_connect(source, 1) as db:
+            return db.execute('SELECT COUNT(*), MAX(rowid) FROM fills').fetchone()
+    except (sqlite3.Error, OSError, TypeError, AttributeError):
+        return None
+
+
+def next_wait(result):
+    """Seconds to the next cycle when the paper ledger does not change first."""
+    if result.get('execution') == 'ACKNOWLEDGED_NOT_FILLED':
+        return ORDER_CHECK_SECONDS
+    return {'RECONCILED': LEDGER_POLL_SECONDS, 'RECONCILE': OPEN_CHECK_SECONDS, 'CANCEL_PENDING': OPEN_CHECK_SECONDS,
+            'BLOCK': BLOCK_CHECK_SECONDS}.get(result.get('action'), CHECK_INTERVAL_SECONDS)
+
+
+def wait_for_fill(stamp, seen, seconds, *, sleep=time.sleep, clock=time.monotonic):
+    """Wait `seconds`, or until the paper ledger's stamp differs from `seen`: True when it did."""
+    end = clock() + seconds
+    while True:
+        current = stamp()
+        if current is not None and current != seen:
+            return True
+        left = end - clock()
+        if left <= 0:
+            return False
+        sleep(min(LEDGER_POLL_SECONDS, left))
+
+
 def configured_accounts(values):
     """Live account numbers whose orders .env authorizes: ACCOUNT_NUMBER, then ACCOUNT_NUMBER_2, _3, ... (digits only)."""
     keys = ['ACCOUNT_NUMBER'] + sorted((k for k in values if k.startswith('ACCOUNT_NUMBER_') and k[15:].isdigit()), key=lambda k: int(k[15:]))
@@ -1302,6 +1402,7 @@ def main():
     from dotenv import dotenv_values
     from accounts import load, resolve
     from nh_guarded_live import ENV
+    from nh_live_broker import linked_accounts
     from src.config.loader import load_agent_config
     from src.config.paths import get_runtime_root
     from src.tools.mcp import MCPServerAdapter
@@ -1318,8 +1419,9 @@ def main():
     if not record:
         raise SystemExit('live account record unavailable, invalid or not on Jev trading')
     reader = MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly'])
-    linked = reader.call_tool('list_accounts', {})
-    rows = ((linked.get('data') or {}).get('Output_0') if isinstance(linked, dict) and linked.get('status') == 'ok' else None) or []
+    rows = linked_accounts(reader, lambda: args.once or session_over(datetime.now(KST)), ACCOUNT_LIST_WAIT)
+    if not rows:
+        raise SystemExit('account list unavailable')
     account = resolve({args.account: record}, rows).get(args.account)
     if not account:
         raise SystemExit('live account not linked at the broker')
@@ -1335,7 +1437,13 @@ def main():
     with (root / name).open('a', encoding='utf-8') as lock:
         file_lock.lock(lock, blocking=False)
         logged = None  # fold(): the last written plan of this account
+        fast = 0
         while True:
+            try:
+                source = paper_source(root, (record or {}).get('engine'))
+            except Exception:  # unreadable settings cost only the early wake; step() judges them itself
+                source = None
+            seen = paper_stamp(source)  # a paper fill during the cycle starts the next one at once
             try:  # settings are re-read every cycle; a disabled or invalid record stops ordering at once
                 record = current()
                 if record is None:
@@ -1368,7 +1476,9 @@ def main():
                 print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
             if args.once or result.get('action') == 'STOP':
                 break
-            time.sleep(CHECK_INTERVAL_SECONDS)
+            quick = next_wait(result)
+            woken = wait_for_fill(lambda: paper_stamp(source), seen, quick if fast < FAST_CYCLES else CHECK_INTERVAL_SECONDS)
+            fast = 0 if woken or quick >= CHECK_INTERVAL_SECONDS else fast + 1
 
 
 if __name__ == '__main__':

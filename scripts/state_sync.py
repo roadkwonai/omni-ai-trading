@@ -333,15 +333,15 @@ def secret_hits(text):
     return [m.group(0)[:6] + '…' for m in re.finditer(r'sk-[A-Za-z0-9_-]{16,}|[A-Fa-f0-9]{32,}|\d{9,}', text)]
 
 
-def app_stores():
+def app_stores(home=None):
     """The Claude app's own scheduled-task stores (where cron, one-time fireAt and enabled live; the SKILL.md files hold only
     the prompt). shortcut: an app-internal file whose path and format may change; tasks_export keeps the old manifest fields
     when none is found, and ops-bootstrap can still refill them from list_scheduled_tasks."""
-    base = Path.home() / 'Library' / 'Application Support' / 'Claude' / 'claude-code-sessions'
+    base = Path(home or Path.home()) / 'Library' / 'Application Support' / 'Claude' / 'claude-code-sessions'
     return sorted(base.glob('*/*/scheduled-tasks.json'), key=lambda f: f.stat().st_mtime) if base.is_dir() else []
 
 
-def app_schedules(stores, repo=None):
+def app_schedules(stores, repo=None, include_model=False):
     """({task id: {title, cron, schedule, enabled, permission_mode}} of this repo's tasks, {ids of other projects' tasks}) from
     the newest readable app store (stores sorted oldest first; an older account's store on this machine must not revive a
     task the current account deleted). The dict is None when no store could be read or it lists none of this repo's tasks
@@ -365,6 +365,9 @@ def app_schedules(stores, repo=None):
             mine[t['id']] = {'title': t.get('displayName') or '', 'cron': t.get('cronExpression') or None,
                              'schedule': datetime.fromtimestamp(fire / 1000, KST).isoformat() if type(fire) in (int, float) else None,
                              'enabled': t.get('enabled', True) is not False, 'permission_mode': t.get('permissionMode')}
+            if include_model:
+                raw_model = t.get('model') or t.get('modelId')
+                mine[t['id']]['model'] = raw_model if isinstance(raw_model, str) else None
         return (mine or None), foreign
     return None, set()
 

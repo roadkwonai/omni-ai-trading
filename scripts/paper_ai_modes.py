@@ -9,6 +9,8 @@ from pathlib import Path
 from src import file_lock
 
 DEFAULT = {'version': 1, 'jev': True, 'decision': True}
+JEV_MODEL = 'jev-1.14.0'
+DECISIONS_MODEL = 'gpt-6-luna'
 
 
 def _validate(data):

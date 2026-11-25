@@ -33,12 +33,10 @@ def ledger_shadow(path, day, events, capital=None, price_cap=None, shares_for=No
     carried book. `overnight` marks a simulated position already open on an earlier Korean calendar day; it does not
     assert that an actual account held it. A missing ledger means the mirror buys nothing, so the result is empty."""
     import sqlite3
-    from nh_live_follow import apply_mirror_units, fill_id, mirror_target
-    from src.tools.nhplug_live_guard import LIMIT
+    from nh_live_follow import apply_mirror_units, fill_id, loss_limit, loss_room, loss_room_shares, mirror_target
     from accounts import DEFAULT_BUDGET
     capital, price_cap = (capital or DEFAULT_BUDGET['live']['capital_krw'], price_cap or DEFAULT_BUDGET['live']['order_price_max_krw'])
-    limit = ((record or {}).get('budget') or {}).get('daily_loss_krw')
-    loss_cap = min(limit, LIMIT) if type(limit) is int and limit > 0 else LIMIT  # as LiveOrderGuard.observe_loss
+    loss_cap = loss_limit(record or {})  # as LiveOrderGuard.observe_loss
     prices, timeline = {}, []
     for event in events:  # today's recorded 1-minute closes
         if isinstance(event, dict) and str(event.get('time', '')).startswith(day):
@@ -95,11 +93,18 @@ def ledger_shadow(path, day, events, capital=None, price_cap=None, shares_for=No
     def follow(stamp, symbol, price, sell_reason, buy_reason='모의 원장 매수'):
         """Trade `symbol` to its target at `price`: buys within the price cap and capital (a skipped share stays skipped)."""
         held = live.setdefault(symbol, {'qty': 0, 'entry': Decimal(0), 'opened_at': None})
-        target, bought = target_of(symbol), 0
+        target, bought, fits = target_of(symbol), 0, None
+        if mirror and stop_pct is not None and buy_reason != '수동 매수' and stamp.startswith(day) and held['qty'] < target:  # the mirror's own loss-room size
+            price_now = lambda c, h: Decimal(str(last.get(c, h['entry'])))
+            open_ = [(h['qty'], price_now(c, h), h['entry'], stops.get(c, stop_pct)) for c, h in live.items() if h['qty']]
+            lost = max(-realized, 0) + max(-sum((price_now(c, h) - h['entry']) * h['qty'] for c, h in live.items() if h['qty']), 0)
+            fits = loss_room_shares(loss_room(loss_cap, lost, open_), price, stops.get(symbol, stop_pct), symbol)
         while held['qty'] < target:
             exposure = sum(prices.get(c, h['entry']) * h['qty'] for c, h in live.items())
             reason = (f'주문가격 {price_cap:,}원 초과' if price > price_cap else
                       f'운용금 {capital:,}원 초과' if exposure + price > capital else None)
+            if reason is None and fits is not None and bought >= fits:
+                reason = '오늘 남은 손실 여유 초과'
             if reason:
                 if stamp.startswith(day):
                     skipped[reason] = skipped.get(reason, 0) + 1

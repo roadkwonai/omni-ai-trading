@@ -12,7 +12,8 @@ NOW = datetime(2026, 11, 24, 10, 25, tzinfo=KST)  # window: slots from 10:00
 
 
 @pytest.fixture
-def root(tmp_path):
+def root(tmp_path, monkeypatch):
+    monkeypatch.setattr(A, 'open_files', lambda: ({}, 256))  # never this Mac's own services
     (tmp_path / 'shared-etf-paper' / 'reviews').mkdir(parents=True)
     with sqlite3.connect(tmp_path / 'api-calls.sqlite3') as db:
         db.executescript(api_calls.SCHEMA)
@@ -153,3 +154,37 @@ def test_the_watch_survives_a_bad_round_and_ends_with_the_report(root, monkeypat
     A.watch(root, clock=lambda: next(times), sleep=lambda s: None, send=lambda text: sent.append(text) or True)
     assert len(rounds) == 2 and len(sent) == 1 and '마감' in sent[0]  # 09:00 is before the first round
     assert (root / 'shared-etf-paper' / 'reviews' / 'api-audit-2026-11-24.md').exists()
+
+
+def test_a_service_near_its_open_file_limit_is_told_before_its_calls_fail(root, monkeypatch):
+    # 2026-11-25: the dashboard's open files grew to 253 of 256 and only the 48 failed calls told anyone
+    sent, files = [], {'shared-etf-dashboard': 178, 'vibe-longterm': 19}
+    monkeypatch.setattr(A, 'open_files', lambda: (files, 256))
+    look = lambda m: A.step(lambda text: sent.append(text) or True, root, NOW + timedelta(minutes=m))  # noqa: E731
+    assert look(0) == [] and sent == []          # 69%
+    files['shared-etf-dashboard'] = 180          # 70%
+    assert [x['key'] for x in look(1)] == ['api.files:shared-etf-dashboard'] and '180/256' in sent[0] and '→' in sent[0]
+    look(2)
+    assert len(sent) == 1                        # once a level
+    files['shared-etf-dashboard'] = 232          # 90%: told again
+    assert [x['key'] for x in look(3)] == ['api.files:shared-etf-dashboard:90'] and len(sent) == 2
+    files['shared-etf-dashboard'] = 35           # restarted
+    assert look(4) == [] and len(sent) == 2
+    assert '180/256' in A.report(root, NOW + timedelta(minutes=5))
+
+
+def test_open_files_counts_each_service_and_reads_the_limit():
+    def run(args, **_):
+        out = {'launchctl list': '2043\t0\tcom.vibetrading.vibe-longterm\n26109\t0\tcom.vibetrading.shared-etf-dashboard\n-\t0\tcom.vibetrading.preflight\n',
+               'launchctl limit': '\tmaxfiles    256            unlimited      \n',
+               'lsof': 'p2043\nfcwd\nftxt\nf0\nf1\np26109\nfcwd\nf0\nf12\nf13\n'}
+        key = ' '.join(args[:2]) if args[0] == 'launchctl' else args[0]
+        return type('R', (), {'returncode': 1 if key == 'lsof' else 0, 'stdout': out[key]})()  # lsof says 1 when one pid is gone
+    assert A.open_files(run) == ({'vibe-longterm': 2, 'shared-etf-dashboard': 3}, 256)
+
+
+def test_open_files_that_cannot_be_read_are_not_a_finding():
+    def run(args, **_):
+        raise FileNotFoundError(args[0])
+    assert A.open_files(run) == ({}, 0) and A.file_findings({}, 0) == []
+    assert A.file_findings({'x': 9000}, 0) == []  # an unlimited service

@@ -590,3 +590,45 @@ def test_api_load_findings_join_the_hourly_audit_without_repeating_the_nh_refusa
             *[(f'{DAY}10:15:0{s}+09:00', 'nh', 'mcp:x', 'dashboard', 'response', None, 'tool error: rate_limit IGW42903') for s in range(4)]])
     found = _keys(nhplug)
     assert '→' in found['api.local_start:nh'] and 'api.refused:nh' not in found
+
+
+def _omni(answers):
+    return lambda args: answers.get(' '.join(args), (0, {}))
+
+
+def _cli_nhplug(tmp_path):
+    nhplug = _nhplug(tmp_path)
+    with sqlite3.connect(nhplug / 'live-orders.sqlite3') as db:
+        db.execute('CREATE TABLE live_halts (scope TEXT, day TEXT)')
+    return nhplug
+
+
+TRADES = {'trades': [{'account': '모의계좌 (공유)', 'side': 'BUY', 'symbol': '005930', 'qty': 3}, {'account': '실계좌 1', 'side': 'BUY', 'symbol': '005930', 'qty': 1}]}
+
+
+def test_a_cli_answer_that_disagrees_with_the_records_fires(tmp_path):
+    nhplug = _cli_nhplug(tmp_path)
+    status = {'live_accounts': {'live-1': {'loss_halt_today': False}}}
+    good = {'status trades': (0, TRADES), 'live status': (0, status)}
+    assert audit.cli_health(nhplug, NOW, _omni(good), reference=lambda: True) == {}
+    wrong = {'trades': [{**TRADES['trades'][0], 'qty': 2}]}
+    with sqlite3.connect(nhplug / 'live-orders.sqlite3') as db:
+        db.execute("INSERT INTO live_halts VALUES ('s','20261117')")
+    found = audit.cli_health(nhplug, NOW, _omni({**good, 'status trades': (0, wrong), 'jev blocks': (1, None), 'jev positions': (5, {})}), reference=lambda: False)
+    assert set(found) == {'cli.mismatch:paper-fills', 'cli.mismatch:loss-halt', 'cli.failed:jev-blocks', 'cli.reference_stale'}  # 5 is stale data, said as such
+    # the fill recorded while the CLI was read is not a mismatch
+    def filling(args):
+        if args == ['status', 'trades']:
+            with sqlite3.connect(nhplug / 'shared-etf-paper' / 'orders.sqlite3') as db:
+                db.execute("INSERT INTO fills VALUES ('b','005930','SELL',3,70000,'2026-11-17T10:20:00+09:00')")
+            return 0, TRADES
+        return _omni({**good, 'live status': (0, {'live_accounts': {'live-1': {'loss_halt_today': True}}})})(args)
+    assert audit.cli_health(nhplug, NOW, filling, reference=lambda: True) == {}
+
+
+def test_the_cli_check_reaches_the_findings_and_its_absence_resolves_nothing(tmp_path):
+    nhplug = _cli_nhplug(tmp_path)
+    facts = audit.collect(nhplug, NOW, run=_launchctl, holidays=frozenset(), cli=lambda *a: {'cli.failed:live-status': '종료 1'})
+    assert 'cli.failed:live-status' in {f['key'] for f in facts['findings']}
+    later = audit.collect(nhplug, NOW.replace(minute=40), run=_launchctl, holidays=frozenset())  # not asked
+    assert 'cli.failed:live-status' not in {i['key'] for i in later['incidents'].get('resolved', [])}

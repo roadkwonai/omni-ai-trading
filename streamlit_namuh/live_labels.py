@@ -30,6 +30,7 @@ REASONS = {
     'above the account price cap': '1주 가격 상한 초과',
     'above the account order limit': '회당 매수 한도보다 1주 가격이 큼',
     'daily new symbol limit': '하루 새 종목 수 한도 도달',
+    'too little of the daily loss limit left for one share': '남은 하루 손실 여유로는 1주도 살 수 없음',
     'automation off': '자동매매 꺼짐(미러 쉼)',
     'capital limit reached': '운용금(또는 주문가능금액) 남은 금액이 1주 가격보다 작음',
     'global or NH live halt': '주문 보호(HALT) 켜짐',

@@ -27,8 +27,9 @@ COST = 0.15  # % round trip (fees, ETF no tax; stock tax ~0.18% would add a bit)
 EXIT_BY = time(15, 20)
 
 
-def fetch(symbol, interval, rng, volume=False):
-    """[(datetime KST, o, h, l, c)] (plus volume when asked) from the Yahoo chart API; [] when blocked or empty."""
+def fetch(symbol, interval, rng, volume=False, last=False):
+    """[(datetime KST, o, h, l, c)] (plus volume when asked) from the Yahoo chart API; [] when blocked or empty.
+    last: the latest price as a row of its own when its day has no bar yet (Yahoo leaves a night's daily bar null for hours)."""
     url = f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval}&range={rng}'
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -43,6 +44,9 @@ def fetch(symbol, interval, rng, volume=False):
         vals = [q[k][i] for k in ('open', 'high', 'low', 'close')]
         if None not in vals:
             out.append((datetime.fromtimestamp(t, tz), *vals, *([q['volume'][i] or 0] if volume else [])))
+    price, at = res['meta'].get('regularMarketPrice'), res['meta'].get('regularMarketTime')
+    if last and price and at and (not out or datetime.fromtimestamp(at, tz).date() > out[-1][0].date()):
+        out.append((datetime.fromtimestamp(at, tz), *[float(price)] * 4, *([0] if volume else [])))
     return out
 
 

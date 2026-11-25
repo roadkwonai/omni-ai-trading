@@ -93,7 +93,7 @@ def evaluate(data, peak, threshold, now):
         return {**result, 'reason': '정규장 시간 미확인'}
     result.update(session=session, peak=peak, regular_start=start_dt.isoformat(), regular_end=end_dt.isoformat())
     ended = now.timestamp() >= end
-    if not (start <= now.timestamp() <= end + 1800) or now.astimezone(NY).date().isoformat() != session:
+    if now.timestamp() < start or now.astimezone(NY).date().isoformat() != session:
         return {**result, 'status': 'outside_session', 'reason': '미국 정규장 외'}
     quote = ((data.get('indicators') or {}).get('quote') or [{}])[0]
     bars = []
@@ -191,6 +191,6 @@ def run(now=None, root=ROOT, provider=fetch, daily_provider=fetch_daily):
 if __name__ == '__main__':
     now = datetime.now(timezone.utc)
     local = now.astimezone(NY)
-    result = (run(now) if local.weekday() < 5 and '09:30' <= local.strftime('%H:%M') <= '17:30'
+    result = (run(now) if local.weekday() < 5 and '09:30' <= local.strftime('%H:%M')  # to midnight: a Mac turned on late still reads the day
               else {'status': 'outside_session', 'alert': False, 'reason': '미국 관측 시간 외'})
     print(json.dumps(result, ensure_ascii=False))

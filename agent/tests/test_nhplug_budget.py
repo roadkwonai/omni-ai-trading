@@ -109,3 +109,17 @@ def test_old_queries_leave_the_same_query_file(tmp_path):
         inquiry(path, clock, account=str(n))
         clock.now += 20
     assert len(json.loads((tmp_path / B.SAME_FILE).read_text())) == 1
+
+
+def test_the_same_query_gap_is_kept_after_a_wait_for_a_slot(tmp_path):
+    # 2026-11-25: the dashboard reserved its second, then waited for a slot and called late, so the next program's same
+    # query came less than a second behind it (5 of the day's 9 refusals)
+    path, clock, started = tmp_path / 'budget.json', Clock(), []
+    for _ in range(B.RATE - B.RESERVE):
+        take(path, clock, 'nh_paper_isolated')
+    for caller in ('dashboard', 'nh_paper_isolated'):
+        inquiry(path, clock, caller)
+        started.append(clock.now)
+        if caller == 'dashboard':
+            assert clock.slept  # it waited for a slot first
+    assert started[1] - started[0] >= B.SAME_GAP

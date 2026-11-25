@@ -114,7 +114,7 @@ flowchart LR
 | 장전 사전 점검 | `scripts/preflight.py` | 08:20·08:53 서비스·계좌·설정·장전 자료 점검(읽기 전용), 실패는 Discord |
 | 시황 | `scripts/market_context.py`, `scripts/etf_regime_observer.py --watch` | 코스피·코스닥 국면, 투자자·프로그램 수급, 테마, 해외 지표, 장중 해외 선물 |
 | 후보 종목 | `scripts/market_movers.py`, `scripts/new_listings.py`, `scripts/issue_candidates.py` | 순위 후보(키움 선별 → NH 현재가), 신규상장, 이슈·테마 그림자 후보 |
-| 뉴스 | `scripts/etf_news.py` | Google·네이버·Bing 순환, 3분 공유 캐시, 90분 안 기사만 |
+| 뉴스 | `scripts/etf_news.py` | Google·네이버 교대(네이버 속보 약 1분), 다음 금융·한국경제·Bing 보충, 90분 공유 캐시, 막힌 출처 쉬게 하기 |
 | 장전 자료 | `scripts/premarket.py` | 장전 뉴스·공시·야간선물·NXT를 모아 `premarket_context`로 전달 |
 | 학습 관찰기 | `scripts/isolated_paper_learning_watch.py` | 사후 관측, 장 마감 뒤 매매일지·사례집·막힌 후보 결과 갱신 |
 | 실계좌 미러 | `scripts/nh_live_follow.py` | Jev 계좌: 모의 체결 원장을 계좌 크기로 미러 |

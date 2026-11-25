@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import sys
 import pytest
 
 import api_calls
@@ -179,3 +180,33 @@ def test_a_long_lock_drops_only_its_own_records_and_never_raises(log, monkeypatc
     log.record('nh', 'x/y', True, 5)
     assert cached is not None and log._conn[os.getpid()] is cached  # one connection per process, not one per call
     assert sqlite3.connect(log.DB).execute('SELECT sum(n) FROM calls').fetchone()[0] == 2
+
+
+def test_a_report_page_that_is_not_up_yet_is_no_failure(log):
+    # every report's first look came back 404 until GitHub had built it (2 of the 16 failures of 2026-11-25)
+    import api_calls as a
+    a._http('https://x.github.io/omni/reports/premarket/2026-11-25.html', None, 0, 404, None, None)
+    a._http('https://api.github.com/repos/x', None, 0, 404, None, None)
+    a._http('https://x.github.io/omni/reports/premarket/2026-11-25.html', None, 0, 500, None, None)
+    assert [(f['endpoint'].split('/')[0], f['status']) for f in a.failures('2000-01-01')] == [('x.github.io', 500), ('api.github.com', 404)]
+
+
+def test_naver_reader_refuses_a_whole_address():
+    import market_context
+    import pytest
+    with pytest.raises(ValueError, match='path'):
+        market_context.naver('https://m.stock.naver.com/api/stock/005930/trend')
+
+
+def test_a_fresh_import_shares_the_connection(monkeypatch):
+    # 2026-11-25: each Streamlit re-import opened one more connection to the call log
+    import importlib
+    kept = sys.modules.pop('api_calls', None)
+    try:
+        a = importlib.import_module('api_calls')
+        sys.modules.pop('api_calls')
+        b = importlib.import_module('api_calls')
+        assert a is not b and a._conn is b._conn and a._lock is b._lock
+    finally:
+        if kept is not None:
+            sys.modules['api_calls'] = kept

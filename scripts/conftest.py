@@ -44,7 +44,13 @@ def _ordinary_exchange_clock(monkeypatch):
 def _no_stock_news_network(monkeypatch):
     """Tests never fetch real per-stock news (watchlist.fresh_stock_news falls back to the recorded headlines)."""
     import watchlist
-    monkeypatch.setattr(watchlist, 'FETCH_STOCK_NEWS', lambda *a, **k: (_ for _ in ()).throw(OSError('no network in tests')))
+    for name in ('FETCH_STOCK_NEWS', 'FETCH_STOCK_FALLBACK'):
+        monkeypatch.setattr(watchlist, name, lambda *a, **k: (_ for _ in ()).throw(OSError('no network in tests')))
+    monkeypatch.setattr(watchlist, 'FOREIGN', lambda *a, **k: (_ for _ in ()).throw(OSError('no network in tests')))
+    monkeypatch.setattr(watchlist, '_FOREIGN', {})
+    import overnight_catalysts
+    monkeypatch.setattr(overnight_catalysts, 'ASK', watchlist.FETCH_STOCK_NEWS)
+    monkeypatch.setattr(overnight_catalysts, '_ASKED', {})
 
 
 @pytest.fixture(autouse=True)

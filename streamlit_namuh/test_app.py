@@ -992,6 +992,43 @@ class LiveMarkerTest(unittest.TestCase):
         self.assertEqual([(m['time'], m['text']) for m in virtual_markers(trades, bars, '069500')],
                          [(t(10, 2), '가상 재현 매도 (10:01)')])
 
+    def test_a_stock_chart_marks_its_picks_and_strength_passes_not_jevs_minute_choice(self):
+        """User 2026-11-25: Jev's minute choice never bought a stock; its watchlist pick and the strength path do."""
+        minute = lambda hhmm: int(datetime.fromisoformat(f'2026-11-25T{hhmm}:00+09:00').timestamp())
+        bars = [{'time': minute(f'09:{m:02d}')} for m in range(1, 60)]
+        picks = [('2026-11-25T08:50:40+09:00', ['257720'], {'257720': 0.44}), ('2026-11-25T09:08:10+09:00', ['257720', '125490'], {'257720': 0.31}),
+                 ('2026-11-25T09:30:10+09:00', ['125490'], {}), ('2026-11-25T09:40:10+09:00', ['257720'], {'257720': 0.5})]
+        strength = lambda hhmm, code='257720': {'event': 'watchlist_strength', 'time': f'2026-11-25T{hhmm}:20+09:00', 'symbol': code, 'confidence': 0.44}
+        events = [strength('09:32'), strength('09:33'), strength('09:45'), strength('09:50', '125490'), {'event': 'jev_shadow'}, 'x']
+        marks = app.stock_markers(events, picks, bars, '257720')
+        shown = {(datetime.fromtimestamp(m['time'], app.KST).strftime('%H:%M'), m['text']) for m in marks}
+        self.assertEqual(shown, {('09:01', '선정 0.44 (08:50)'), ('09:08', '0.31'), ('09:40', '선정 0.50'),
+                                 ('09:32', '강도 통과 0.44'), ('09:33', ''), ('09:45', '강도 통과 0.44')})
+        self.assertEqual({m['shape'] for m in marks}, {'square'})  # never an arrow: neither is an order
+        self.assertEqual(app.stock_markers([], [], bars, '257720'), [])
+
+    def test_the_days_picks_are_read_from_the_research_record(self):
+        import research_store
+        with tempfile.TemporaryDirectory() as temp, patch.object(research_store, 'ROOT', Path(temp)):
+            for day, selected in (('2026-11-24', ['000001']), ('2026-11-25', ['257720'])):
+                research_store.record('watchlist', {'time': f'{day}T09:08:00+09:00', 'selected': selected, 'probabilities': {'257720': 0.4}},
+                                      Path(temp) / 'market-research.sqlite3')
+            app.watchlist_picks.clear()
+            self.assertEqual(app.watchlist_picks(datetime(2026, 11, 25).date()), [('2026-11-25T09:08:00+09:00', ['257720'], {'257720': 0.4})])
+            app.watchlist_picks.clear()
+
+    def test_the_choice_line_says_what_jev_chose_and_this_symbols_share(self):
+        shadow = lambda at, choice, probabilities: {'event': 'jev_shadow', 'time': f'2026-11-25T{at}:31+09:00', 'jev': {'candidate': {
+            'choice': choice, 'confidence': 0.48, 'probabilities': probabilities}}}
+        events = [shadow('10:10', 'WAIT', {}), shadow('10:11', 'INV', {'INV': 0.53, '257720': 0.02, 'WAIT': 0.16})]
+        day = datetime(2026, 11, 25).date()
+        line = app.choice_line(events, '257720', day, {'257720': '이름'})
+        self.assertEqual(line, '10:11 Jev 매수 선택 KODEX 인버스 0.53 · 이 종목 0.02 (기회를 하나만 고르는 매분 판단)')
+        self.assertIn('이 종목이 선택됨', app.choice_line(events, 'INV', day, {}))
+        self.assertIn('이 종목은 선택지에 없음', app.choice_line(events, '005930', day, {}))
+        self.assertIn('대기', app.choice_line(events[:1], '257720', day, {}))
+        self.assertEqual(app.choice_line(events, '257720', datetime(2026, 11, 26).date(), {}), '')
+
     def test_shadow_symbols_and_markers_distinguish_replay_from_real_fills(self):
         from app import shadow_chart_symbols, virtual_markers, KST
         from datetime import datetime
@@ -1369,6 +1406,12 @@ def test_stock_names_cover_etfs_scanner_and_watchlist(tmp_path):
     assert names[app.ETF_CODES['K200']] == app.ETF_NAMES['K200']
 
 
+def test_a_held_stock_outside_the_watchlist_is_in_the_quote_list():
+    # 2026-11-25: 엠비디 (new listing) was held while the sidebar's quotes never showed it
+    held = [{'symbol': '498150'}, {'symbol': '005930'}]
+    assert app.held_targets(held, {'498150': '엠비디'}, {'삼성전자 ·Jev': '005930'}) == {'엠비디 ·보유': '498150'}
+
+
 def test_display_quotes_run_together_but_start_at_most_five_a_second():
     # P1: the sidebar's quotes ran one after another (~0.27 s each, every rerun); in parallel they must still respect
     # NH's 5 calls/s per app key, which the runners share
@@ -1514,7 +1557,9 @@ def test_the_desk_shows_a_realized_card_for_today_this_month_and_since_records_s
              '069500': {'sales': [('2026-10-30T10:00:00+09:00', 250, 10_000)]}}
     card = app.realized_card(books, date(2026, 11, 18))
     assert card['label'] == '실현손익' and card['value'] == '+1,000원' and card['tone'] == 'up'
-    assert card['sub'] == '이번 달 +600원 · 누적 +850원'
+    assert card['sub'] == '이번 달 +600원 · 누적 +850원'  # books without amounts: no cost estimate
+    costed = app.realized_card({'005930': {'sales': [('2026-11-18T10:00:00+09:00', 1000, 99_000)], 'cost_today': 265.0}}, date(2026, 11, 18))
+    assert costed['sub'].startswith('비용 추정 뒤 +735원 · 이번 달')
     assert app.realized_card(None, date(2026, 11, 18))['value'] == '확인 불가'
 
 
@@ -1625,6 +1670,35 @@ def test_fill_rows_put_each_stock_on_its_own_line_by_trading_day_and_minute():
     assert [r['금액'] for r in rows] == [100_000, 101_000, 200_000] and rows[1]['구분'] == '매도'
 
 
+def test_a_live_order_on_its_way_is_looked_at_again_before_the_next_refresh():
+    # user 2026-11-25: 257720's sale stood unfilled, without its result, until the next 30 s poll (and a 20 s shared copy)
+    from datetime import datetime, timedelta
+    at = datetime(2026, 11, 25, 10, 39, 24, tzinfo=app.KST)
+    snap = lambda left=0: {'time': at, 'orders': [{'미체결수량': left, '주문번호': 1}]}  # noqa: E731
+    record = lambda action, seconds: {'time': (at + timedelta(seconds=seconds)).isoformat(), 'action': action}  # noqa: E731
+    assert app.live_moved(snap(17), None)                               # still open
+    assert app.live_moved(snap(), record('SELL', 5)) and app.live_moved(snap(), record('RECONCILED', 47))  # sent or filled since
+    assert not app.live_moved(snap(), record('HOLD', 5)) and not app.live_moved(snap(), record('SELL', -5))
+    assert not app.live_moved(snap(), None) and not app.live_moved(None, record('SELL', 5))
+    assert not app.live_moved(snap(), {'time': 'x', 'action': 'SELL'})
+
+
+def test_only_the_progress_of_an_order_redraws_the_page():
+    old = {'orders': [{'주문번호': 1, '체결수량': 0, '미체결수량': 17, '취소수량': 0, '주문 시각': '10:39:09'}]}
+    same = {'orders': [{'주문번호': 1, '체결수량': 0, '미체결수량': 17, '취소수량': 0}]}
+    assert app.order_progress(old) == app.order_progress(same) != app.order_progress({'orders': [{**same['orders'][0], '체결수량': 17, '미체결수량': 0}]})
+
+
+def test_a_moved_order_is_read_again_at_most_every_few_seconds():
+    calls = []
+    fetch = lambda: calls.append(1) or {'n': len(calls)}  # noqa: E731
+    assert app.shared_snapshot('live', 'acct-moved', fetch) == {'n': 1}
+    assert app.shared_snapshot('live', 'acct-moved', fetch, max_age=4) == {'n': 1}
+    with patch.object(app.time, 'monotonic', return_value=app.time.monotonic() + 5):
+        assert app.shared_snapshot('live', 'acct-moved', fetch) == {'n': 1}
+        assert app.shared_snapshot('live', 'acct-moved', fetch, max_age=4) == {'n': 2}
+
+
 def test_shared_snapshot_serves_other_sessions_until_a_refresh():
     app._read_cache().pop(('broker-snapshot', 'live', 'acct-x'), None)
     calls = []
@@ -1697,3 +1771,49 @@ def test_a_wait_after_a_refused_pick_reads_as_the_hand_off():  # user 2026-11-20
     assert app.step_line(steps[1], steps, names) == '**KODEX 인버스 막힘** → 강도·신규주 경로로 넘김'
     alone = [{'choice': 'WAIT', 'reason': 'jev_wait'}]
     assert app.step_line(alone[0], alone, names) == '**Jev 대기** → Jev 대기 의견'
+
+
+def test_two_screens_reading_one_account_at_once_make_one_read():
+    # 2026-11-25: two tabs asked NH for the same balance in one second and NH refused the second (IGW42903)
+    import threading
+    import time
+    made = []
+
+    def fetch():
+        made.append(1)
+        time.sleep(0.2)
+        return {'n': len(made)}
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(app.shared_snapshot('live', 'acct-flight', fetch, fresh=fresh)))
+               for fresh in (False, False, True)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(made) == 1 and got == [{'n': 1}] * 3
+
+
+def test_a_stuck_read_does_not_hold_the_other_screens():
+    import threading
+    stuck = threading.Event()
+    t = threading.Thread(target=lambda: app.shared_snapshot('live', 'acct-stuck', lambda: stuck.wait(5) or {'n': 1}))
+    t.start()
+    with patch.object(app, 'SNAPSHOT_WAIT_S', 0.05):
+        assert app.shared_snapshot('live', 'acct-stuck', lambda: {'n': 2}) == {'n': 2}
+    stuck.set()
+    t.join()
+
+
+def test_a_failed_kiwoom_read_is_asked_once_more_before_nh(monkeypatch):
+    import kiwoom_data
+    asked = []
+
+    def answer(*_, **__):
+        asked.append(1)
+        if len(asked) == 1:
+            raise OSError('reset')
+        return [{'stk_cd': '005930', 'cur_prc': '-70000', 'base_pric': '71000', 'open_pric': '70500', 'high_pric': '71000', 'trde_qty': '1'}]
+    monkeypatch.setattr(kiwoom_data, 'call', answer)
+    monkeypatch.setattr(app.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(app, 'display_quotes', lambda *a: (_ for _ in ()).throw(AssertionError('NH asked')))
+    assert app.display_prices(None, ['005930'], 0)['005930'][1] == 'kiwoom' and len(asked) == 2

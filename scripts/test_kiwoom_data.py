@@ -49,6 +49,13 @@ if __name__ == '__main__':
     unittest.main()
 
 
+def test_the_foreign_net_quantity_is_the_asked_days_row():
+    rows = [{'dt': '20261125', 'frgnr_invsr': '+3431843'}, {'dt': '20261124', 'frgnr_invsr': '--4965611'}]
+    with patch.object(k, '_token', return_value='t'), patch.object(k, '_post', return_value=({}, {'return_code': 0, 'stk_invsr_orgn': rows})) as post:
+        assert k.foreign_net('114800', '20261124') == -4965611 and k.foreign_net('114800', '20261123') is None
+    assert post.call_args.args[-1] == 2  # an optional figure never holds a cycle for long
+
+
 class CallTests(unittest.TestCase):
     def setUp(self):
         self.tokens = iter(['cached', 'renewed'])

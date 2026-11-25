@@ -23,6 +23,7 @@ from streamlit.errors import StreamlitAPIException
 import api_calls
 import api_catalog as cat
 import api_load
+import etf_news
 import liner_history
 import liner_jobs
 import status_cards as sc
@@ -106,6 +107,7 @@ def state(provider, today, recent, keys, now, active=False):
 def provider_states(calls, keys, now):
     """{api key: (label, reason)} for every catalog API from call rows covering yesterday and today."""
     today = now.strftime('%Y-%m-%d')
+    calls = [r for r in calls if r['caller'] not in cat.BY_HAND]  # a one-off script's mistake says nothing about the API
     today_totals = totals(pd.DataFrame([r for r in calls if r['day'] == today]))
     recent = recent_totals(calls, now)
     return {p['key']: state(p, today_totals.get(p['key']), recent.get(p['key']), keys, now, bool(today_totals)) for p in cat.CATALOG}
@@ -1003,6 +1005,34 @@ def load_audit(now):
         st.dataframe(spread or [{'NH 조회': '오늘 없음'}], hide_index=True, width='stretch', alt='NH 호출을 많이 쓰는 조회')
 
 
+NEWS_TOPICS = {'market': '시장', 'kosdaq150': '코스닥', 'semiconductor': '반도체'}
+NEWS_SOURCES = {'google_news_rss': ('Google 뉴스', '약 6분마다'), 'naver_finance_news': ('네이버 증권', '약 1분마다(속보)'), 'daum_finance_news': ('다음 금융', '빠진 주제만'),
+                'hankyung_rss': ('한국경제', '빠진 주제만'), 'bing_news_rss': ('Bing 뉴스', '마지막')}
+
+
+def load_news(now):
+    """Jev's market news as the shared files hold it now (etf_news.status: local files, no request)."""
+    told = etf_news.status(now)
+    clock = lambda t: f'{t.astimezone(KST):%m-%d %H:%M:%S}' if t else '기록 없음'  # noqa: E731
+    age = lambda n: '—' if n is None else f'{n}분 전'  # noqa: E731
+    st.markdown('##### 뉴스 수집 상태')
+    empty = [NEWS_TOPICS[t['topic']] for t in told['topics'] if not t['count']]
+    if empty:
+        st.warning(f"최근 90분 기사가 없는 주제: {' · '.join(empty)}", icon=':material/warning:')
+    else:
+        st.success('시장·코스닥·반도체 모두 최근 90분 기사가 있습니다.', icon=':material/check_circle:')
+    left, right = st.columns(2)
+    left.dataframe([{'주제': NEWS_TOPICS[t['topic']], '쓸 기사(최대 3)': t['count'], '가장 새 기사': age(t['newest_min']), '제목': t['newest_title'] or '—'} for t in told['topics']],
+                   hide_index=True, width='stretch', alt='주제별 뉴스')
+    right.dataframe([{'출처': NEWS_SOURCES[s['source']][0], '상태': f"쉬는 중 · {s['rest_until'].astimezone(KST):%H:%M:%S}까지" if s['rest_until'] else '사용 가능',
+                      '부르는 때': NEWS_SOURCES[s['source']][1], '캐시 기사': s['count'], '가장 새 기사': age(s['newest_min'])} for s in told['sources']],
+                    hide_index=True, width='stretch', alt='출처별 뉴스')
+    st.caption(f"전체 조회 {clock(told['fetched'])} · 네이버 속보 보충 {clock(told['topped'])}"
+               + (f" · 모든 출처 실패, {clock(told['retry_after'])}까지 전체 조회 쉼" if told['retry_after'] and now < told['retry_after'] else '')
+               + '. 캐시 기사는 최근 90분 기준이며 시각은 저장된 기사의 발행 시각입니다. 쉬는 중 = 거절(429·403) 10분, 연결 실패 2분. '
+                 '장 시간 밖에는 실행기가 조회하지 않아 비어 있을 수 있습니다.')
+
+
 def render(runtime):
     now = datetime.now(KST)
     # 스킬 · 리포트 발행 · 자동 작업 are their own 운영 screens since 2026-11-19 (skills_view, report_pages_view, schedule_view)
@@ -1064,6 +1094,7 @@ def render(runtime):
                '"호출 없음"은 장 시간 밖이거나 그 API를 쓰는 서비스가 아직 새 코드로 재시작하지 않았다는 뜻일 수 있습니다.')
 
     load_audit(now)
+    load_news(now)
 
     if not frame.empty:
         st.markdown(f'##### {period} 호출 흐름')

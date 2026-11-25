@@ -160,6 +160,7 @@ omni jev events --help
 
 | 사용자의 말 | 명령 |
 | --- | --- |
+| 오늘 실계좌가 새로 살 수 있어? | `omni live status`(계좌별 `loss_halt_today`가 참이면 하루 손실 정지, `buy_paused`는 신규 매수 중단) |
 | 실주문 켜져 있어? | `omni live status` · `omni account checklist live-1` |
 | 실계좌가 왜 안 샀어? | `omni live log live-1` (회차마다 계획·거절 이유) |
 | 실계좌가 왜 모의와 달라? | `omni status trades`와 `omni live fills live-1 --day 2026-11-24`의 가격을 비교 · 모의를 그대로 따라 샀을 때의 계산 결과는 `omni account shadow` |
@@ -247,7 +248,7 @@ omni query vibe-longterm/longterm.sqlite3 "SELECT day, book, value FROM nav ORDE
 | --- | --- | --- |
 | `shared-etf-paper/orders.sqlite3` | `intents` `fills` `cancels` | 모의 주문·체결 |
 | `shared-etf-paper/trading-ledger.sqlite3` | `events_v2` | 실행기 이벤트 기록 |
-| `shared-etf-paper/market-research.sqlite3` | `decision_outcomes` `model_evidence` `shadow_candidates` `blocked_outcomes` `ipo_shadow` | 판단 근거·사후 결과 |
+| `shared-etf-paper/market-research.sqlite3` | `decision_outcomes` `model_evidence` `shadow_candidates` `blocked_outcomes` `ipo_shadow` `fade_looks` | 판단 근거·사후 결과 |
 | `shared-etf-paper/trading-journal.sqlite3` | `days` `periods` | 매매일지 |
 | `shared-etf-paper/oversold-cases.sqlite3` | `cases` | 과거 급락 사례 |
 | `live-fills.sqlite3` | `fills` | 실계좌 체결 |

@@ -30,7 +30,7 @@
 | 장기투자 | `vibe-longterm`, `longterm-watch`, `us-ideas` | 장기 엔진(가상 계좌), 장중 상시 감시(기록만 읽고 Discord 장기 채널로 알림), 미국 종목 아이디어(참고) |
 | 기타 | `nxt-virtual` | [NXT 종가매매](nxt.md) 가상 실행 |
 | | `discord-notify` | [알림](notifications.md)과 [리포트 발행](report-pages.md) |
-| | `api-watch` | API 부하·분산 상시 감사(호출 기록만 읽고 Discord 실시간 채널로 알림) |
+| | `api-watch` | API 부하·분산과 서비스별 열린 파일(한도의 70%·90%) 상시 감사(읽기만 하고 Discord 실시간 채널로 알림) |
 | | `trading-backup`, `state-sync`, `exit-replay` | 일일 사본, 설정·전체 백업, 청산 규칙 재현 |
 | | `shared-etf-dashboard` | 대시보드 `http://127.0.0.1:8501` |
 

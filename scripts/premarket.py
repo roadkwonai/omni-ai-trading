@@ -264,6 +264,53 @@ def _nxt_gap(now, codes, previous=None):
 NXT_PRE_SOURCE = '토스증권 Open API(NXT 프리마켓 1분봉)'
 
 
+OVERNIGHT_SOURCE = '네이버 종목 뉴스·공시, Yahoo Finance 일봉'
+OVERNIGHT_ROWS = {'호재': 20, '악재': 10}
+
+
+def _overnight(now, root, previous=None):
+    """What came between the previous close and now for KOSPI200·KOSDAQ150 stocks (overnight_catalysts.morning) with today's
+    NXT pre-market move of the listed ones (Kiwoom, kept after 08:50), and the overseas sector moves. Never asks for news itself."""
+    import overnight_catalysts as o
+    scan = o.load_morning(root, now)
+    if not scan:
+        early = now.strftime('%H:%M') < '08:00'
+        return _section(OVERNIGHT_SOURCE, now, {}, 'empty' if early else 'unavailable', note='첫 수집 전' if early else '오늘 재료 수집 없음')
+    ranked = o.strongest(scan['stocks'])
+    row = lambda code, s: {'code': code, 'name': s['name'], 'direction': s['direction'], 'items': s['items'][:3]}
+    data = {'since': scan['since'], 'scanned': scan['scanned'], 'failed': scan['failed'], 'overseas': scan['overseas'],
+            'counts': {k: sum(s['direction'] == k for _, s in ranked) for k in ('호재', '악재', '혼재')},
+            'rows': [row(c, s) for kind, limit in OVERNIGHT_ROWS.items() for c, s in [x for x in ranked if x[1]['direction'] == kind][:limit]]}
+    nxt = ((previous or {}).get('data') or {}).get('nxt') or {} if str((previous or {}).get('observed_at', ''))[:10] == now.date().isoformat() else {}
+    if '08:00' <= now.strftime('%H:%M') < '08:55' and data['rows']:
+        try:
+            import kiwoom_data
+            from theme_data import kiwoom_quotes
+            if kiwoom_data.configured():
+                quotes = kiwoom_quotes([f"{r['code']}_NX" for r in data['rows']])[0]
+                nxt = {**nxt, **{c: {'change_pct': q['change_pct'], 'as_of': q['as_of']} for c, q in quotes.items()
+                                 if q['change_pct'] is not None and str(q['as_of']).startswith(now.strftime('%Y%m%d'))}}
+        except Exception:  # noqa: BLE001 - the titles stand without the price
+            pass
+    return _section(OVERNIGHT_SOURCE, datetime.fromisoformat(scan['time']), {**data, 'nxt': nxt}, 'partial' if scan['failed'] else 'ok',
+                    note='제목을 규칙으로 나눈 참고 분류 · 이미 가격에 반영됐을 수 있음')
+
+
+def overnight_context(brief, root, now):
+    """The overnight material of the watched and selected stocks for Jev's premarket_context, in the first hours only."""
+    import overnight_catalysts as o
+    scan = o.load_morning(root, now)
+    if not scan or not o.in_first_hours(now):
+        return None
+    selected = _json_file(Path(root) / 'watchlist.json', {}).get('selected') or []
+    codes = {*(brief.get('watch_codes') or []), *(c for c in selected if isinstance(c, str))}
+    stocks = {c: {'name': s['name'], 'direction': o.WORD[s['direction']],
+                  'titles': [{k: i[k] for k in ('title', 'type', 'time', 'source')} for i in s['items'][:3]]}
+              for c, s in scan['stocks'].items() if c in codes}
+    abroad = o.overseas_field([s for s in scan['overseas'] if s['big'] or set(s['codes']) & codes], {c for s in scan['overseas'] for c in s['codes']})
+    return {'observed_at': scan['time'], 'stocks': stocks, 'overseas': abroad, 'note': o.FIELD_NOTE} if stocks or abroad else None
+
+
 def _naver_over_market(code):
     """Backup for one stock: Naver's NXT price while its session is PRE_MARKET (with the trade time); None otherwise."""
     import requests
@@ -534,6 +581,7 @@ def collect(now=None, root=None):
     sections['krx'] = _krx(now, codes, previous_session(now), keys.get('KRX_API_KEY'), old.get('krx'))
     sections['dart'] = _dart(now, stocks, keys.get('OPENDART_API_KEY'), old.get('dart'))
     sections['listings'] = _listings(now, root)
+    sections['overnight_news'] = _overnight(now, root, old.get('overnight_news'))
     sections['nxt_gap'] = _nxt_gap(now, codes, old.get('nxt_gap'))
     closes = {}
     for row in sections['krx'].get('data') or []:
@@ -646,6 +694,8 @@ def engine_brief(root=None, now=None):
                                    'note': 'NXT 프리마켓(08:00~08:50) 실제 체결 요약. last_time은 마지막 체결 분(오늘), change_pct는 '
                                            'KRX 전일 종가 대비 %, from_first_pct는 프리마켓 첫 체결 대비 %, value_mil은 거래대금(백만 원). '
                                            '거래가 적으면 정규장 시가와 크게 다를 수 있다.'}
+    if overnight := overnight_context(brief, root or ROOT, now):
+        result['overnight_material'] = overnight
     dart = sources.get('dart', {})
     if dart.get('source') == 'Open DART' and dart.get('status') in ('ok', 'partial'):
         result['disclosures'] = [row for row in dart.get('data', []) if isinstance(row, dict)
@@ -667,6 +717,13 @@ def run_once():
         save(brief)
         research_store.record('premarket', brief)
         print(json.dumps({'time': brief['time'], 'sections': {k: v['status'] for k, v in brief['sections'].items()}}, ensure_ascii=False), flush=True)
+    try:  # after the brief is saved and the lock is free: the full scan takes minutes and the next run shows it
+        import overnight_catalysts
+        if scan := overnight_catalysts.morning(ROOT):
+            research_store.record('overnight_morning', scan)
+            print(json.dumps({'overnight': scan['time'], 'scanned': scan['scanned'], 'failed': scan['failed'], 'stocks': len(scan['stocks'])}), flush=True)
+    except Exception as exc:  # noqa: BLE001 - research input only
+        print(json.dumps({'overnight_error': type(exc).__name__}), flush=True)
 
 
 # ── issue ranking and the automatic Markdown skeleton ──────────────────────
@@ -769,6 +826,38 @@ def written_line(brief, now):
     return f'작성: {now:%m/%d %H:%M} KST ({when}) · 브리프 수집 {collected}'
 
 
+OVERSEAS_TONE = {'up': '오름', 'down': '내림', 'mixed': '엇갈림'}
+
+
+def overnight_lines(section):
+    """The stocks with good or bad material since the previous close, and the overseas moves, for section 3 of the report."""
+    data = section.get('data') if isinstance(section.get('data'), dict) else {}
+    if not data:
+        return []
+    counts = data.get('counts') or {}
+    out = ['', f"### 장 마감 뒤 재료 ({_hm(data.get('since'), '%m/%d %H:%M')} ~ {_hm(section.get('observed_at'), '%m/%d %H:%M')} KST)", '',
+           f"코스피200·코스닥150 {data.get('scanned')}종목의 기사·공시 제목을 규칙으로 나눴습니다: 호재 {counts.get('호재', 0)} · 악재 {counts.get('악재', 0)} · "
+           '혼재 ' + f"{counts.get('혼재', 0)}종목. 이미 가격에 반영됐을 수 있으며 매수 신호가 아닙니다.", '']
+    nxt = data.get('nxt') or {}
+    titles = lambda row: ' / '.join((f"[{_cell(i['title'])}]({i['link']})" if str(i.get('link', '')).startswith('https://') else _cell(i['title']))
+                                    + f" ({_cell(i['source'])} {_hm(i['time'], '%m/%d %H:%M')})" for i in row['items'][:2])
+    if data.get('rows'):
+        out += ['| 구분 | 종목 | 재료 | 제목 |', '|---|---|---|---|']
+        out += [f"| {r['direction']} | {_cell(r['name'])}({r['code']}) | {_cell('·'.join(dict.fromkeys(i['type'] for i in r['items'])))} | {titles(r)} |"
+                for r in data['rows']]
+    if moved := [r for r in data.get('rows') or [] if r['code'] in nxt]:
+        for label, keep in (('호재인데 내리는', lambda r, c: r['direction'] == '호재' and c < 0), ('호재이고 오르는', lambda r, c: r['direction'] == '호재' and c >= 2)):
+            hit = [r for r in moved if keep(r, nxt[r['code']]['change_pct'])]
+            if hit:
+                out += ['', f"NXT 프리마켓에서 {label} 종목(키움): " + ', '.join(f"{_cell(r['name'])} {_n(nxt[r['code']]['change_pct'], '+.2f', '%')}" for r in hit)]
+    if data.get('overseas'):
+        out += ['', '밤사이 해외 업종(굵은 글씨는 평소보다 크게 움직임, 1표준편차 이상). 기사 방향은 해외 업종 기사 제목의 오름·내림이며 국내 종목의 호재·악재가 아닙니다. '
+                '지난 기록에서 해외 급등은 국내 시가에 먼저 반영됐습니다.', '', '| 해외 업종 | 등락 | 기사 방향 | 관련 국내 종목 | 기사 |', '|---|---|---|---|---|']
+        out += [f"| {'**' + _cell(s['signal']) + '**' if s['big'] else _cell(s['signal'])} | {_n(s['move_pct'], '+.2f', '%')} | {OVERSEAS_TONE.get(s['news'], '—')} | "
+                f"{_cell('·'.join(s['names']))} | {titles(s) or '—'} |" for s in data['overseas']]
+    return out
+
+
 def report_md(brief, now=None):
     """The premarket analysis skeleton: every template section, the observed tables and links filled in, and the
     analysis left as '작성 전' placeholders for the premarket-analysis skill. A brief without data still has every
@@ -848,6 +937,7 @@ def report_md(brief, now=None):
     out += [f"- {star_text(item['stars'])} [{_cell(item['title'])}]({item['link']}) · {_cell(item.get('publisher'))} · "
             f"{_hm(item.get('published'), '%m/%d %H:%M')} KST · {' · '.join(item['why'])}"
             for item in news[:8] if str(item.get('link', '')).startswith('https://')] or ['- 순위를 매길 뉴스가 없습니다.']
+    out += overnight_lines(get('overnight_news'))
     out += ['', T.WRITE, '']
 
     out += [f'## {next(heading)}', '', '| 코드 | 종목 | 구분 | KRX 기준일 | 종가 | 등락 | 최근 공시(접수일) |', '|---|---|---|---|---|---|---|']

@@ -33,10 +33,12 @@ TOKENS = Path.home() / '.vibe-trading' / 'nhplug' / 'tokens'  # where dist/auth.
 READ_TOOLS = ('get_stock_price', 'list_accounts')
 READ_OPERATIONS = ('krstockQuote', 'krstockInquiry')
 
-_sessions: dict = {}   # (pid, server) -> _Session; touched only on the loop thread
-_resting: dict = {}    # server -> monotonic time reuse may be tried again
-_loop_lock = threading.Lock()
-_loop: tuple | None = None  # (pid, loop): a forked child starts its own
+# Kept on `sys`, not in this module: the dashboard (Streamlit) imports changed code afresh, and each new import used to
+# start its own loop and process while the old ones stayed (2026-11-25: 45 processes used up its 256 open files).
+_kept = sys.__dict__.setdefault('_nh_sessions_kept', {'sessions': {}, 'resting': {}, 'lock': threading.Lock(), 'loop': None})
+_sessions: dict = _kept['sessions']  # server -> _Session; touched only on the loop thread
+_resting: dict = _kept['resting']    # server -> monotonic time reuse may be tried again
+_loop_lock = _kept['lock']           # _kept['loop'] = (pid, loop): a forked child starts its own
 
 
 class _Session:
@@ -67,14 +69,13 @@ def key_of(config):
 
 
 def _background_loop():
-    global _loop
     with _loop_lock:
-        if _loop is None or _loop[0] != os.getpid():
+        if _kept['loop'] is None or _kept['loop'][0] != os.getpid():
             loop = asyncio.new_event_loop()
             threading.Thread(target=loop.run_forever, name='nh-sessions', daemon=True).start()
-            _loop = (os.getpid(), loop)
+            _kept['loop'] = (os.getpid(), loop)
             _sessions.clear()
-        return _loop[1]
+        return _kept['loop'][1]
 
 
 def _drop(key, session):
@@ -130,8 +131,8 @@ async def call(config, build, tool, arguments, timeout):
 
 def close_all():
     """End every shared process (program exit, tests)."""
-    global _loop
-    if _loop is None or _loop[0] != os.getpid():
+    loop = _kept['loop']
+    if loop is None or loop[0] != os.getpid():
         return
 
     async def close():
@@ -142,7 +143,7 @@ def close_all():
             except BaseException:  # noqa: BLE001 - the pipe closes with the program anyway
                 pass
     try:
-        asyncio.run_coroutine_threadsafe(close(), _loop[1]).result(3)
+        asyncio.run_coroutine_threadsafe(close(), loop[1]).result(3)
     except (concurrent.futures.TimeoutError, RuntimeError):
         pass
     _resting.clear()

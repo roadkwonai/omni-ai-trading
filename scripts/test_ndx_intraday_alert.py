@@ -22,7 +22,8 @@ def test_delayed_missing_or_closed_never_alerts():
     data = {'meta': {'symbol': '^NDX', 'currentTradingPeriod': {'regular': {'start': start.timestamp(), 'end': end.timestamp()}}},
             'timestamp': [int(start.timestamp())], 'indicators': {'quote': [{'low': [79]}]}}
     assert evaluate(data, 100, -.2, start + timedelta(minutes=10))['status'] == 'delayed'
-    assert evaluate(data, 100, -.2, end + timedelta(minutes=31))['status'] == 'outside_session'
+    assert evaluate(data, 100, -.2, start - timedelta(minutes=1))['status'] == 'outside_session'
+    assert evaluate(data, 100, -.2, start + timedelta(days=1))['status'] == 'outside_session'
     assert evaluate(data, None, -.2, start)['status'] == 'unavailable'
 
 
@@ -63,3 +64,16 @@ def test_last_minute_crossing_can_be_observed_after_early_close():
             'timestamp': [ts], 'indicators': {'quote': [{'low': [80]}]}}
     result = evaluate(data, 100, -.2, end + timedelta(minutes=10))
     assert result['status'] == 'crossed' and result['crossed_low'] == 80
+
+
+def test_a_crossing_while_the_mac_was_off_is_found_after_the_close():
+    # 2026-11-25: off 01:00~06:38 KST, first look 06:40 (16:40 New York) and the whole session's bars are still served
+    start = datetime(2026, 11, 24, 9, 30, tzinfo=NY)
+    end = start.replace(hour=16, minute=0)
+    times = [int((start + timedelta(minutes=n)).timestamp()) for n in (60, 389)]
+    data = {'meta': {'symbol': '^NDX', 'currentTradingPeriod': {'regular': {'start': start.timestamp(), 'end': end.timestamp()}}},
+            'timestamp': times, 'indicators': {'quote': [{'low': [79, 85]}]}}
+    result = evaluate(data, 100, -.2, end + timedelta(minutes=40))
+    assert result['status'] == 'crossed' and result['crossed_low'] == 79
+    data['indicators']['quote'][0]['low'] = [81, 85]
+    assert evaluate(data, 100, -.2, end + timedelta(minutes=40))['status'] == 'finished'

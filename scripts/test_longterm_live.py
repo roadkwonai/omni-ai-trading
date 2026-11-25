@@ -52,7 +52,7 @@ class Broker:
     def __init__(self, cash=600_000, held=(), avg=10_000, quote=(10_000, 10_010)):
         self.cash, self.held, self.avg, self.quote = cash, dict(held), avg, quote
         self.refuse = {}  # code -> LiveOrderBlocked message
-        self.sent, self.reads, self.replacements = [], 0, []
+        self.sent, self.reads, self.replacements, self.previous, self.waited = [], 0, [], [], []
 
     def snapshots(self, reader, account, now):
         self.reads += 1
@@ -64,8 +64,9 @@ class Broker:
         self.reads += 1
         return self.quote
 
-    def execute(self, reader, guard, credentials, op, fields, replacement_of=None, quote_audit=None):
+    def execute(self, reader, guard, credentials, op, fields, replacement_of=None, quote_audit=None, previous_quote=None):
         self.replacements.append(replacement_of)
+        self.previous.append(previous_quote)
         if fields['iem_cd'] not in guard.symbols:  # as LiveOrderGuard.reserve: a guard orders only the symbols it was built with
             raise LiveOrderBlocked('account or symbol mismatch')
         if fields['iem_cd'] in self.refuse:
@@ -81,6 +82,7 @@ def run(root, now, broker, *, execute_orders, dca=None, record=RECORD, plan=PLAN
          patch.object(L, 'load_settings', return_value=settings), \
          patch('nh_live_broker.collect_snapshots', side_effect=broker.snapshots), patch('live_fills.record'), \
          patch('nh_live_follow.pending_step', return_value=pending), patch('nh_live_follow.bid_ask', side_effect=broker.bid_ask), \
+         patch('nh_live_broker.quote_before_advance', side_effect=lambda reader, code: broker.waited.append(code) or f'old {code}'), \
          patch('nh_guarded_live.execute', side_effect=broker.execute):
         return LL.cycle(None, ACCOUNT, {}, record, 'live-2', now=now, execute_orders=execute_orders,
                         may_cancel=execute_orders, root=root, engine_root=root, auto=auto)
@@ -111,6 +113,21 @@ def send_all(root, broker, start=(9, 42), **kw):
         h, m = (h + 1, 0) if m == 59 else (h, m + 1)
         assert len(results) < 30
     return results
+
+
+def test_a_buy_waits_for_the_quote_to_move_and_a_sell_never_does(tmp_path):
+    # 2026-11-25 09:41~09:48: 357870's quote clock moves every 6~20 s and the guard's two reads are 2 s apart
+    buying, selling = Broker(), Broker(cash=100_000, held=[(CODE['NDX'], 40)])
+    (tmp_path / 'b').mkdir()
+    run(tmp_path, at(9, 41), buying, execute_orders=True)
+    run(tmp_path, at(9, 42), buying, execute_orders=True)
+    code = buying.sent[0][1]
+    assert buying.sent[0][0] == 'BUY' and buying.waited == [code] and buying.previous == [f'old {code}']
+    own(tmp_path / 'b', 'NDX', 40)
+    plan = {**PLAN, 'active': ['bogle_core', 'dalio_rebalance', 'buffett_lowturn']}
+    run(tmp_path / 'b', at(9, 41), selling, execute_orders=True, plan=plan)
+    run(tmp_path / 'b', at(9, 42), selling, execute_orders=True, plan=plan)
+    assert selling.sent[0][0] == 'SELL' and selling.waited == [] and selling.previous == [None]
 
 
 def test_dry_run_records_the_day_plan_once_and_sends_nothing(tmp_path):
@@ -154,6 +171,7 @@ def test_a_lasting_refusal_moves_on_a_passing_one_is_retried_and_the_book_waits_
     assert [code for _, code, _, _ in broker.sent] == [first, third]
     state = LL.load_state(tmp_path, 'live-2')
     assert [o['status'] for o in state['orders'][:3]] == ['sent', 'blocked', 'sent'] and state['book'].get('deploying')
+    assert 'reason' not in state['orders'][0] and state['orders'][1]['reason'] == 'daily new symbol limit'  # a sent order keeps no earlier refusal (11-25)
     assert run(tmp_path, at(14, 35), broker, execute_orders=True)['action'] == 'HOLD'
 
 
@@ -395,18 +413,19 @@ def test_a_finished_day_reads_nothing_from_the_broker_until_an_order_is_open(tmp
     assert broker.reads > reads
 
 
-def start_main(tmp_path, monkeypatch, *argv, live_orders=False):
-    """main() with its broker, .env and accounts.json replaced by fakes; returns the cycle calls."""
+def start_main(tmp_path, monkeypatch, *argv, live_orders=False, failures=(), once=True):
+    """main() with its broker, .env and accounts.json replaced by fakes; returns the cycle calls. failures: what the account
+    list answers before it works."""
     import accounts
     record = {'kind': 'live', 'engine': 'longterm', 'auto': True, 'live_orders': live_orders, 'hash': accounts.digest(ACCOUNT),
               'budget': RECORD['budget']}
     linked = {'status': 'ok', 'data': {'Output_0': [{'acct_no': ACCOUNT, 'acct_type': '01'}]}}
-    calls = []
-    monkeypatch.setattr(sys, 'argv', ['longterm_live.py', '--account', 'live-2', '--once', *argv])
+    calls, answers = [], [*failures]
+    monkeypatch.setattr(sys, 'argv', ['longterm_live.py', '--account', 'live-2', *(['--once'] if once else []), *argv])
     monkeypatch.setattr(accounts, 'load', lambda *a, **k: {'live-2': record})
     monkeypatch.setattr('src.config.paths.get_runtime_root', lambda: tmp_path)
     monkeypatch.setattr('src.config.loader.load_agent_config', lambda: SimpleNamespace(mcp_servers={'nhplug_readonly': None}))
-    monkeypatch.setattr('src.tools.mcp.MCPServerAdapter', lambda *a: SimpleNamespace(call_tool=lambda *a: linked))
+    monkeypatch.setattr('src.tools.mcp.MCPServerAdapter', lambda *a: SimpleNamespace(call_tool=lambda *a: answers.pop(0) if answers else linked))
     monkeypatch.setattr('dotenv.dotenv_values', lambda *a, **k: {'ACCOUNT_NUMBER': '00000000001', 'ACCOUNT_NUMBER_2': ACCOUNT,
                                                                  'APP_KEY': 'k', 'APP_SECRET': 's'})
     monkeypatch.setattr(LL.os, 'umask', lambda mask: 0o022)
@@ -422,6 +441,32 @@ def test_a_dry_and_an_armed_loop_for_one_account_never_run_together(tmp_path, mo
         with pytest.raises(BlockingIOError):
             start_main(tmp_path, monkeypatch)  # a dry loop shares state-live-2.json: it must not start
     assert start_main(tmp_path, monkeypatch)[0]['execute_orders'] is False
+
+
+DOWN = {'status': 'error', 'error': 'MCP server did not start'}
+
+
+def test_the_day_is_not_lost_to_an_account_list_that_fails_at_the_start(tmp_path, monkeypatch):
+    # 2026-11-25 06:40: the NH process missed its 8 s start and a runner asking once ended for the day
+    waits = []
+    monkeypatch.setattr('nh_live_broker.time.sleep', waits.append)
+    monkeypatch.setattr(LL, 'day_over', lambda now=None: now is not None)  # the day is over after the first cycle
+    assert len(start_main(tmp_path, monkeypatch, failures=[DOWN, DOWN], once=False)) == 1
+    assert waits == [LL.CHECK_INTERVAL_SECONDS] * 2
+
+
+def test_the_account_list_is_not_asked_again_after_the_day_is_over(tmp_path, monkeypatch):
+    monkeypatch.setattr('nh_live_broker.time.sleep', lambda s: None)
+    monkeypatch.setattr(LL, 'day_over', lambda now=None: True)
+    with pytest.raises(SystemExit, match='account list unavailable'):
+        start_main(tmp_path, monkeypatch, failures=[DOWN] * 3, once=False)
+
+
+def test_one_cycle_by_hand_asks_the_account_list_once(tmp_path, monkeypatch):
+    monkeypatch.setattr('nh_live_broker.time.sleep', lambda s: pytest.fail('waited'))
+    monkeypatch.setattr(LL, 'day_over', lambda now=None: False)
+    with pytest.raises(SystemExit, match='account list unavailable'):
+        start_main(tmp_path, monkeypatch, failures=[DOWN] * 3)
 
 
 @pytest.mark.parametrize('argv, live_orders, mode', [((), True, 'dry_run'), (('--execute',), False, 'dry_run'),
@@ -703,6 +748,19 @@ def test_an_alert_only_dca_records_what_it_would_buy_and_sends_nothing(tmp_path)
     state = LL.load_state(tmp_path, 'live-2')
     assert not [o for o in state['orders'] if 'dca' in o['source'].split('+')] and not state['dca']  # the 적립식 itself stays off
     assert run(tmp_path, at(10, 1), broker, execute_orders=True, dca=ALERT)['action'] != 'DCA_ALERT'  # once a day
+
+
+def test_an_order_refused_all_day_does_not_lose_the_alert(tmp_path):
+    # user approval 2026-11-25: the alert is no order, so at the last check (14:20) it no longer waits for one to go out
+    broker = Broker(cash=600_000)
+    plan = run(tmp_path, at(9, 41), broker, execute_orders=True, dca=ALERT)
+    broker.refuse = {o['code']: 'market data stale or market closed' for o in plan['orders']}
+    look = lambda h, m: run(tmp_path, at(h, m), broker, execute_orders=True, dca=ALERT)  # noqa: E731
+    assert look(10, 0)['execution'] == 'RETRY' and look(14, 19)['execution'] == 'RETRY'  # until then the order goes first
+    assert look(14, 20)['action'] == 'DCA_ALERT' and broker.sent == []
+    assert look(14, 21)['execution'] == 'RETRY'  # once, and the order is tried again
+    broker.refuse = {}
+    assert look(14, 22)['execution'] == 'ACKNOWLEDGED_NOT_FILLED'
 
 
 def test_the_alert_book_carries_over_to_the_next_day(tmp_path):

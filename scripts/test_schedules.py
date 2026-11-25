@@ -47,6 +47,17 @@ def test_codex_automations_of_this_repo_only(tmp_path):
     assert not S.runs_on(found[0], date(2026, 11, 20))  # paused: not on the day's timeline
 
 
+def test_utc_codex_rule_keeps_kst_weekdays_and_expiry(tmp_path):
+    file = tmp_path / '.codex/automations/check/automation.toml'
+    file.parent.mkdir(parents=True)
+    file.write_text(f'prompt = "{S.REPO}에서 확인"\nstatus = "ACTIVE"\n'
+                    'rrule = "FREQ=HOURLY;BYDAY=TU,WE,TH;BYHOUR=0,6;BYMINUTE=20;UNTIL=20261126T064000Z"\n')
+    found, = S.codex_jobs(tmp_path)
+    assert found['times'] == [(9, 20), (15, 20)]
+    assert S.starts_on(found, date(2026, 11, 26)) == [(9, 20), (15, 20)]
+    assert S.starts_on(found, date(2026, 12, 1)) == []
+
+
 def test_launchd_services_carry_their_times_and_always_on_services_none():
     jobs = {j['key']: j for j in S.launchd_jobs({'장기투자 실행기': '종료'})}
     longterm = jobs['com.vibetrading.vibe-longterm']

@@ -288,12 +288,15 @@ def stale(runtime):
 
 
 def check(runtime):
-    """Stored Jev realized total against the ledger's own: {'ledger', 'table', 'ok'}."""
+    """Stored Jev realized total against the ledger's own up to the table's build: {'ledger', 'table', 'ok'} (a sale after
+    it is not in the table until the next build, so it is no fault)."""
     import engine_compare as ec
     from engine_roles import ledger_root
+    stored = [r for r in rows(runtime) if r['book'] == 'jev']
+    built = max((r['built'] for r in stored), default='9')  # no table: everything is missing from it
     ledger = sum(r['pnl'] for r in ec.journal(ledger_root(Path(runtime), 'jev') / 'orders.sqlite3')
-                 if r['side'] == 'SELL' and r['pnl'] is not None)
-    table = sum(r['realized_day'] or 0 for r in rows(runtime) if r['book'] == 'jev')
+                 if r['side'] == 'SELL' and r['pnl'] is not None and r['time'] <= built)
+    table = sum(r['realized_day'] or 0 for r in stored)
     return {'ledger': round(ledger), 'table': round(table), 'ok': abs(ledger - table) < 1}
 
 

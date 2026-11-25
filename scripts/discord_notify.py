@@ -91,7 +91,7 @@ def won(value):
 EXIT_KO = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market_rebound': '지수 반등 인버스 청산',  # 2026-11-20
     'breakeven_stop': '본전 손절', 'take_profit': '익절', 'stop_loss': '손절', 'trailing_stop': '추적 손절',
            'session_flatten': '장 마감 정리', 'regime_trim': '국면 절반 매도', 'ipo_time_stop': '신규주 시간 손절',
-           'direction_switch': '방향 전환 매도'}
+           'direction_switch': '방향 전환 매도', 'fade_exit': '매수세 약화 익절'}
 
 
 def sell_head(route, pnl, closed=False):
@@ -133,18 +133,9 @@ def fill_line(row, names, label='', route='', pnl=None, ret=None, closed=False):
 
 
 def names_map():
-    from etf_universe import NAMES, SYMBOLS  # the 7 ETFs Jev trades (114800 KODEX 인버스 ...)
-    names = {code: NAMES[key] for key, code in SYMBOLS.items()}
-    names.update({a[0]: a[1] for a in L.ASSETS.values()})  # the long-term ETFs (379810 KODEX 미국나스닥100 ...)
-    for file, key in (('movers.json', 'rows'), ('watchlist.json', 'stocks')):
-        try:
-            data = json.loads((HOME / 'shared-etf-paper' / file).read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            continue
-        for code, row in ((data or {}).get(key) or {}).items():
-            if isinstance(row, dict) and row.get('name'):
-                names.setdefault(code, row['name'])
-    return names
+    import stock_names
+    stock_names.learn(HOME)  # a fill nobody named yet (a new listing, a stock that left the scan)
+    return stock_names.load(HOME)
 
 
 BOOK_LABELS = {**L.BOOK_LABELS, L.CONTRIBUTED: '적립 누계'}

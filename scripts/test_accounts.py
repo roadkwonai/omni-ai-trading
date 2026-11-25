@@ -134,7 +134,7 @@ class LiveLimitTests(unittest.TestCase):
         live = {'kind': 'live', 'engine': 'jev', 'auto': True,
                 'budget': {'capital_krw': 3_000_000, 'order_price_max_krw': 300_000, 'daily_loss_krw': 20_000}}
         self.assertEqual(acc.problems({**live, 'limits': {'order_max_krw': 2_000_000}}), [])  # above the old 1,000,000
-        self.assertTrue(acc.problems({**live, 'budget': {**live['budget'], 'daily_loss_krw': 30_000}}))  # loss cap unchanged
+        self.assertTrue(acc.problems({**live, 'budget': {**live['budget'], 'daily_loss_krw': 30_001}}))  # the approved ceiling (user 2026-11-25)
 
 
 class LiveOrderSwitchTests(unittest.TestCase):
@@ -246,3 +246,11 @@ def test_the_paper_account_matches_a_live_accounts_capital_and_restores(tmp_path
     A.set_match('live-1', on=False, path=path)
     back = A.load(path)['paper-shared']
     assert back['budget'] == paper['budget'] and back['limits'] == paper['limits'] and back.get('match_live') is None
+
+
+def test_a_live_account_may_set_its_daily_loss_limit_up_to_30000():
+    # user decision 2026-11-25
+    live = {'kind': 'live', 'engine': 'jev', 'auto': True, 'budget': {'capital_krw': 500_000, 'order_price_max_krw': 300_000, 'daily_loss_krw': 30_000}}
+    assert not a.problems(live)
+    assert a.problems({**live, 'budget': {**live['budget'], 'daily_loss_krw': 30_001}})
+    assert a.DEFAULT_BUDGET['live']['daily_loss_krw'] == 20_000

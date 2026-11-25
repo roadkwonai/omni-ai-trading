@@ -25,7 +25,9 @@ from src.tools.private_db import private_file
 
 KST = ZoneInfo('Asia/Seoul')
 SYMBOL = '114800'
-LIMIT = 20_000
+LIMIT = 20_000  # daily loss when an account sets none
+# User decision 2026-11-25: an account may set its daily loss limit up to this (the live 1 account asked for 30,000).
+LIMIT_MAX = 30_000
 MAX_PRICE = 2_000_000  # hard ceiling for one share (user decision 2026-11-12); the account setting may only lower it
 # User decision 2026-11-12: like the paper order guard, no daily buy count; at most 5 distinct symbols bought per day
 # (re-buying a symbol already bought today does not count). Replaces the earlier one-buy-per-day limit.
@@ -204,12 +206,12 @@ class LiveOrderGuard:
 
     def observe_loss(self, pnl, now, limit=LIMIT, realized_only=False):
         """Latch the day's halt once the loss reaches the account's own limit (accounts budget.daily_loss_krw, user setting);
-        it can only tighten the approved LIMIT."""
+        it can only tighten the approved LIMIT_MAX."""
         if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
             raise LiveOrderBlocked('clock unavailable')
         day = now.astimezone(KST).strftime('%Y%m%d')
         loss = _loss(pnl, realized_only)
-        cap = min(limit, LIMIT) if type(limit) is int and limit > 0 else LIMIT
+        cap = min(limit, LIMIT_MAX) if type(limit) is int and limit > 0 else LIMIT
         with closing(self._db()) as db, db:
             db.execute('BEGIN IMMEDIATE')
             if loss >= cap:

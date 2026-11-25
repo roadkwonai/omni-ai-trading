@@ -24,7 +24,7 @@ EVENT_TYPES = {'holding_quote', 'started', 'stopped', 'decision', 'market_contex
                'oversold_atr_status', 'oversold_research_failure', 'oversold_v2_research_failure', 'vibe_decision_intent', 'oversold_v2_gate_error', 'careful_reentry_review', 'pick_cooldown', 'ipo_seen'}  # every journal_event name: an unknown one stops the runner (11/17 11:46 vibe)
 
 REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_reentry_no_session', 'careful_reentry_jev_wait',
-    'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'strength_trend', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
+    'careful_reentry_review_error', 'decision_wait', 'invalid_decision', 'confidence_below_threshold', 'invalid_bars', 'entry_conditions_met', 'strength_change_out_of_range', 'strength_weak_tape', 'trend_not_rising', 'jev_error', 'jev_model_mismatch', 'jev_invalid', 'jev_wait', 'jev_low_confidence', 'model_disagreement', 'order_limit', 'position_limit', 'learning_filter', 'insufficient_buying_power', 'stale_model_signal', 'stale_market_bars', 'signal_or_session_invalid', 'ai_settings_unavailable', 'models_disabled', 'opposite_direction_holding', 'order_guard_refused', 'single_order_limit', 'split_plan_holding', 'split_limit', 'split_history_unavailable', 'market_bars_unavailable', 'auto_off', 'vibe_no_buy', 'entry_window_closed', 'downtrend_no_averaging_down', 'stop_inside_spread', 'take_profit_all', 'stop_loss', 'breakeven_stop', 'session_flatten', 'ipo_time_stop', 'fade_exit', 'averaging_down_unknown', 'quote_not_fresh', 'trailing_stop', 'trend_upgrade', 'strength_trend', 'not_trend_profile', 'regime_not_rising', 'not_in_profit', 'overnight_limit', 'market_closed_next_day', 'trend_rising_in_profit', 'flows_not_supporting', 'volume_not_high', 'jev_not_supportive', 'closing_trade_supported', 'breadth_not_broad', 'not_first_target', 'weak_close', 'not_uptrend', 'vibe_negative', 'market_unconfirmed', 'direction_not_confirmed', 'volume_not_rising', 'losing_streak_cooldown', 'swing_continued', 'swing_days_exceeded', 'jev_selling', 'transient_read_failure', 'weak_market_targets', 'quantity_or_cash_limit',
     'add_count_limit', 'add_not_better', 'scale_signal_disabled', 'projected_exit', 'engine_unavailable', 'manual_after_flatten',
     'market_not_falling', 'opening_observation_only', 'quote_unavailable', 'regime_reversal', 'take_profit_history_unavailable',
     'oversold_hold_days',
@@ -33,7 +33,7 @@ REASONS = frozenset(('careful_reentry_chase', 'careful_reentry_weak', 'careful_r
     'losing_streak_history_unavailable', 'oversold_limit', 'ipo_limit', 'direction_switch'))  # every code the runner journals (test: runner_codes)
 
 
-STRENGTH_WHYS = {'no_strength_candidate', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit',
+STRENGTH_WHYS = {'no_strength_candidate', 'strength_weak_tape', 'strength_change_out_of_range', 'trend_not_rising', 'reentry_below_last_exit',
                  'one_share_over_buy', 'pick_cooldown', 'not_in_movers', 'held', 'jev_below_min', 'bars_missing', 'picked'}
 
 
@@ -248,7 +248,7 @@ def sanitize(event):
             title = re.sub(r'(?i)\b(?:sk|jv|api)[-_][A-Za-z0-9_-]{8,}\b', '[redacted]', title)
             title = re.sub(r'(?<!\d)\d(?:[\d -]{7,}\d)(?!\d)', '[redacted]', title)
             safe_news = {'title': title, 'published': published.isoformat()}
-            if item.get('source') in ('google_news_rss', 'bing_news_rss', 'naver_finance_news'):
+            if item.get('source') in ('google_news_rss', 'bing_news_rss', 'naver_finance_news', 'daum_finance_news', 'hankyung_rss'):
                 safe_news['source'] = item['source']
                 publisher = item.get('publisher')
                 if (isinstance(publisher, str) and 1 <= len(publisher) <= 80 and publisher.isprintable()

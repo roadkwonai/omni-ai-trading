@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 import math
 import json
@@ -193,7 +194,13 @@ def display_prices(read, codes, ttl):
         got = {}
         try:
             import kiwoom_data
-            for s in kiwoom_data.call('ka10095', {'stk_cd': '|'.join(codes[:100])}, 'atn_stk_infr', max_pages=1):
+            ask = lambda: kiwoom_data.call('ka10095', {'stk_cd': '|'.join(codes[:100])}, 'atn_stk_infr', max_pages=1)  # noqa: E731
+            try:
+                answer = ask()
+            except Exception:  # noqa: BLE001 - once more: one Kiwoom call stands for a dozen NH ones
+                time.sleep(0.5)
+                answer = ask()
+            for s in answer:
                 code = str(s.get('stk_cd') or '').split('_')[0]  # '090430_AL' (KRX+NXT) -> '090430'
                 price, base, opened, high, volume = (abs(kiwoom_data.num(s.get(k)) or 0)
                                                      for k in ('cur_prc', 'base_pric', 'open_pric', 'high_pric', 'trde_qty'))
@@ -264,20 +271,69 @@ def snapshot_due(kept, now):
     return kept is None or (now - kept['time']).total_seconds() > min(refresh_s(), SNAPSHOT_MAX_AGE)
 
 
+SNAPSHOT_WAIT_S = 10  # how long a screen waits for another screen's read of the same account
 SHARED_SNAPSHOT_S = 20  # seconds a broker snapshot one session fetched serves the others (2026-11-20 NH call audit)
 
 
-def shared_snapshot(kind, account, fetch, fresh=False):
+def shared_snapshot(kind, account, fetch, fresh=False, max_age=SHARED_SNAPSHOT_S):
     """A display-only broker snapshot shared by every session of this dashboard: each open browser tab kept its own and
     re-read the same balance and orders on its own timer (two tabs doubled the dashboard's NH calls). `fresh` (a refresh
     button) always reads again. Never before an order."""
-    key = ('broker-snapshot', kind, account)
-    hit = _read_cache().get(key)
-    if not fresh and hit and time.monotonic() - hit[0] < SHARED_SNAPSHOT_S:
-        return hit[1]
-    got = fetch()
-    _read_cache()[key] = (time.monotonic(), got)
-    return got
+    key, asked = ('broker-snapshot', kind, account), time.monotonic()
+    lock = _read_cache().setdefault(('lock', *key), threading.Lock())
+    held = lock.acquire(timeout=SNAPSHOT_WAIT_S)  # one read of an account at a time; a stuck one does not hold the others
+    try:
+        hit = _read_cache().get(key)
+        if hit and time.monotonic() - hit[0] < max_age and (not fresh or hit[0] > asked):  # read while this one waited
+            return hit[1]
+        got = fetch()
+        _read_cache()[key] = (time.monotonic(), got)
+        return got
+    finally:
+        if held:
+            lock.release()
+
+
+MOVED_EVERY_S = 5  # while a live order is on its way (user 2026-11-25: its fill and result showed up to 50 s late)
+
+
+def live_moved(snapshot, latest):
+    """The kept live snapshot misses an order on its way: one is still open in it, or the mirror sent or settled one since."""
+    if not snapshot:
+        return False
+    if any(type(o.get('미체결수량')) in (int, float) and o['미체결수량'] > 0 for o in snapshot['orders']):
+        return True
+    try:
+        return latest['action'] in ('BUY', 'SELL', 'RECONCILED') and datetime.fromisoformat(latest['time']) > snapshot['time']
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def order_progress(snapshot):
+    return [(o.get('주문번호'), o.get('체결수량'), o.get('미체결수량'), o.get('취소수량')) for o in snapshot['orders']]
+
+
+def watch_live_order(read, number, key, snapshot, state):
+    """A look at the mirror's local record every MOVED_EVERY_S; only while an order is on its way is the broker read again, and
+    the page drawn again when that brought something new."""
+    armed = False
+
+    @st.fragment(run_every=f'{MOVED_EVERY_S}s')
+    def look():
+        nonlocal armed
+        if not armed:
+            armed = True
+            return
+        if dialogs.OPEN in st.session_state or not live_moved(snapshot, follow_state(key)):
+            return
+        try:
+            got = shared_snapshot('live', number, lambda: live_broker_snapshot(read, number, datetime.now(KST)), max_age=MOVED_EVERY_S - 1)
+        except Exception:  # noqa: BLE001 - the regular refresh shows the failure
+            return
+        if order_progress(got) != order_progress(snapshot):
+            st.session_state[state] = got
+            st.rerun()
+    look()
 
 
 def shared_etf_broker_snapshot(read, paper, account, now):
@@ -431,9 +487,12 @@ def realized_by_symbol(db, day):
 def books_from_rows(rows, day):
     """realized_by_symbol over (time, symbol, side, qty, price) rows; a sale of shares bought before the rows began has
     no known cost, so only the part covered by recorded buys counts as realized."""
+    from mirror_gap import cost as trade_cost
     books = {}
     for stamp, symbol, side, qty, price in rows:
-        book = books.setdefault(symbol, {'qty': 0, 'avg': 0.0, 'realized': 0.0, 'today': 0.0, 'buys': 0, 'sells': 0, 'sales': []})
+        book = books.setdefault(symbol, {'qty': 0, 'avg': 0.0, 'realized': 0.0, 'today': 0.0, 'buys': 0, 'sells': 0, 'sales': [], 'cost_today': 0.0})
+        if str(stamp).startswith(day):
+            book['cost_today'] += trade_cost([{'symbol': symbol, 'side': str(side).upper(), 'qty': qty, 'price': price}])
         book['qty'], book['avg'], cost, pnl, _ = apply_fill(book['qty'], book['avg'], side, qty, price)
         book['buys' if side == 'BUY' else 'sells'] += 1
         if cost is not None:  # a covered sale
@@ -460,10 +519,14 @@ def watchlist_snapshot():
 
 
 def stock_names():
-    """Display names by code: the ETF universe, the latest scan (movers.json) and the watchlist."""
-    rows = {**((movers_snapshot() or {}).get('rows') or {}), **((watchlist_snapshot() or {}).get('stocks') or {})}
-    return {**{code: ETF_NAMES[key] for key, code in ETF_CODES.items()},
-            **{code: row.get('name', code) for code, row in rows.items() if isinstance(row, dict)}}
+    """Display names by code (scripts/stock_names.py): ETFs, learned names, new listings, the latest scan, the watchlist."""
+    import stock_names as names
+    return names.load(get_runtime_root() / 'nhplug')
+
+
+def held_targets(holdings, names, shown):
+    """{label: code} of held stocks the quote list does not show yet (bought outside the watchlist, like a new listing)."""
+    return {f"{names.get(r['symbol'], r['symbol'])} ·보유": r['symbol'] for r in holdings if r['symbol'] not in shown.values()}
 
 
 HOLDING_STATES = {'보유': lambda row: (row.get('보유수량') or 0) > 0, '전체': lambda row: True,
@@ -482,6 +545,28 @@ def realized_in(book, prefix):
     return sum(p for p, _ in sales), sum(c for _, c in sales)
 
 
+def mirror_gap_view(key):
+    """How far this live account's fills were from the paper's, day by day (scripts/mirror_gap.py)."""
+    import mirror_gap
+    days = mirror_gap.gap(get_runtime_root() / 'nhplug', key)
+    if not days:
+        st.info('아직 비교할 실계좌 체결이 없습니다.')
+        return
+    st.caption('비용 전 손익입니다. 가격 차이는 같은 종목·방향의 직전 모의 체결가와 비교하며 +면 실계좌가 유리했습니다. 지연은 모의 체결부터 실계좌 주문까지의 중앙값이고, '
+               '비용은 추정값입니다. 매입 수량이 다르면 손익 차이와 가격 차이의 합이 맞지 않을 수 있습니다.')
+    won = lambda v: f'{v:+,}원'
+    seconds = lambda v: '—' if v is None else f'{v}초'
+    st.dataframe([{'거래일': d['day'], '모의 손익': won(d['paper_pnl']), '실계좌 손익': won(d['live_pnl']), '매수 가격 차이': won(d['buy_slip']),
+                   '매도 가격 차이': won(d['sell_slip']), '따라가지 않은 모의 손익': won(d['not_followed_pnl']), '실계좌 비용(추정)': won(-d['live_cost']),
+                   '매수 지연': seconds(d['buy_delay_s']), '매도 지연': seconds(d['sell_delay_s']), '미체결 취소': d['cancelled'],
+                   '손실 정지': d['halted'] or '—'} for d in days], hide_index=True, alt='날짜별 모의와 실계좌 차이')
+    names = stock_names()
+    with st.expander(f"{days[0]['day']} 종목별"):
+        st.dataframe([{'종목': names.get(r['symbol'], r['symbol']), '모의 손익': won(r['paper_pnl']), '실계좌 손익': won(r['live_pnl']),
+                       '매수 가격 차이': won(r['buy_slip']), '매도 가격 차이': won(r['sell_slip']), '따라 삼': '예' if r['followed'] else '아니요'}
+                      for r in days[0]['rows']], hide_index=True, alt='종목별 모의와 실계좌 차이')
+
+
 def realized_card(books, today):
     """The desk's 실현손익 card (user 2026-11-18): today's realized P&L, with this month and since the records start."""
     if books is None:
@@ -489,10 +574,11 @@ def realized_card(books, today):
                 'help': '로컬 체결 원장을 읽지 못해 실현손익을 계산하지 못했습니다.'}
     total = lambda prefix: round(sum(realized_in(book, prefix)[0] for book in books.values()))
     day, month, all_ = total(today.isoformat()), total(today.isoformat()[:7]), total(None)
+    costs = round(sum(book.get('cost_today', 0) for book in books.values()))
     return {'label': '실현손익', 'value': f'{day:+,}원', 'tone': sc.signed(day),
             'icon': 'trending_up' if day > 0 else 'trending_down' if day < 0 else 'trending_flat',
-            'sub': f'이번 달 {month:+,}원 · 누적 {all_:+,}원',
-            'help': '판 주식의 손익(체결가 기준, 수수료·세금 미반영)입니다. 큰 값은 오늘, 아래는 이번 달과 이 계좌 기록 시작부터의 누적입니다. '
+            'sub': (f'비용 추정 뒤 {day - costs:+,}원 · ' if costs else '') + f'이번 달 {month:+,}원 · 누적 {all_:+,}원',
+            'help': '판 주식의 손익(체결가 기준, 수수료·세금 미반영)입니다. 비용 추정은 오늘 체결의 수수료와 매도세 추정값(ETF는 세금 없음)이며 증권사 확정값이 아닙니다. 큰 값은 오늘, 아래는 이번 달과 이 계좌 기록 시작부터의 누적입니다. '
                     '전체 계좌 합은 종합 현황의 "오늘 실현손익 · 전체 계좌"에서 봅니다.'}
 
 
@@ -2095,8 +2181,10 @@ def live_account_view(read, key, record, number, configured, events):
                           shadow=result, engine=record['engine'])
         st.caption('주황 원: 가상 매수 · 자주 원: 가상 매도(실주문 아님) · 초록/빨강 화살표: 증권사 체결(주문 시각 기준) · '
                    '자세한 읽는 법은 오른쪽 위 "화면 안내"')
-        virtual, orders_tab, sell_tab, runner_tab, settings_tab = st.tabs(['메인 엔진 가상 실행', '당일 주문·체결', '즉시 매도',
-                                                                            '실행기 기록', '계좌 설정'])
+        virtual, orders_tab, sell_tab, gap_tab, runner_tab, settings_tab = st.tabs(['메인 엔진 가상 실행', '당일 주문·체결', '즉시 매도',
+                                                                                     '모의와 차이', '실행기 기록', '계좌 설정'])
+        with gap_tab:
+            mirror_gap_view(key)
         with sell_tab:
             live_quick_sell(number, key, record, f'live_quick_{key}')
         with virtual:
@@ -2109,6 +2197,8 @@ def live_account_view(read, key, record, number, configured, events):
         with orders_tab:
             if snapshot:
                 orders_view(snapshot, books, now.strftime('%Y-%m-%d'))
+        if krx_open():  # auto refresh on or off: nothing is asked while no order is on its way
+            watch_live_order(read, number, key, snapshot, state)
         with runner_tab:
             st.caption('미러 실행기(nh_live_follow) 최근 기록입니다. 매분 엔진 원장과 증권사 잔고를 비교해 계획을 남깁니다.')
             from engine_compare import recent_events as journal_tail
@@ -2931,6 +3021,8 @@ STRATEGY_HELP = {
     'weak_half_pct': ('약세장(하락장이면서 오늘 강세가 아닌 날)에는 늦어도 이 수익에서 절반을 팝니다. 데이터 목표가 더 낮으면 그 값을 씁니다.',
                       '하락장에서는 오른 만큼을 빨리 확정하는 것이 중요합니다. 절반을 판 뒤 나머지는 본전 아래로 내려오면 팝니다. 기본 1.'),
     'weak_all_pct': ('약세장에서 남은 수량을 늦어도 이 수익에서 모두 팝니다.', '기본 2. 절반 익절보다 커야 합니다.'),
+    'fade_exit_pct': ('하락·횡보장에서 산 관심종목 강도 종목이 이 수익 이상이고 최근 끝난 1분봉 3개의 거래량이 매도 우위면 전량 팝니다.',
+                      '기본 0.8, 0이면 끔. 낮추면 작은 수익도 챙기지만 더 오를 종목을 일찍 팝니다.'),
     'direction_switch': ('Jev가 반대 방향(예: 롱 보유 중 인버스)을 진입 기준 이상으로 고르고, 보유 종목이 평균가 아래이며 시장이 그 보유에 불리하면(약세장) 보유 종목을 정리합니다.',
                          '1이면 켬, 0이면 끔. 정리 뒤 다음 주기부터 새 방향 진입을 검토합니다. 이익 중인 보유는 정리하지 않습니다.'),
     'entry_volume_ratio': ('모든 진입 경로(Jev · 관심종목 강도 · 신규주)에서, 최근 5분 거래량이 그 전 5분의 몇 배 이상이어야 사는지입니다. 0이면 거래량을 보지 않습니다.',
@@ -3527,7 +3619,7 @@ def strategy_form(events, prefix=''):
     steps = {'oversold_market_drop_pct': 0.5, 'entry_confidence': 0.05, 'sell_confidence': 0.05, 'overnight_max_manwon': 50.0, 'swing_max_days': 1.0,
              'strength_top_n': 1.0, 'strength_min_prob': 0.05, 'strength_change_min': 0.5, 'strength_change_max': 1.0,
              'ipo_days': 1.0, 'ipo_size_pct': 10.0, 'ipo_near_high_pct': 0.5, 'ipo_stop_pct': 0.5, 'ipo_half_pct': 0.5, 'ipo_trail_pct': 0.5,
-             'weak_half_pct': 0.1, 'weak_all_pct': 0.1, 'direction_switch': 1.0, 'entry_volume_ratio': 0.1,
+             'weak_half_pct': 0.1, 'weak_all_pct': 0.1, 'fade_exit_pct': 0.1, 'direction_switch': 1.0, 'entry_volume_ratio': 0.1,
              'oversold_v2_on': 1.0, 'oversold_v2_from_hhmm': 5.0, 'oversold_v2_hold_days': 1.0, 'oversold_v2_size_pct': 10.0,
              'oversold_v2_max_new': 1.0, 'oversold_v2_stop_pct': 0.5, 'oversold_v2_tp_pct': 1.0, 'oversold_v2_until_hhmm': 5.0,
              'oversold_v2_jev_sell_on': 1.0, 'oversold_v2_trail_at_pct': 0.5, 'oversold_v2_trail_pct': 0.5,
@@ -3538,7 +3630,7 @@ def strategy_form(events, prefix=''):
     groups = [('진입 (매수 조건)', '#a855f7', 'login', ['entry_confidence', 'entry_volume_ratio', 'direction_switch']),
               ('방어형 익절 · 손절', '#ef4444', 'savings', ['take_profit_half_pct', 'take_profit_all_pct', 'stop_loss_pct']),
               ('분할 추가 매수', '#f59e0b', 'stacked_line_chart', ['add_step_pct']),
-              ('추세형 · 약세장', '#3b82f6', 'trending_up', ['trend_half_pct', 'trend_trail_pct', 'weak_half_pct', 'weak_all_pct']),
+              ('추세형 · 약세장', '#3b82f6', 'trending_up', ['trend_half_pct', 'trend_trail_pct', 'weak_half_pct', 'weak_all_pct', 'fade_exit_pct']),
               ('Jev 매도 · 이월 · 스윙', '#64748b', 'nightlight', ['sell_confidence', 'overnight_max_manwon', 'swing_max_days']),
               ('관심종목 강도 진입', '#22c55e', 'local_fire_department', ['strength_top_n', 'strength_min_prob', 'strength_change_min', 'strength_change_max']),
               ('신규주 진입', '#06b6d4', 'fiber_new', ['ipo_days', 'ipo_size_pct', 'ipo_near_high_pct', 'ipo_stop_pct', 'ipo_half_pct', 'ipo_trail_pct']),
@@ -3675,6 +3767,7 @@ def rules_card(settings, status):
                       f"목표 데이터가 없으면 +{settings['take_profit_half_pct']:g}% 절반 · +{settings['take_profit_all_pct']:g}% 나머지  \n"
                       f":blue[▼ **−{settings['stop_loss_pct']:g}%** 전량 손절] · Jev 매도 신뢰도 **{settings['sell_confidence']:.2f} 이상** 전량  \n"
                       f"**약세장**(하락장·강세 아닌 날): 늦어도 **+{settings['weak_half_pct']:g}% 절반 · +{settings['weak_all_pct']:g}% 전량**, 추가 매수 없음"
+                      + (f" · 하락·횡보장 강도 종목은 **+{settings['fade_exit_pct']:g}%** 이상에서 매수세가 꺾이면 전량" if settings.get('fade_exit_pct') else '')
                       + (" · Jev가 반대 방향을 고르면 손실 중인 보유 정리" if settings['direction_switch'] else '') + "  \n"
                       "절반 익절 뒤 나머지는 **매입가(본전)** 아래로 내려가면 전량  \n"
                       f"**추세형**(상승장·지수 강세일): +{settings['trend_half_pct']:g}% 절반, 나머지는 고점 대비 "
@@ -3717,9 +3810,9 @@ def portfolio_overview(snapshot, events, fills, now, books=None, live_stop_pct=N
     aggregate = snapshot.get('aggregate')
     cards = []
     if aggregate is not None:
-        rate = aggregate['수익률(%)']
-        cards.append({'label': '평가손익', 'value': f"{aggregate['평가손익']:+,.0f}원", 'sub': f'수익률 {rate:+.2f}%', 'tone': sc.signed(rate),
-                      'icon': 'trending_up' if rate > 0 else 'trending_down' if rate < 0 else 'trending_flat',
+        pnl, rate = aggregate['평가손익'], aggregate['수익률(%)']
+        cards.append({'label': '평가손익', 'value': f'{pnl:+,.0f}원', 'sub': f'수익률 {rate:+.2f}%', 'tone': sc.signed(pnl),
+                      'icon': 'trending_up' if pnl > 0 else 'trending_down' if pnl < 0 else 'trending_flat',
                       'help': '증권사 응답의 평가손익입니다. 수익은 빨강, 손실은 파랑입니다. 수수료·세금은 빠져 있습니다.'})
     else:
         cards.append({'label': '평가손익', 'value': '확인 불가', 'tone': 'alert', 'icon': 'error', 'help': '증권사 합계가 없어 계산하지 못했습니다.'})
@@ -4351,6 +4444,70 @@ def chart_markers(rows, fills, bars, group, symbol, *, show_jev=True):
     return sorted(markers, key=lambda marker: marker['time'])
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def watchlist_picks(day):
+    """[(time, selected codes, {code: probability})] of one day's watchlist picks, oldest first."""
+    import research_store
+    try:
+        with ro_connect(research_store.ROOT / 'market-research.sqlite3') as db:
+            rows = db.execute("SELECT time, json_extract(payload, '$.selected'), json_extract(payload, '$.probabilities') FROM snapshots "
+                              "WHERE kind = 'watchlist' AND time >= ? AND time < ? ORDER BY time", (day.isoformat(), (day + timedelta(days=1)).isoformat()))
+            return [(at, json.loads(selected or '[]'), json.loads(probabilities or '{}')) for at, selected, probabilities in rows]
+    except (OSError, sqlite3.Error, ValueError):
+        return []
+
+
+def stock_markers(events, picks, bars, symbol):
+    """Squares, never arrows, for what buys a stock: Jev's watchlist pick of it and its passes of the strength conditions.
+    Text goes on a new pick and on a pass that does not follow another within three minutes."""
+    times = sorted(bar['time'] for bar in bars)
+    markers, held, last = [], False, None
+
+    def mark(stamp, text, position, color, late=False):
+        minute = int(stamp.replace(second=0, microsecond=0).timestamp())
+        at = next((t for t in times if t >= minute), None)
+        if at is not None and (late or at == minute):
+            markers.append({'time': at, 'position': position, 'color': color, 'shape': 'square', 'size': 1,
+                            'text': text + ('' if not text or at == minute else f' ({stamp.astimezone(KST):%H:%M})')})
+    for at, selected, probabilities in picks:
+        stamp = event_time(at)
+        if stamp is None:
+            continue
+        value = probabilities.get(symbol)
+        score = f'{value:.2f}' if type(value) in (int, float) else ''
+        if symbol in selected:
+            mark(stamp, score if held else f'선정 {score}'.strip(), 'aboveBar', '#64748b', late=True)
+        held = symbol in selected
+    for event in events:
+        if not isinstance(event, dict) or event.get('event') != 'watchlist_strength' or event.get('symbol') != symbol:
+            continue
+        stamp = event_time(event.get('time'))
+        if stamp is None:
+            continue
+        value = event.get('confidence')
+        fresh = last is None or (stamp - last).total_seconds() > 180
+        mark(stamp, ('강도 통과' + (f' {value:.2f}' if type(value) in (int, float) else '')) if fresh else '', 'belowBar', '#0d9488')
+        last = stamp
+    return sorted(markers, key=lambda m: m['time'])
+
+
+def choice_line(events, group, day, names):
+    """Jev's latest entry choice of the day and this symbol's share of it: a symbol without marks was asked about, not skipped."""
+    for event in reversed(events):
+        if not isinstance(event, dict) or event.get('event') != 'jev_shadow':
+            continue
+        stamp = event_time(event.get('time'))
+        if stamp is None or stamp.astimezone(KST).date() != day:
+            return ''
+        candidate = (event.get('jev') or {}).get('candidate') or {}
+        choice, probabilities = candidate.get('choice'), candidate.get('probabilities') or {}
+        score = lambda key: f' {probabilities[key]:.2f}' if type(probabilities.get(key)) in (int, float) else ''
+        label = '대기' if choice == 'WAIT' else ETF_NAMES.get(choice) or names.get(choice, choice)
+        mine = ('이 종목이 선택됨' if choice == group else f'이 종목{score(group)}' if score(group) else '이 종목은 선택지에 없음')
+        return f'{stamp.astimezone(KST):%H:%M} Jev 매수 선택 {label}{score(choice)} · {mine} (기회를 하나만 고르는 매분 판단)'
+    return ''
+
+
 def tradingview_chart(bars, markers, basis=None, *, averages=None, volume=True, intraday=True, visible=120, levels=None, alt='분봉과 AI 의견 및 확인된 체결',
                       volume_pane=False):
     """Candles with markers, optional moving averages and a volume pane; opens on the latest `visible` bars. levels: horizontal
@@ -4566,7 +4723,7 @@ def paper_trade_chart(read, snapshot, refresh, auto, preferred=None, fills=None,
     show_jev = not longterm  # Jev does not trade a long-term account
     if minute and show_jev:
         show_jev = st.toggle('Jev 판단 표식', value=True, key=f'{key}_show_jev',
-                             help='차트의 Jev 의견만 표시하거나 숨깁니다. 체결과 가상 매매 표식은 유지됩니다.')
+                             help='차트의 Jev 의견과 개별주의 선정·강도 통과 표식을 표시하거나 숨깁니다. 체결과 가상 매매 표식은 유지됩니다.')
     observed = snapshot.get('time') if isinstance(snapshot, dict) else None
     if isinstance(snapshot, dict) and not (isinstance(observed, datetime) and observed.tzinfo is not None
                                            and 0 <= (now - observed).total_seconds() <= SNAPSHOT_MAX_AGE):
@@ -4636,11 +4793,15 @@ def paper_trade_chart(read, snapshot, refresh, auto, preferred=None, fills=None,
         last = datetime.fromtimestamp(bars[-1]['time'], KST)
         status.append(f"마지막 {timeframe}봉 {last:%m/%d %H:%M}" if TIMEFRAMES[timeframe][1] else f"마지막 {timeframe}봉 {last:%Y-%m-%d}")
         st.caption(' · '.join(status))
+        if minute and show_jev and (line := choice_line(events, group, now.date(), known)):
+            st.caption(line)
         if basis:
             st.caption('손절선은 표시된 계획과 시황 기준의 참고값입니다. 본전·추적 청산 및 주문·체결 상태는 별도로 확인합니다.')
         if minute:
             markers = chart_markers(rows, fills or [], bars, group, symbol, show_jev=show_jev) + virtual_markers(
                 (shadow or {}).get('trades', extra or []), bars, symbol)
+            if show_jev and group == symbol:  # a stock; the ETFs are Jev's own minute choices
+                markers += stock_markers(events, watchlist_picks(now.date()), bars, symbol)
         else:
             markers = containing_markers(fills, bars, symbol) + virtual_markers(
                 (shadow or {}).get('trades', extra or []), bars, symbol, minute=False)
@@ -4652,6 +4813,7 @@ def paper_trade_chart(read, snapshot, refresh, auto, preferred=None, fills=None,
             st.warning('마지막 분봉이 4분보다 오래돼 현재 가격으로 사용할 수 없습니다.')
         with st.expander('차트 보는 법 · 가격 데이터'):
             st.caption('보라 ▲(아래) Jev 매수의견 · 분홍 ▼(위) 보유분 Jev 매도의견 · 파랑 ● Decision · 초록 ↑/빨강 ↓ 체결 확인 · 주황 ● 가상 재현 매수 / 자주 ● 가상 재현 매도(실체결 아님). '
+                       '개별주는 회색 ■(위) 관심종목 선정(숫자는 선정 확률) · 청록 ■(아래) 강도 조건 통과를 표시합니다. 둘 다 매수·체결이 아니며 선정 확률은 수익 확률이 아닙니다. '
                        f"기준(매수 {strategy_settings()[0]['entry_confidence']:.2f}·매도 {strategy_settings()[0]['sell_confidence']:.2f})을 넘은 의견은 '신뢰도 충족'으로 표시합니다. "
                        "'진입 통과·차단'은 같은 판단의 진입 확인 기록이며 주문·체결을 뜻하지 않습니다. 주문이 차단되면 별도 표시하고, 실제 거래는 체결 확인 표식으로 구분합니다. "
                        '그 밖의 의견은 5분마다 신뢰도 숫자를 표시합니다. '
@@ -5337,11 +5499,14 @@ def live_every(now=None):
     """run_every of the fragments that poll NH quotes and balances: the refresh interval while KRX trades (09:00~15:30
     on a KRX trading day) with auto refresh on, else None. Polling every 30 s through evenings and holidays made the
     dashboard NH's top caller beside the runners' rate-limit errors."""
+    return f'{refresh_s()}s' if auto_on() and krx_open(now) else None
+
+
+def krx_open(now=None):
     from nh_paper_isolated import is_trading_day
     import session_times
     now = now or datetime.now(KST)
-    trading = session_times.MARKET_OPEN <= f'{now:%H:%M}' < '15:30' and is_trading_day(now.date())
-    return f'{refresh_s()}s' if auto_on() and trading else None
+    return session_times.MARKET_OPEN <= f'{now:%H:%M}' < '15:30' and is_trading_day(now.date())
 
 
 def prefs_path():
@@ -5493,6 +5658,10 @@ def main():
             # 7 ETFs, then the selected account's watchlist (·Jev selected, ·추가 added by hand)
             targets = {**{name.removeprefix('KODEX '): code for name, code in SYMBOLS.items()},
                        **{f'{name} ·{source}': code for code, name, source in account_watchlist(picked)}}
+            if records[picked].get('engine') == 'jev':  # bought outside the watchlist (a new listing): shown while held
+                import trading_positions
+                held = (trading_positions.snapshot(get_runtime_root() / 'nhplug').get('jev') or {}).get('holdings') or []
+                targets |= held_targets(held, stock_names(), targets)
             rows, failed = [], []
             # reused for one refresh interval (other tabs and sessions rerun in between); the button asks again
             quotes = display_prices(read, list(dict.fromkeys(targets.values())), 1 if fresh else refresh_s())
@@ -5987,7 +6156,7 @@ def ai_record_tab(ai_tab, engine, read):
                 st.dataframe([regime], hide_index=True)
             st.subheader('TradingView 판단·체결 차트')
             st.caption('선택한 실험에 저장된 NH 완료 1분봉입니다. 실시간 시세가 아니며 브라우저가 차트 라이브러리를 외부 CDN에서 불러옵니다.')
-            st.caption('파랑 Decision · 보라 Jev 후보 · 초록 매수 체결 확인 · 빨강 매도 체결 확인. 해당 분봉이 없으면 표에만 표시합니다. 체결 시각은 증권사 체결 시각이 아닌 로컬 확인 시각입니다.')
+            st.caption('파랑 Decision · 보라 Jev 후보 · 초록 매수 체결 확인 · 빨강 매도 체결 확인 · 개별주는 회색 ■ 선정 · 청록 ■ 강도 통과. 해당 분봉이 없으면 표에만 표시합니다. 체결 시각은 증권사 체결 시각이 아닌 로컬 확인 시각입니다.')
             if dates:
                 ai_charts = dict(ETF_CHARTS)
                 names = stock_names()
@@ -6028,7 +6197,10 @@ def ai_record_tab(ai_tab, engine, read):
                     else:
                         basis = None
                         st.caption('최신 잔고와 보유 시작을 확인할 수 없어 매입가·손익 구간을 표시하지 않습니다.')
-                    tradingview_chart(bars, chart_markers(selected, st.session_state.get('ai_fills') or [], bars, group, chart_symbol), basis,
+                    marks = chart_markers(selected, st.session_state.get('ai_fills') or [], bars, group, chart_symbol)
+                    if group == chart_symbol:
+                        marks = sorted(marks + stock_markers(raw, watchlist_picks(chart_day), bars, chart_symbol), key=lambda m: m['time'])
+                    tradingview_chart(bars, marks, basis,
                                       averages=moving_averages(bars, ai_periods), volume=ai_volume, visible=TIMEFRAMES['1분'][3])
                     last_bar = datetime.fromtimestamp(bars[-1]['time'], KST)
                     st.caption(f'마지막 기록 분봉: {last_bar:%Y-%m-%d %H:%M} · {len(bars)}개')

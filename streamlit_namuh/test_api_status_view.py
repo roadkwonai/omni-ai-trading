@@ -772,7 +772,7 @@ def test_api_tab_renders_status_usage_and_failures(tmp_path, monkeypatch):
     at = AppTest.from_function(_app, default_timeout=60).run()
     assert not at.exception
     heads = [m.value for m in at.markdown if m.value.startswith('#####')]
-    assert heads[:3] == ['##### API별 연동 상태', '##### 오늘 부하·분산 감사', '##### 오늘 호출 흐름'] and '##### 화면별 데이터 출처' in heads
+    assert heads[:4] == ['##### API별 연동 상태', '##### 오늘 부하·분산 감사', '##### 뉴스 수집 상태', '##### 오늘 호출 흐름'] and '##### 화면별 데이터 출처' in heads
     assert any('로컬 연결 시작 실패 2건' in w.value for w in at.warning)
     load = at.dataframe[1].value
     assert int(load.loc[load['API'] == 'Google 뉴스 RSS', '거절'].iloc[0]) == 1
@@ -976,3 +976,35 @@ def test_answers_with_marks_that_are_not_marks_are_shown_as_written():
     assert shown('시작\n```python\na ** b  # $5 ~ $6') == '시작\n```python\na ** b  # $5 ~ $6'  # a fence the answer did not close
     copied = api_status_view.answer_markdown('!((1))(http://x/b.png)', highlight=False)
     assert '![' not in copied.replace('\\![', '')
+
+
+def test_the_screen_shows_the_news_cache_and_a_resting_source(tmp_path, monkeypatch):
+    """User 2026-11-25: which news source rests, and how new the cached stories are (local files, no request)."""
+    import json
+    from datetime import datetime, timedelta
+    monkeypatch.setenv('VIBE_TRADING_NEWS_CACHE', str(tmp_path / 'news-cache.json'))
+    now = datetime.now(api_status_view.KST)
+    story = {'title': '코스피 상승', 'topic': 'market', 'source': 'naver_finance_news', 'publisher': 'P', 'published': (now - timedelta(minutes=7)).isoformat()}
+    (tmp_path / 'news-cache.json').write_text(json.dumps({'fetched': now.isoformat(), 'rows': [story], 'topped': now.isoformat()}))
+    (tmp_path / 'news-sources.json').write_text(json.dumps({'google_news_rss': (now + timedelta(minutes=5)).isoformat()}))
+
+    def page():
+        from datetime import datetime
+        import api_status_view
+        api_status_view.load_news(datetime.now(api_status_view.KST))
+    at = AppTest.from_function(page).run()
+    assert not at.exception
+    topics, sources = at.dataframe[0].value, at.dataframe[1].value
+    assert list(topics['가장 새 기사']) == ['7분 전', '—', '—'] and topics['제목'][0] == '코스피 상승'
+    assert sources['상태'][0].startswith('쉬는 중') and sources['상태'][1] == '사용 가능'
+    assert '코스닥 · 반도체' in at.warning[0].value
+
+
+def test_a_typed_in_script_does_not_mark_an_api_as_failing():
+    from datetime import datetime
+    now = datetime(2026, 11, 25, 7, 50, tzinfo=api_status_view.KST)
+    row = lambda who: {'day': '2026-11-25', 'slot': '07:40', 'provider': 'naver', 'endpoint': 'e', 'caller': who, 'n': 12, 'fail': 12, 'bad': 0,  # noqa: E731
+                       'ms_sum': 1.0, 'ms_max': 1.0, 'bytes': 0, 'last_ok': None, 'last_fail': '2026-11-25T07:48:06+09:00'}
+    state = lambda who: api_status_view.provider_states([row(who)], {}, now)['naver'][0]  # noqa: E731
+    assert (state('market_movers'), state('-')) == ('실패', '호출 없음')
+    assert api_status_view.cat.CALLERS['-'].startswith('임시')

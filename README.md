@@ -65,7 +65,7 @@
 </details>
 
 <p align="center">
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.7"><img src="https://img.shields.io/badge/release-v0.1.7-ff6600?style=flat-square" alt="Release v0.1.7"></a>
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.8"><img src="https://img.shields.io/badge/release-v0.1.8-ff6600?style=flat-square" alt="Release v0.1.8"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1c20?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-1a1c20?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/broker-NH%20%EB%82%98%EB%AC%B4%20PLUG-ff6600?style=flat-square" alt="NH 나무 PLUG OpenAPI">
@@ -115,7 +115,7 @@
 > [!IMPORTANT]
 > **AI 도구 유료 이용이 필요합니다.** 이 서비스는 AI 도구와 함께 쓰는 AI 트레이딩 시스템입니다. 설치·운영·리포트 작성에 Claude Code나 Codex 같은 AI 코딩 에이전트가 필요하고, 이를 쓰려면 해당 서비스의 유료 요금제(Claude Pro·Max 또는 ChatGPT Plus·Pro 같은 구독, 또는 API 사용료)가 필요합니다. 매매 판단에 쓰는 Jev·OpenAI API도 각 서비스의 이용 조건과 요금을 따릅니다.
 >
-> 기본은 **모의계좌**입니다. 실계좌는 계좌마다 실주문 스위치(확인 문구), 실행 플래그 `--execute`, 하루 손실 한도(계좌별 최대 2만 원)를 모두 거쳐야 주문합니다.
+> 기본은 **모의계좌**입니다. 실계좌는 계좌마다 실주문 스위치(확인 문구), 실행 플래그 `--execute`, 하루 손실 한도(계좌별 최대 3만 원)를 모두 거쳐야 주문합니다.
 
 ## 왜 AI로 투자해야 할까요
 
@@ -1015,7 +1015,7 @@ flowchart LR
   f["모의 체결<br/>shared-etf-paper"] --> p["실계좌 몫 계산<br/>1주 기준 또는 금액 비율"]
   p --> pin["체결별 몫 고정<br/>설정이 바뀌어도 소급 안 함"]
   pin --> sw{"실행 인자·계좌 스위치·자동매매<br/>HALT 해제 확인"}
-  sw -->|켜짐| g["LiveOrderGuard<br/>운용금·하루 손실 2만 원·1주 상한·새 종목 5"]
+  sw -->|켜짐| g["LiveOrderGuard<br/>운용금·하루 손실 한도·1주 상한·새 종목 5"]
   sw -->|꺼짐| plan["계획만 기록"]
   g --> nh["NH 실계좌 주문"]
 ```
@@ -1222,7 +1222,7 @@ cp .env.example .env && chmod 600 .env   # 키 이름은 .env.example 참고, �
 | 구분 | 한도 |
 | --- | --- |
 | 공유 모의계좌 | 회당 매수·하루 매수·보유 금액·하루 새 종목·하루 손실을 대시보드에서 범위 안으로 설정 |
-| 실계좌 | 운용금(잔고 안에서) · 하루 손실 차단 기준 계좌별 최대 2만 원 · 1주 가격 상한 · 하루 새 종목 최대 5개(장기투자 첫 투입일 최대 6개) · 미체결·미확인 차단 |
+| 실계좌 | 운용금(잔고 안에서) · 하루 손실 차단 기준 계좌별 최대 3만 원 · 1주 가격 상한 · 하루 새 종목 최대 5개(장기투자 첫 투입일 최대 6개) · 미체결·미확인 차단 |
 | 공통 | 계좌 소유 확인 · KRX 장 시간 확인 · 원장 대조 뒤에만 주문 |
 
 실계좌는 **관찰 → 가상 실행 → 보호된 실주문** 순서로 확인합니다. 공유 모의 `STOP`은 미확인 주문 대조 뒤 실행기를 종료하고, 실계좌 `HALT`는 해당 실주문 경로를 차단합니다. [안전장치](docs/safety.md) · [실계좌](docs/live-accounts.md)

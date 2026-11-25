@@ -369,9 +369,9 @@ live = group('live', '실계좌 조회, 매수 중단·재개(승인 코드)')
 @live.command('status')
 @command
 def live_status():
-    """실주문 스위치·HALT·신규 매수"""
+    """실주문 스위치·HALT·신규 매수 중단·하루 손실 정지"""
     found = reads.status(nh())
-    return {k: found[k] for k in ('live_accounts', 'halt', 'new_live_buys_allowed')}
+    return Answer({k: found.data[k] for k in ('live_accounts', 'halt', 'buy_paused')}, warnings=found.warnings)
 
 
 @live.command('log')

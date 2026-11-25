@@ -76,6 +76,11 @@ def test_build_writes_one_row_per_day_and_book_and_rebuilds_the_same(tmp_path, m
     assert [(r['day'], r['book'], r['pnl_day']) for r in S.rows(tmp_path)] == [(r['day'], r['book'], r['pnl_day']) for r in first]
     assert S.check(tmp_path) == {'ledger': 2000, 'table': 2000, 'ok': True}
     assert not S.stale(tmp_path)
+    late = rows + [fill('2099-01-01T10:00:00+09:00', '069500', 'SELL', 1, 9_000, -500)]  # after the build: not in the table yet
+    monkeypatch.setattr(engine_compare, 'journal', lambda *a, **k: late)
+    assert S.check(tmp_path) == {'ledger': 2000, 'table': 2000, 'ok': True}
+    rows[1]['pnl'] = 1500  # a sale the table already counted
+    assert S.check(tmp_path)['ok'] is False
     with sqlite3.connect(tmp_path / S.FILE) as db:
         assert db.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
 

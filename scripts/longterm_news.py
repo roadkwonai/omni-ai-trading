@@ -55,8 +55,8 @@ def collect(now, root=None, session=None):
         cached = {}
     if cached.get('day') == now.date().isoformat() and cached.get('rows'):
         return {'as_of': cached['as_of'], 'rows': cached['rows'], 'error': None}
-    first = int(cached.get('next') or 0) % len(etf_news.SOURCES)
-    order = etf_news.SOURCES[first:] + etf_news.SOURCES[:first]
+    first = int(cached.get('next') or 0) % len(etf_news.SEARCH_SOURCES)
+    order = etf_news.SEARCH_SOURCES[first:] + etf_news.SEARCH_SOURCES[:first]
     recent = window(now, session)
     days = 1 if recent == WINDOW else math.ceil(recent / timedelta(days=1))
     feeds = FEEDS if days == 1 else tuple((t, q.replace(' when:1d', f' when:{days}d'), keys) for t, q, keys in FEEDS)

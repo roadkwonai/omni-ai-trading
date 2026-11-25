@@ -208,6 +208,28 @@ def stopped_in_session(runtime, states, now):
             if states.get(label) == '종료' and clock < intraday_audit.SERVICE_UNTIL.get(name, '15:20')]
 
 
+def loss_halts(runtime, records, today):
+    """{live account key: True · False · None} of today's daily loss halt, from the rows the order guard itself checks
+    (live_halts); None = it cannot be told (unreadable ledger, or a halt on an account .env does not name)."""
+    keys, path = [k for k, r in records.items() if r.get('kind') == 'live'], Path(runtime) / 'live-orders.sqlite3'
+    if not keys or not path.exists():
+        return dict.fromkeys(keys, False)
+    import hashlib
+    import sqlite3
+    from accounts import digest
+    from dotenv import dotenv_values
+    from local_env import ENV
+    from nh_live_follow import configured_accounts
+    from sqlite_ro import ro_connect
+    try:
+        with ro_connect(path) as db:
+            halted = {scope for (scope,) in db.execute('SELECT scope FROM live_halts WHERE day=?', (today.replace('-', ''),))}
+    except sqlite3.Error:
+        return dict.fromkeys(keys)
+    scopes = {digest(n): hashlib.sha256(('nh-live:' + n).encode()).hexdigest() for n in configured_accounts(dotenv_values(ENV, interpolate=False))}
+    return {k: scopes[records[k].get('hash')] in halted if records[k].get('hash') in scopes else None if halted - set(scopes.values()) else False for k in keys}
+
+
 def alerts(runtime, states, follow, today, now=None):
     """Things that need a look, in words: executors that stopped in the session or are in an unknown state, pending
     exit requests, live blocks and errors today, and external APIs failing or late today (api_status_view)."""
@@ -236,6 +258,10 @@ def alerts(runtime, states, follow, today, now=None):
         if str(lag.get('since', '')).startswith(today):
             found.insert(0, f"실계좌 미러 지연 · {path.stem.replace('lag-alert-', '')}: 모의보다 더 보유 {lag.get('excess')} · "
                             f"{lag.get('minutes')}분째 ({lag.get('last_reason') or lag.get('last_action')})")
+    import accounts
+    records = accounts.load(runtime / 'accounts.json')
+    found += [f"{records[k].get('label', k)} 하루 손실 정지: 오늘 새 매수 없음" if on else f"{records[k].get('label', k)} 하루 손실 정지 여부 확인 불가"
+              for k, on in loss_halts(runtime, records, today).items() if on is not False]
     found += longterm_alerts(runtime / 'vibe-longterm', today)
     if today == datetime.now().astimezone().strftime('%Y-%m-%d'):  # failing or late external APIs (API 연동 tab)
         import api_status_view
@@ -558,7 +584,7 @@ def render(runtime, records, states, names, refresh_balances=None):
             who = pick.segmented_control('계좌', traded, default=traded[0], key='ov_timeline_account', label_visibility='collapsed') or traded[0]
             mine = [r for r in todays if r['계좌'] == who]
             stamp = now.isoformat(timespec='seconds')
-            spans = pd.DataFrame(holding_spans(mine, stamp))
+            spans = pd.DataFrame(holding_spans(mine, stamp), columns=['종목', 'start', 'end', 'qty', 'pnl', '결과'])  # no bar when only a carried holding was sold
             fills = pd.DataFrame(mine)
             fills['구분'] = fills['side'].map({'BUY': '매수 ▲', 'SELL': '매도 ▼'})
             lanes = sorted(fills['종목'].unique(), key=lambda n: min(r['time'] for r in mine if r['종목'] == n))

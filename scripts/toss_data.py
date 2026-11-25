@@ -58,8 +58,15 @@ def _token(stale=None):
     return broker_token.token(TOKEN_FILE, issue, stale)
 
 
+def _retry_after(response):
+    try:
+        return max(0.0, float(response.headers.get('Retry-After') or 1))
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def get(path, params=None):
-    """`result` of a GET under an allowed prefix; a 401 (revoked by another issue, or expired) retries once."""
+    """`result` of a GET under an allowed prefix; a 401 (revoked by another issue, or expired) or a short 429 retries once."""
     import requests
 
     if not path.startswith(ALLOWED):
@@ -73,6 +80,9 @@ def get(path, params=None):
         response = requests.get(BASE + path, params=params, timeout=10, headers={'Authorization': 'Bearer ' + token})
         if response.status_code == 401 and attempt == 0:
             token = _token(stale=token)
+            continue
+        if response.status_code == 429 and attempt == 0 and (wait := _retry_after(response)) <= 3:
+            time.sleep(wait)
             continue
         if response.status_code != 200:
             raise TossError(f'{path}: HTTP {response.status_code}')

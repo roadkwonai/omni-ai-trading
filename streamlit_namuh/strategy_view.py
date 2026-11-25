@@ -38,6 +38,7 @@ def exit_cards(settings):
         ('방어형', [('익절', '데이터 목표에서 전량'), ('데이터 없으면', f"+{s['take_profit_half_pct']:g}% 절반 · +{s['take_profit_all_pct']:g}% 나머지"),
                    ('손절', f"상승장 −{s['stop_loss_pct']:g}% · 횡보·하락장 −{min(s['stop_loss_pct'], 1.0):g}%")], '횡보장 등 기본. 목표 = 최근 20일 장중 상승폭 중앙값 × 국면 계수(0.8~3%).'),
         ('약세장', [('절반 익절', f"늦어도 +{s.get('weak_half_pct', 1.0):g}%"), ('전량 익절', f"늦어도 +{s.get('weak_all_pct', 2.0):g}%"),
+                   *([('강도 종목', f"+{s['fade_exit_pct']:g}% 이상에서 매수세 꺾이면 전량")] if s.get('fade_exit_pct') else []),
                    ('손절', f"−{min(s['stop_loss_pct'], 1.0):g}% · 본전")], '하락장의 혼조·약세일. 반등을 짧게 먹고 빠집니다(롱 추가 매수 중단).'),
     ]
 

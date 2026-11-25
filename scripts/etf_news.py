@@ -1,7 +1,8 @@
-"""Recent ETF market headlines from three independent Google News searches."""
+"""Recent ETF market headlines for Jev: Google News searches and Naver's lists in turn, Daum, 한국경제 and Bing behind them."""
 from __future__ import annotations
 
 import html
+import http.client
 import json
 import os
 import urllib.request
@@ -23,16 +24,23 @@ FEEDS = (
 )
 RESTRICTED_PUBLISHERS = ('연합뉴스', 'yonhap')
 # Sources are used in turn (one per fresh fetch) and a blocked or empty one hands its missing topics to the next.
-SOURCES = ('google_news_rss', 'bing_news_rss', 'naver_finance_news')
+SEARCH_SOURCES = ('google_news_rss', 'bing_news_rss', 'naver_finance_news')  # what longterm_news asks its own topics
+# user 2026-11-25: Daum's and 한국경제's lists (HTTPS, one request for every topic) come before Bing when Google and Naver leave a topic
+SOURCES = ('google_news_rss', 'naver_finance_news', 'daum_finance_news', 'hankyung_rss', 'bing_news_rss')
 # headlines7 keeps Bing last: its feed is relevance-ranked over a day, so inside RECENT it rarely adds a story, and first in
 # the turn it cost three requests (about 3.5 s inside the entry cycle) before the others filled the topics (r3 E9).
-FALLBACK = ('bing_news_rss',)
+FALLBACK = ('daum_finance_news', 'hankyung_rss', 'bing_news_rss')
+NAVER = 'naver_finance_news'
 KST = timezone(timedelta(hours=9))
 # Every runner (shared paper, Jev virtual, vibe advisor, watchlist) asks each minute; one shared fetch per FRESH keeps
 # Google News under its rate limit (HTTP 429 from 2026-11-17 09:09 stopped every entry cycle).
 FRESH = timedelta(minutes=3)
-STALE_OK = timedelta(minutes=30)  # a network failure (429, timeout) reuses the last good set this long
-BACKOFF = timedelta(minutes=5)    # and nobody retries the feed for this long after a failure
+BACKOFF = timedelta(minutes=5)    # after every source failed, nobody retries them all for this long (TOP_UP still may)
+# Naver's two lists cost about 0.1 s and were never refused, so between full fetches they bring the newest stories in (user
+# 2026-11-25); each story stays in the shared cache and is used until it leaves RECENT, whatever a later fetch returns.
+TOP_UP = timedelta(seconds=55)  # once a runner cycle
+READ_TIMEOUT = 2  # seconds a source may take before the next one is asked: these reads sit inside the trading cycle
+REST_REFUSED, REST_DOWN = timedelta(minutes=10), timedelta(minutes=2)  # a source that refused (429, 403) / failed is left alone
 # Only recent headlines reach the engines (user 2026-11-18: "오래된 뉴스를 참고하고 판단하면 안돼"): 11/18 a third of Jev's calls
 # got only Bing items 2-10 hours old (its 24-hour window). A topic without a story this recent is left out; with none at all
 # headlines7 raises and Jev is told there is none (no_fresh_news). Overnight and premarket stories reach Jev through premarket_context instead.
@@ -56,29 +64,64 @@ def _read_cache() -> dict:
         return {'fetched': datetime.fromisoformat(data['fetched']), 'rows': list(data['rows']),
                 'retry_after': datetime.fromisoformat(data['retry_after']) if data.get('retry_after') else None,
                 'next': int(data.get('next') or 0) % len(SOURCES), 'error': data.get('error'),
-                'seen': list(data.get('seen') or [])}
+                'seen': list(data.get('seen') or []),
+                'topped': datetime.fromisoformat(data['topped']) if data.get('topped') else None}
     except (OSError, ValueError, KeyError, TypeError):
         return {}
 
 
 def _write_cache(fetched: datetime, rows: list, retry_after: datetime | None = None, next_source: int = 0,
-                 error: str | None = None) -> None:
+                 error: str | None = None, topped: datetime | None = None) -> None:
     from config_store import write_json
-    seen = _earlier([*rows, *_read_cache().get('seen', [])], fetched, timedelta(seconds=-1))  # no_fresh_news reads these later
+    seen = _earlier([*rows, *_read_cache().get('seen', [])], max(fetched, topped or fetched), timedelta(seconds=-1))  # no_fresh_news reads these later
     try:
         write_json(cache_path(), {'fetched': fetched.isoformat(), 'rows': rows, 'seen': seen, 'next': next_source, 'error': error,
+                                  'topped': topped.isoformat() if topped else None,
                                   'retry_after': retry_after.isoformat() if retry_after else None}, indent=None)
     except OSError:
         pass  # a cache that cannot be written only costs another fetch
 
 
-def _still_recent(rows: list, now: datetime) -> list | None:
-    """Cached rows re-checked against now: each must still be within RECENT; None when none is."""
+def _merge(rows, now):
+    """Each topic's newest three stories within RECENT, each story once (Google repeats the publisher after the title)."""
+    out = {topic: {} for topic, *_ in FEEDS}
+    for row in rows:
+        try:
+            published = datetime.fromisoformat(row['published'])
+            if row['topic'] in out and timedelta(0) <= now - published <= RECENT:
+                out[row['topic']].setdefault(row['title'].removesuffix(f" - {row.get('publisher')}"), (published, row))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return [row for stories in out.values() for _, row in sorted(stories.values(), key=lambda x: x[0], reverse=True)[:3]]
+
+
+def _rest_path() -> Path:
+    return cache_path().with_name('news-sources.json')
+
+
+def _rests() -> dict:
     try:
-        kept = [r for r in rows if timedelta(0) <= now - datetime.fromisoformat(r['published']) <= RECENT]
-    except (KeyError, TypeError, ValueError):
-        return None
-    return kept or None
+        data = json.loads(_rest_path().read_text(encoding='utf-8'))
+        return {k: datetime.fromisoformat(v) for k, v in data.items()}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def resting(source: str, now: datetime) -> bool:
+    """Whether a program found this source refusing or down a moment ago (shared: one refusal spares every caller)."""
+    until = _rests().get(source)
+    return until is not None and now < until
+
+
+def rest(source: str, now: datetime, exc: Exception) -> None:
+    if isinstance(exc, ValueError) and not isinstance(exc, OSError):
+        return  # it answered; only the content was unusable
+    from config_store import write_json
+    until = now + (REST_REFUSED if getattr(exc, 'code', None) in (429, 403) else REST_DOWN)
+    try:
+        write_json(_rest_path(), {k: v.isoformat() for k, v in {**_rests(), source: until}.items() if v > now}, indent=None)
+    except OSError:
+        pass  # an unwritten rest only costs another try
 
 
 def _earlier(rows, now, older_than):
@@ -132,38 +175,93 @@ def jev_market_headlines(rows, now):
     return preferred + [row for row in fallback if row.get('topic') not in covered]
 
 
+def status(now):
+    """The shared news files as they are, for a screen (no request): when they were filled, each topic's and source's stories
+    within RECENT, and until when a refusing source rests."""
+    cached, rests = _read_cache(), _rests()
+    pool = [*cached.get('rows', []), *cached.get('seen', [])]
+    rows, stories = _merge(pool, now), {}
+    for row in pool:
+        try:
+            if timedelta(0) <= now - datetime.fromisoformat(row['published']) <= RECENT:
+                stories[row['source'], row['title']] = row
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    def told(kept):
+        ages = [(now - datetime.fromisoformat(r['published'])).total_seconds() / 60 for r in kept]
+        return {'count': len(kept), 'newest_min': round(min(ages)) if ages else None}
+    return {'fetched': cached.get('fetched'), 'topped': cached.get('topped'), 'error': cached.get('error'), 'retry_after': cached.get('retry_after'),
+            'topics': [{'topic': topic, **told([r for r in rows if r['topic'] == topic]),
+                        'newest_title': max((r for r in rows if r['topic'] == topic), key=lambda r: r['published'], default={}).get('title')} for topic, *_ in FEEDS],
+            'sources': [{'source': source, **told([r for (s, _), r in stories.items() if s == source]),
+                         'rest_until': until if (until := rests.get(source)) and now < until else None} for source in SOURCES]}
+
+
 def headlines7(now: datetime) -> list[dict[str, str]]:
     """The recent, relevant headlines (within RECENT; shared cache, see FRESH and SOURCES); fails closed with none."""
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise ValueError('news observation time requires timezone')
     cached = _read_cache()
-    age = now - cached['fetched'] if cached else None
-    usable = _still_recent(cached['rows'], now) if cached and timedelta(0) <= age <= STALE_OK else None
+    if cached and cached['fetched'] > now:  # written by a clock ahead of this one
+        cached = {}
+    pool = [*cached.get('rows', []), *cached.get('seen', [])]
+    usable = _merge(pool, now)
     backing_off = bool(cached and cached['retry_after'] and now < cached['retry_after'])
-    if usable and (age <= FRESH or backing_off):
-        return usable
-    if backing_off:  # the last fetch failed with nothing to fall back on: nobody retries the feeds until BACKOFF ends
+    if cached and (backing_off or (usable and now - cached['fetched'] <= FRESH)):
+        usable = _top_up(cached, pool, now) or usable
+        if usable:
+            return usable
+        # the last fetch failed with nothing to fall back on: nobody retries all the feeds until BACKOFF ends
         raise (ValueError if cached.get('error') == 'ValueError' else OSError)('news feeds backing off after a failure')
     turn = [s for s in SOURCES if s not in FALLBACK] or list(SOURCES)
     first = cached.get('next', 0) % len(turn)
     order = (*turn[first:], *turn[:first], *(s for s in SOURCES if s not in turn))
+    order = [s for s in order if not resting(s, now)]
+    failed = {}
     try:
-        rows = _fetch7(now, order)
+        if not order:
+            raise OSError('every news source is resting after a failure')
+        found = _fetch7(now, order, timeout=READ_TIMEOUT, failed=failed)
+        rows = _merge([*found, *pool], now)
     except (OSError, ValueError, ET.ParseError) as exc:
         # 4th review: back off even with no usable cache, or every caller re-reads every source each minute (11/17 429)
-        _write_cache(cached['fetched'] if usable else now, cached['rows'] if usable else [], now + BACKOFF,
-                     (first + 1) % len(turn), 'ValueError' if isinstance(exc, ValueError) else 'OSError')
+        _write_cache(cached['fetched'] if usable else now, usable, now + BACKOFF, (first + 1) % len(turn),
+                     'ValueError' if isinstance(exc, ValueError) else 'OSError', now)
         if usable:
             return usable
         raise
-    _write_cache(now, rows, None, (first + 1) % len(turn))
+    finally:
+        for source, exc in failed.items():
+            rest(source, now, exc)
+    read = order[0] == NAVER or any(row['source'] == NAVER for row in found)
+    _write_cache(now, rows, None, (first + 1) % len(turn), topped=now if read else cached.get('topped'))
     return rows
 
 
-def _read(url: str, *, timeout=10) -> bytes:
-    request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        payload = response.read(300_001)
+def _top_up(cached, pool, now):
+    """The cached stories with Naver's newest added, or None when it is not due, resting or brings nothing."""
+    if NAVER not in SOURCES or (cached['topped'] and now - cached['topped'] < TOP_UP) or resting(NAVER, now):
+        return None
+    failed = {}
+    try:
+        rows = _merge([*_fetch7(now, (NAVER,), timeout=READ_TIMEOUT, failed=failed), *pool], now)
+        error, retry = None, None
+    except (OSError, ValueError, ET.ParseError):
+        rows, error, retry = _merge(pool, now), cached['error'], cached['retry_after']
+    for exc in failed.values():
+        rest(NAVER, now, exc)
+    _write_cache(cached['fetched'], rows, retry, cached['next'], error, now)
+    return rows or None
+
+
+def _read(url: str, *, timeout=10, headers=None) -> bytes:
+    request = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', **(headers or {})})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = response.read(300_001)
+    except http.client.HTTPException as exc:  # a broken reply (IncompleteRead) is no OSError
+        raise OSError('news feed reply broken') from exc
     if len(payload) > 300_000:
         raise ValueError('news feed too large')
     return payload
@@ -211,11 +309,34 @@ def _naver(*, timeout=None):
         yield html.unescape(str(row.get('tit') or '')), html.unescape(str(row.get('ohnm') or '')), published, link
 
 
+def _daum(*, timeout=None):
+    data = json.loads(_read('https://finance.daum.net/content/news?page=1&perPage=100&category=stock', timeout=timeout or 10,
+                            headers={'Referer': 'https://finance.daum.net/'}))  # refused without it
+    if not isinstance(data, dict) or not isinstance(data.get('data'), list):
+        raise ValueError('news feed invalid')
+    for row in data['data']:
+        if not isinstance(row, dict):
+            continue
+        try:
+            published = datetime.strptime(str(row.get('createdAt')), '%Y-%m-%d %H:%M:%S').replace(tzinfo=KST)
+        except ValueError:
+            published = None
+        yield html.unescape(str(row.get('title') or '')), html.unescape(str(row.get('cpKorName') or '')), published, ''
+
+
+def _hankyung(*, timeout=None):
+    for title, publisher, published, link in _rss('https://www.hankyung.com/feed/all-news', timeout=timeout):
+        yield title, publisher or '한국경제', published, link  # its feed names no source: every story is its own
+
+
+LISTS = {'naver_finance_news': lambda **kw: _naver(**kw), 'daum_finance_news': lambda **kw: _daum(**kw), 'hankyung_rss': lambda **kw: _hankyung(**kw)}
+
+
 def _items(source: str, topic: str, query: str, shared: dict, *, timeout=None):
-    if source == 'naver_finance_news':  # one list serves every topic
-        if 'naver' not in shared:
-            shared['naver'] = list(_naver() if timeout is None else _naver(timeout=timeout))
-        return shared['naver']
+    if source in LISTS:  # one list serves every topic
+        if source not in shared:
+            shared[source] = list(LISTS[source](timeout=timeout))
+        return shared[source]
     if source == 'bing_news_rss':
         url = ('https://www.bing.com/news/search?q=' + quote(re.sub(r' when:\d+[dh]', '', query)) +
                '&format=rss&setlang=ko&cc=KR&qft=' + quote('interval="%s"' % ('8' if re.search(r' when:(?!1d)\d+d', query) else '7')))  # 7 = last 24 hours, 8 = last 7 days
@@ -271,7 +392,7 @@ def supplement_jev_topics(rows, now):
         query, keywords = settings[topic]
         found, attempted = [], False
         for source in sources:
-            if source in prior:
+            if source in prior or resting(source, now):
                 continue
             remaining = JEV_TOPIC_BUDGET_SECONDS - (time.monotonic() - start)
             if remaining <= 0:
@@ -281,7 +402,9 @@ def supplement_jev_topics(rows, now):
             try:
                 items = list(_items(source, topic, query, shared, timeout=min(1.2, remaining)))
                 found = _topic_rows(items, now, topic, keywords, source, timedelta(minutes=JEV_NEWS_MAX_MINUTES))
-            except (OSError, ValueError, ET.ParseError):
+            except (OSError, ValueError, ET.ParseError) as exc:
+                if getattr(exc, 'code', None) in (429, 403):  # a timeout under this short budget says little
+                    rest(source, now, exc)
                 continue
             if found:
                 break
@@ -292,9 +415,10 @@ def supplement_jev_topics(rows, now):
                                  'elapsed_ms': round((time.monotonic() - start) * 1000, 1)}
 
 
-def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=False) -> list[dict[str, str]]:
+def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=False, *, timeout=None, failed=None) -> list[dict[str, str]]:
     """The sources in `order`, a blocked or empty one handing its missing topics to the next. feeds / recent / links: the
-    long-term news (longterm_news) asks its own topics over a day and keeps each story's link; the runners' defaults stay."""
+    long-term news (longterm_news) asks its own topics over a day and keeps each story's link; the runners' defaults stay.
+    failed: filled with {source: its error}."""
     observed = now.astimezone(timezone.utc)
     found, error, shared = {}, None, {}
     for source in order:
@@ -302,9 +426,11 @@ def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=Fals
             if topic in found:
                 continue
             try:
-                items = list(_items(source, topic, query, shared))
+                items = list(_items(source, topic, query, shared) if timeout is None else _items(source, topic, query, shared, timeout=timeout))
             except (OSError, ValueError, ET.ParseError) as exc:
                 error = exc
+                if failed is not None:
+                    failed[source] = exc
                 break  # blocked, offline or malformed: the next source takes the remaining topics
             kept = _topic_rows(items, observed, topic, keywords, source, recent, links)
             if kept:

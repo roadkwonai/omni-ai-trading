@@ -2,11 +2,14 @@ import io
 import json
 import tempfile
 import unittest
+
+import pytest
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
+import nh_paper_isolated  # noqa: F401 - bound before a test patches nh_etf_paper_runner.valid_bars
 import watchlist as w
 
 NOW = datetime(2026, 11, 12, 10, 0, tzinfo=ZoneInfo('Asia/Seoul'))
@@ -41,6 +44,7 @@ class WatchlistTests(unittest.TestCase):
                 patch.object(w, 'FETCH_STOCK_NEWS', return_value=[{'title': 'A 뉴스', 'published': (NOW - timedelta(minutes=20)).isoformat()},
                                                                   {'title': 'A 어제', 'published': (NOW - timedelta(hours=20)).isoformat()}]), \
                 patch.object(w.urllib.request, 'urlopen', side_effect=OSError('no network in tests')), \
+                patch.object(w, 'FOREIGN', return_value=5), \
                 patch('nh_etf_auto_v2._jev7_question', return_value=answer) as jev:
             record = w.select(Reader(), {**self.candidates(), '000009': {'name': 'Z', 'price': 1_500_000}}, NOW)
         self.assertEqual(record['selected'], ['000002', '000003', '000001'])
@@ -53,6 +57,8 @@ class WatchlistTests(unittest.TestCase):
         self.assertIn('NONE', jev.call_args.args[3])
         self.assertNotIn('000009', jev.call_args.args[3])  # one share above the 1,000,000 tranche
         self.assertEqual(record['market']['K200']['change_pct'], 10.0)
+        # 2026-11-25: the overnight material of the candidates is a field of its own, and a failure is named, not raised
+        self.assertEqual(jev.call_args.kwargs['extra_state']['overnight_material']['not_checked'], sorted(record['stocks']))
 
     def test_no_market_news_does_not_stop_the_watchlist(self):
         answer = {'watchlist': {'type': 'choice', 'choice': '000002', 'confidence': 0.4}, 'chart_sha256': 'a' * 64}
@@ -67,10 +73,23 @@ class WatchlistTests(unittest.TestCase):
     def test_due_load_and_expiry(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'watchlist.json'
-            self.assertFalse(w.due(NOW.replace(hour=9, minute=1), path))
-            self.assertFalse(w.due(NOW.replace(hour=9, minute=5), path))
-            self.assertFalse(w.due(NOW.replace(hour=9, minute=7), path))
-            self.assertTrue(w.due(NOW.replace(hour=9, minute=8), path))
+            at = lambda minute: NOW.replace(hour=9, minute=minute, second=0)  # noqa: E731
+            # user 2026-11-25: stocks from the first minute (11-20~11-25 Jev had none before 09:10), then better charts
+            self.assertFalse(w.due(at(0), path))
+            self.assertTrue(w.due(at(1), path))
+            picked = lambda when: w.write({'time': when.isoformat(), 'selected': [], 'stocks': {}}, path)  # noqa: E731
+            picked(NOW.replace(hour=8, minute=52))  # the pre-open pick
+            self.assertTrue(w.due(at(1), path))
+            picked(at(1))
+            self.assertFalse(w.due(at(3), path))
+            self.assertTrue(w.due(at(5), path))
+            picked(at(7))
+            self.assertFalse(w.due(at(7), path))
+            self.assertTrue(w.due(at(8), path))  # six settled bars now
+            picked(at(8))
+            self.assertFalse(w.due(at(20), path))
+            self.assertTrue(w.due(at(38), path))
+            path.unlink()
             self.assertTrue(w.due(NOW, path))
             record = {'time': (NOW - timedelta(minutes=10)).isoformat(), 'selected': ['000001', 'bad'],
                       'stocks': {'000001': {'name': 'A'}, 'bad': {}}}
@@ -183,3 +202,132 @@ def test_enrich_gives_jev_the_nh_figures_not_the_ranking_sources():
         stocks, _ = w.enrich(Quoting(), kiwoom, NOW)
     assert {k: stocks['000001'][k] for k in ('price', 'change_pct', 'volume', 'value_mil')} == \
         {'price': 110, 'change_pct': 10.0, 'volume': 5000, 'value_mil': 55}
+
+
+def test_stock_news_goes_round_a_refused_google_and_keeps_what_it_had(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+    from urllib.error import HTTPError
+    import watchlist
+    monkeypatch.setenv('VIBE_TRADING_STOCK_NEWS_CACHE', str(tmp_path / 'stock-news.json'))
+    now, calls = datetime(2026, 11, 25, 10, 0, tzinfo=watchlist.KST), []
+
+    def story(title, at):
+        return [{'title': title, 'published': at.isoformat(), 'publisher': 'P'}]
+
+    def refused(name, at):
+        calls.append(name)
+        raise HTTPError('u', 429, 'Too Many Requests', {}, None)
+    monkeypatch.setattr(watchlist, 'FETCH_STOCK_FALLBACK', lambda code, name, at: story(f'{name} 네이버 {at:%H:%M}', at))
+    assert watchlist.fresh_stock_news('005930', '삼성전자', now, refused)[0]['title'] == '삼성전자 네이버 10:00'
+    # Google refused a moment ago: the other stocks of the same burst go straight to Naver
+    assert watchlist.fresh_stock_news('000660', 'SK하이닉스', now, refused)[0]['title'] == 'SK하이닉스 네이버 10:00'
+    assert calls == ['삼성전자']
+    rows = watchlist.fresh_stock_news('005930', '삼성전자', now + timedelta(minutes=6), refused)
+    assert [r['title'] for r in rows] == ['삼성전자 네이버 10:06', '삼성전자 네이버 10:00'] and calls == ['삼성전자']
+    monkeypatch.setattr(watchlist, 'FETCH_STOCK_FALLBACK', lambda *a: (_ for _ in ()).throw(OSError('down')))
+    assert watchlist.fresh_stock_news('005930', '삼성전자', now + timedelta(minutes=12), refused)[0]['title'] == '삼성전자 네이버 10:06'
+
+
+def test_naver_stock_news_keeps_the_stocks_own_stories_of_the_day(monkeypatch):
+    import io
+    from datetime import datetime
+    import watchlist
+    now = datetime(2026, 11, 25, 10, 0, tzinfo=watchlist.KST)
+    item = lambda title, at, office='한 매체': {'title': title, 'datetime': at, 'officeName': office}  # noqa: E731
+    body = [{'items': [item('삼성전자 &quot;신기록&quot;', '202611250950'), item('삼성전자 &quot;신기록&quot;', '202611250950')]},
+            {'items': [item('삼성전자 속보', '202611250955', '연합뉴스'), item('무관한 기사', '202611250955'), item('삼성전자 옛 기사', '202611230900'),
+                       item('삼성전자 미래', '202611251100'), item('삼성전자 시각 오류', 'x'), None]}, 'x']
+    monkeypatch.setattr(watchlist.urllib.request, 'urlopen', lambda *a, **k: io.BytesIO(json.dumps(body).encode()))
+    rows = watchlist.naver_stock_news('005930', '삼성전자', now)
+    assert [(r['title'], r['published']) for r in rows] == [('삼성전자 "신기록"', '2026-11-25T00:50:00+00:00')]
+
+
+def _bar(day, at, **more):
+    return {'bsop_date': day, 'bsop_time': at, 'stck_oprc': '100', 'stck_hgpr': '100', 'stck_lwpr': '100', 'stck_prpr': '100', 'vol': '1', **more}
+
+
+def test_the_pre_open_pick_reads_the_nxt_pre_market_and_not_yesterdays_quote():
+    """User 2026-11-25: the 09:00:00 cycle must already have stocks. NH still quotes yesterday before the bell."""
+    from datetime import datetime
+    now = datetime(2026, 11, 25, 8, 52, tzinfo=w.KST)
+    nxt = [_bar('20261125', f'08{m:02d}00', market='NXT') for m in range(49, 39, -1)]
+    prior = [_bar('20261124', f'15{m:02d}00') for m in range(30, 10, -1)]
+    asked = []
+
+    class Read:
+        def call_tool(self, tool, params):
+            if tool == 'get_stock_price':
+                return {'status': 'ok', 'data': {'Output_0': {'iem_cd': params['stock_code'], 'stck_prpr': 50, 'stck_prdy_clpr': 40, 'acml_vol': 9, 'acml_tr_pbmn': 9}}}
+            asked.append((params['input']['iem_cd'], params['input'].get('today_cls_code')))
+            return {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': {'iem_cd': params['input']['iem_cd']}, 'Output_1': prior}}
+    candidates = {'000001': {'name': 'A', 'price': 110, 'change_pct': 4.0, 'volume': 5, 'value_mil': 7, 'reasons': ['급상승']},
+                  '000002': {'name': 'B', 'price': 110, 'change_pct': 4.0, 'volume': 5, 'value_mil': 7, 'reasons': ['급상승']}}
+    answer = {'watchlist': {'type': 'choice', 'choice': '000001', 'confidence': 0.4, 'probabilities': {'000001': 0.4, 'NONE': 0.6}}, 'chart_sha256': 'a' * 64}
+    with patch('nh_paper_isolated.nxt_premarket', side_effect=lambda code, at: nxt if code == '000001' else nxt[:5]), \
+            patch.object(w, 'investor_days', return_value=None), patch.object(w, 'fresh_stock_news', return_value=[]), \
+            patch('etf_news.headlines7', return_value=[]), patch('nh_etf_auto_v2._jev7_question', return_value=answer) as jev:
+        record = w.select(Read(), candidates, now, preopen=True)
+    assert record['selected'] == ['000001'] and set(record['stocks']) == {'000001'}  # five rows are no chart
+    assert record['stocks']['000001']['change_pct'] == 4.0 and record['market'] == {}
+    bars = jev.call_args.args[0]
+    assert bars['000001'] == nxt and bars['K200'][0]['bsop_date'] == '20261124'
+    assert {cls for _, cls in asked} == {'0'} and 'pre-market' in jev.call_args.kwargs['extra_state']['note']
+
+
+def investor_reader(*rows):
+    class Read:
+        def call_tool(self, tool, params):
+            return {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': [
+                dict(zip(('bsop_date1', 'frgn_ntby_qty', 'gigwan', 'person'), r)) for r in rows]}}
+    return Read()
+
+
+def test_the_closed_days_foreign_figure_is_kiwooms_and_asked_once_a_day(monkeypatch):
+    """11-25: NH's foreign figure of a closed day missed Naver's by 36% (median of 57), Kiwoom's by 1.6%."""
+    asked = []
+    monkeypatch.setattr(w, 'FOREIGN', lambda code, day: asked.append((code, day)) or -4965611)
+    read = investor_reader(('20261124', -9965611, -15287759, 24479858))
+    for _ in range(2):
+        assert w.investor_days(read, '114800', '20261125') == {'last_close_day': {
+            'date': '20261124', 'foreign': -4965611, 'institution': -15287759, 'individual': 24479858}}
+    assert asked == [('114800', '20261124')]
+
+
+def test_a_failed_kiwoom_read_leaves_the_foreign_figure_out_and_is_not_repeated_at_once(monkeypatch):
+    calls, clock = [], [1000.0]
+    monkeypatch.setattr(w, 'FOREIGN', lambda code, day: calls.append(code) or (_ for _ in ()).throw(TimeoutError()))
+    monkeypatch.setattr(w.time, 'monotonic', lambda: clock[0])
+    read = investor_reader(('20261124', 5, 6, -11))
+    for code in ('000001', '000002', '000003'):  # one slow answer must not be waited for once per stock
+        assert w.investor_days(read, code, '20261125')['last_close_day'] == {'date': '20261124', 'institution': 6, 'individual': -11}
+    assert calls == ['000001']
+    clock[0] += w.FOREIGN_RETRY + 1
+    monkeypatch.setattr(w, 'FOREIGN', lambda code, day: 7)
+    assert w.investor_days(read, '000001', '20261125')['last_close_day']['foreign'] == 7
+    monkeypatch.setattr(w, 'FOREIGN', lambda code, day: None)  # answered, but no row of that day
+    assert 'foreign' not in w.investor_days(read, '000002', '20261125')['last_close_day']
+
+
+def test_an_etfs_foreign_figure_of_today_is_not_sent(monkeypatch):
+    """11-25: NH's value of 09:00 stood all day and two of three had the wrong sign at the close."""
+    today = ('20261125', -1100000, 0, 0)
+    assert 'today_provisional' not in w.investor_days(investor_reader(today), '251340', '20261125')
+    closed = w.investor_days(investor_reader(('20261125', -1100000, -2116966, 761678)), '251340', '20261125')
+    assert closed['today_provisional'] == {'date': '20261125', 'institution': -2116966, 'individual': 761678, 'not_tallied_yet': ['foreign']}
+    stock = w.investor_days(investor_reader(('20261125', 120, 45, 0)), '005930', '20261125')['today_provisional']
+    assert stock == {'date': '20261125', 'foreign': 120, 'institution': 45, 'not_tallied_yet': ['individual']}
+
+
+def test_the_first_minute_charts_are_the_runners_opening_ones():
+    from datetime import datetime
+    now = datetime(2026, 11, 25, 9, 1, 20, tzinfo=w.KST)
+    rows = [_bar('20261124', f'15{m:02d}00') for m in range(30, 10, -1)]
+
+    class Read:
+        def call_tool(self, tool, params):
+            return {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': {'iem_cd': '069500'}, 'Output_1': rows}}
+    assert w.chart(Read(), '069500', now)[0]['bsop_date'] == '20261124'
+    nxt = [_bar('20261125', '084900', market='NXT')] * 6
+    assert w.chart(Read(), '069500', now, premarket=lambda code: nxt)[0]['market'] == 'NXT'
+    with pytest.raises(ValueError):
+        w.chart(Read(), '069500', now.replace(minute=20))

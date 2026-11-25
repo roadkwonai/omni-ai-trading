@@ -17,7 +17,7 @@ NAMES = {'shared-etf-paper': '공유 모의 ETF 실행기', 'shared-etf-learning
          'shared-etf-regime': '시황 국면 관찰기', 'shared-etf-dashboard': '대시보드', 'market-movers': '순위·관심종목 계산기',
          'premarket': '장전 자료 수집', 'trading-day-start': '거래일 시작', 'preflight': '장전 사전 점검',
          'vibe-longterm': '장기투자 실행기', 'longterm-watch': '장기투자 상시 감시', 'us-ideas': '미국 종목 아이디어', 'api-watch': 'API 부하 감사', 'trading-backup': '거래 데이터 백업',
-         'state-sync': '상태 백업', 'discord-notify': '디스코드 알림', 'exit-replay': '청산 재현',
+         'state-sync': '상태 백업', 'ai-schedule-runner': '예약 AI 실행기', 'discord-notify': '디스코드 알림', 'exit-replay': '청산 재현',
          'live-follow-1': '실계좌 1 미러 실행기', 'longterm-live-2': '실계좌 2 장기투자 실행기', 'nxt-virtual': 'NXT 가상 실행기'}
 LABELS = {NAMES.get(name, name): f'com.vibetrading.{name}' for name in SERVICES}
 

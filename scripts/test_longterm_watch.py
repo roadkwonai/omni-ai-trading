@@ -183,3 +183,15 @@ def test_a_later_error_does_not_undo_an_earlier_recovery(tmp_path):
     d = facts()['decisions'] + [row('error', '10:30', 9, reason='dca: error'), row('error', '12:05', 10, reason='dca: error')]
     got = found(now=NOW.replace(hour=12, minute=8), decisions=d, cursor=10, recovered=rec)
     assert 'engine.error:9' not in got and 'engine.error:10' in got
+
+
+def test_a_halt_of_nh_alone_is_found_by_its_real_name(tmp_path, monkeypatch):
+    # until 2026-11-25 the watch asked for a broker named 'nh', which no one halts; every test passed its own `halted`
+    from src.live import halt
+    monkeypatch.setattr('src.live.paths.get_runtime_root', lambda: tmp_path)
+    (tmp_path / 'nhplug').mkdir()
+    run = lambda *a, **k: type('R', (), {'returncode': 1, 'stdout': ''})()  # noqa: E731
+    look = lambda: W.collect(tmp_path / 'nhplug', NOW, run=run)['stop']  # noqa: E731
+    assert look() == []
+    halt.trip_halt('cli', 'test', broker='nhplug')
+    assert look() == ['NH HALT']

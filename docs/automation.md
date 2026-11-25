@@ -16,6 +16,14 @@
 > [!NOTE]
 > 시각은 모두 한국 시간입니다. launchd는 Mac 시계를 그대로 쓰므로 Mac이 KST여야 합니다. 서비스 등록·재시작 절차는 [운영 가이드](operations.md)에 있습니다.
 
+## 운영 화면에서 조회와 AI 선택
+
+**운영 → 자동 작업**에서 프로젝트의 launchd 서비스, Claude 예약 작업, Codex 자동화를 살펴봅니다. 작업을 골라 상세를 열면 보존된 실행 기록과 실행에 사용된 모델을 볼 수 있습니다. Claude 작업 지시문의 모델 선언과 최근 세션이 기록한 모델은 각각 표시됩니다. 시작 기록이 없는 서비스 로그는 관측 시각으로 표시합니다.
+
+전환을 지원하는 리포트·감사는 상세의 **AI 실행 설정**에서 Claude 또는 Codex와 모델을 선택할 수 있습니다. 저장하면 대기 상태로 표시됩니다. 원본 Claude 예약을 일시 정지하면 이 Mac의 예약 AI 실행기가 같은 일정부터 선택한 CLI로 실행합니다. 같은 업무의 Codex 자동화가 켜져 있거나 원본 일정이 바뀐 경우에는 대기합니다. 전환을 해제하고 원본 예약을 다시 켜면 Claude 앱에서 실행을 이어갑니다.
+
+예약 AI 실행기는 실행 슬롯마다 선택한 모델, 시작·종료 시각, 결과를 기록합니다. 전환 후 대화 보고의 결과는 상세 팝업에서 확인합니다. 설정·코드 보완이나 별도 데이터베이스 쓰기가 필요한 작업은 현재 앱의 예약을 사용합니다.
+
 ## 평일 하루 일정
 
 ```mermaid
@@ -44,7 +52,7 @@ gantt
 | --- | --- | --- | --- |
 | 로그인 시 | launchd | `shared-etf-dashboard`, `discord-notify`, `shared-etf-learning`, `shared-etf-regime`, `shared-etf-paper`, `nxt-virtual` | 대시보드, 알림 감시, 관찰기, 실행기(장 밖에서는 기다림) |
 | 금 10:00·10:30 | launchd | `us-ideas` | 미국 종목 아이디어: 10:30 주간 스크린, 10:00 분기 갱신(2·5·8·11월 셋째 금요일만) |
-| 07:40\~09:10 | launchd | `premarket` | 장전 브리프 수집(07:40, 08:00\~08:55 매 5분, 09:00, 09:10). NXT 프리마켓 체결 요약 포함 |
+| 07:40\~09:10 | launchd | `premarket` | 장전 브리프 수집(07:40, 08:00\~08:55 매 5분, 09:00, 09:10). NXT 프리마켓 체결 요약 포함. 07:40·08:20 회차는 브리프를 쓴 뒤 장 마감 뒤 호재·악재 기사를 모음 |
 | 07:55 | launchd | `nxt-virtual` | NXT 종가매매 가상 아침 청산 |
 | 08:20 | launchd | `preflight` | 장전 사전 점검 1차 |
 | 08:25 | Claude | `trading-preflight` | 점검 실패 보완 뒤 다시 점검 |
@@ -91,7 +99,7 @@ gantt
 | `preflight` | 장전 사전 점검 | `preflight.py` | 평일 08:20 · 08:53 | `shared-etf-paper` |
 | `vibe-longterm` | 장기투자 실행기 | `vibe_longterm.py --run` | 평일 08:40 | `vibe-longterm` |
 | `longterm-watch` | 장기투자 상시 감시 | `longterm_watch.py --watch` (기록만 읽음, 변화는 Discord 장기 채널, 16:00 종료) | 로그인 · 평일 08:40 | `vibe-longterm` |
-| `api-watch` | API 부하 감사 | `api_load.py --watch` (호출 기록만 읽음, `reviews/api-audit-DAY.md`) | 로그인 · 평일 08:40 | `shared-etf-paper` |
+| `api-watch` | API 부하 감사 | `api_load.py --watch` (호출 기록과 서비스별 열린 파일 수만 읽음, `reviews/api-audit-DAY.md`) | 로그인 · 평일 08:40 | `shared-etf-paper` |
 | `market-movers` | 순위·관심종목 계산기 | `market_movers.py` | 평일 08:50 | `shared-etf-paper` |
 | `live-follow-1` | 실계좌 1 미러 실행기 | `nh_live_follow.py --execute --account live-1` | 평일 08:58 | `live-follow` |
 | `trading-day-start` | 거래일 준비 | `trading_day_start.py` | 평일 08:55 | `shared-etf-paper` |
@@ -247,6 +255,7 @@ scripts/ro audit_incidents.py --since 2026-11-18
 | `scripts/ro <스크립트.py> [인자]` | 허용 목록의 스크립트 실행(PYTHONPATH는 `ro`가 넣음) |
 | `scripts/ro --out <파일> <스크립트.py> …` | 출력을 파일로(리다이렉트 대신) |
 | `scripts/ro sql <~/.vibe-trading 아래 DB> "<SELECT…>"` | 읽기 전용 SQLite 질의 한 문장(SELECT·WITH·PRAGMA), 줄마다 JSON |
+| `scripts/ro json <파일> [키 …]` | `.scratch/`·리포트 폴더 JSON의 항목과 크기, 키를 주면 그 부분만 |
 | `scripts/ro services` | 등록된 vibetrading 서비스(PID·마지막 종료 값·이름). 확인할 수 없으면 실패 |
 | `scripts/ro pytest <scripts/test_*.py…>` | `scripts/`·`streamlit_namuh/` 테스트 파일(`-q -x -v -k -p no:cacheprovider`만, 파일 하나 이상) |
 | `scripts/ro vibe-status` | 장기 엔진 켜짐 여부 |

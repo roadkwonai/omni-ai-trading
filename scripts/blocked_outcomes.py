@@ -3,6 +3,8 @@
 What the shared paper runner did NOT buy, settled after the close so the filters can be judged by data:
 - strength: each `strength_shadow` pick (the watchlist-strength name the runner would have taken when Jev's pick was
   blocked), with the reason it was blocked;
+- strength_gate: each watchlist name the strength path's last checks refused (FOLLOWED; the gate's strength_reasons), once
+  per half hour a name and reason keeps being refused. Rows of one day overlap: compare reasons, do not add them up;
 - ipo: each recent new listing inside the new-listing window (ipo_days) on a day the runner looked at listings and
   bought none, measured from the new-listing start time (ipo_start), with the day's most common block reason.
 
@@ -26,6 +28,8 @@ from zoneinfo import ZoneInfo
 KST = ZoneInfo('Asia/Seoul')
 ROOT = Path.home() / '.vibe-trading/nhplug/shared-etf-paper'
 CLOSE = time(15, 0)
+FOLLOWED = ('one_share_over_buy', 'volume_not_rising', 'trend_not_rising', 'careful_reentry_')  # the last one is a prefix
+APART = timedelta(minutes=30)
 
 
 def _events(root, day):
@@ -41,6 +45,16 @@ def candidates(root, day, events, settings):
         if e.get('event') == 'strength_shadow' and e.get('symbol') and (e['symbol'], e.get('blocked')) not in seen:
             seen.add((e['symbol'], e.get('blocked')))
             rows.append(('strength', e['symbol'], e['time'], e.get('blocked') or 'unknown', e.get('confidence')))
+    last = {}
+    for e in events:
+        why = e.get('strength_reasons')
+        if e.get('event') != 'v2_entry_gate' or not isinstance(why, dict):
+            continue
+        at = datetime.fromisoformat(e['time'])
+        for symbol, reason in why.items():
+            if str(reason).startswith(FOLLOWED) and at - last.get((symbol, reason), at - APART) >= APART:
+                last[symbol, reason] = at
+                rows.append(('strength_gate', symbol, e['time'], reason, None))
     reasons = Counter(str(e['ipo_reason']) for e in events if e.get('event') == 'v2_entry_gate' and e.get('ipo_reason'))
     bought = {e.get('symbol') for e in events if e.get('event') == 'new_listing'}
     if reasons:
@@ -111,7 +125,8 @@ def update(root=ROOT, day=None, research=None, fetch=None):
                 cache[symbol] = []
         if not cache[symbol]:
             continue
-        rows.append({'key': f'{kind}:{day}:{symbol}:{blocked}', 'day': day, 'kind': kind, 'symbol': symbol, 'time': when,
+        key = f'{kind}:{day}:{symbol}:{blocked}' + (f':{when[11:16]}' if kind == 'strength_gate' else '')
+        rows.append({'key': key, 'day': day, 'kind': kind, 'symbol': symbol, 'time': when,
                      'blocked': blocked, 'value': value, **settle(when, cache[symbol])})
     research = Path(research or root / 'market-research.sqlite3')
     with sqlite3.connect(research, timeout=5) as db:

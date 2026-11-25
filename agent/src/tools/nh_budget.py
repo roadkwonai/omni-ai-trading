@@ -29,10 +29,11 @@ _wait_deadline = {'high': 1.0, 'low': 2.0}  # longest wait for a slot before the
 HIGH = frozenset({'nh_paper_isolated', 'nh_live_follow', 'longterm_live', 'nh_guarded_live', 'nh_live_auto',
                   'nh_live_position_watch', 'restart_runner'})
 TRIES = 50
-SAME_GAP = 1.1  # measured 2026-11-19: the same query 0.5 s later is refused, 0.7-1.0 s later answered (nh_live_broker.PAGE_GAP)
+SAME_GAP = 1.5  # NH needs about a second between arrivals (2026-11-19: 0.5 s refused, 0.7-1.0 s answered); at 1.1 s between
+# starts a first call that reached NH late was still followed too soon (2026-11-25: 5 refusals in 90 minutes)
 SAME_FILE = 'nh-budget-same.json'  # its own file: programs still running older code read nh-budget.json as a list
 SAME_QUERIES = ('krstockInquiry',)
-_same_deadline = {'high': 1.2, 'low': 3.0}  # past it the call goes at once; a trading program does not queue behind a screen
+_same_deadline = {'high': 1.6, 'low': 4.0}  # past it the call goes at once; a trading program does not queue behind a screen
 ORDERS = ('krstockOrder',)  # operationId prefix of order, modify and cancel calls
 
 
@@ -68,7 +69,8 @@ def _locked(path: Path, update):
 
 def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
     """Seconds waited so that this account query starts SAME_GAP after the last one of any program. The slot is reserved
-    under the lock, so two waiting programs get different ones. The key is a hash: no account number is written."""
+    under the lock, so two waiting programs get different ones. The key is a hash: no account number is written.
+    `tier` None: only note that the query starts now (take, after its wait for a slot)."""
     try:
         account = str((arguments.get('input') or {}).get('act_no'))
         key = hashlib.sha256(f'{operation}:{account}'.encode()).hexdigest()[:16]
@@ -78,8 +80,10 @@ def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
             now = clock()
             text = stream.read()
             starts = {k: float(v) for k, v in (json.loads(text) if text.strip() else {}).items() if abs(now - float(v)) < 10}
-            wait = max(0.0, starts.get(key, 0.0) + SAME_GAP - now)
-            if wait > _same_deadline[tier]:
+            wait = max(0.0, starts.get(key, 0.0) + SAME_GAP - now) if tier else 0.0
+            if tier is None:
+                starts[key] = max(starts.get(key, 0.0), now)
+            elif wait > _same_deadline[tier]:
                 wait = 0.0
             else:
                 starts[key] = now + wait
@@ -103,8 +107,15 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
         tier = 'high' if order or high_priority(caller or program()) else 'low'
         limit = RATE if tier == 'high' else RATE - RESERVE
         path = Path(path) if path is not None else _default_path()
-        same = _wait_same(name, arguments, tier, path, clock, sleep) if tool == 'call_api' and str(name).startswith(SAME_QUERIES) else 0.0
+        spaced = tool == 'call_api' and str(name).startswith(SAME_QUERIES)
+        same = _wait_same(name, arguments, tier, path, clock, sleep) if spaced else 0.0
         started = clock()
+
+        def went(now):
+            # a slot waited for after the reservation made the real call later: the next same query counts from here
+            # (2026-11-25: it came less than a second behind and NH refused it, IGW42903)
+            if spaced and now > started:
+                _wait_same(name, arguments, None, path, clock, sleep)
         deadline = started + _wait_deadline[tier]
         for attempt in range(TRIES):  # bounded: a clock that never moves cannot hold a call
             now, pause, last = clock(), [None], attempt == TRIES - 1
@@ -117,6 +128,7 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
                 return recent
             _locked(path, update)
             if pause[0] is None:
+                went(now)
                 return round(same + max(0.0, now - started), 3)
             sleep(min(max(pause[0], 0.01), max(0.0, deadline - now)))
         return round(same + max(0.0, clock() - started), 3)  # unreachable: the last try always counts the call

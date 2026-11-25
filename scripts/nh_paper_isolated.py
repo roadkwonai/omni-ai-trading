@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import os
 import sqlite3
@@ -11,9 +12,11 @@ import uuid
 import math
 import re
 import sys
+import threading
 from contextvars import ContextVar
 from functools import wraps
 from decimal import Decimal
+from urllib.error import URLError
 from xml.etree.ElementTree import ParseError
 from datetime import datetime, timedelta
 from datetime import datetime as datetime_type
@@ -273,7 +276,18 @@ def selected_config(configs, digest, adapter_factory=MCPServerAdapter):
     return isolated_config(template, accounts[0])
 
 
-def shared_default_config(configs, runtime, adapter_factory=MCPServerAdapter):
+# a login starts every service at once and the NH MCP process may miss its 8 s start (2026-11-25 06:40, 10.4 s). Long
+# enough that trading-day-start, which counts a runner alive after 30 s as started, loses none of its own 150 s.
+ACCOUNT_LIST_TRIES, ACCOUNT_LIST_WAIT = 16, 10
+
+
+def session_left(root, now):
+    """Whether a runner started now still has a session to trade: pre-open (it waits for the bell) or under way, and no STOP."""
+    from session_times import until_open
+    return (in_observation_session(now) or until_open(now) > 0) and not (Path(root) / 'STOP').exists()
+
+
+def shared_default_config(configs, runtime, adapter_factory=MCPServerAdapter, *, tries=1, going=lambda: False, wait=time.sleep):
     config = configs['nhplug_paper']
     account = paper_account(config)
     if account[3:5] != '01':
@@ -291,11 +305,17 @@ def shared_default_config(configs, runtime, adapter_factory=MCPServerAdapter):
             raise ValueError('shared account owner unavailable')
     except (OSError, TypeError, ValueError) as exc:
         raise ValueError('shared account owner unavailable') from exc
-    response = adapter_factory('nhplug_readonly', configs['nhplug_readonly']).call_tool('list_accounts', {})
-    data = response.get('data') if isinstance(response, dict) else None
-    if (not isinstance(response, dict) or response.get('status') != 'ok' or not isinstance(data, dict) or data.get('rsp_cd') != '00000'
-            or not isinstance(data.get('Output_0'), list)):
-        raise ValueError('paper account list unavailable')
+    reader = adapter_factory('nhplug_readonly', configs['nhplug_readonly'])
+    for left in itertools.count(tries - 1, -1):
+        response = reader.call_tool('list_accounts', {})
+        data = response.get('data') if isinstance(response, dict) else None
+        if (isinstance(response, dict) and response.get('status') == 'ok' and isinstance(data, dict)
+                and data.get('rsp_cd') == '00000' and isinstance(data.get('Output_0'), list)):
+            break
+        if left <= 0 and not going():  # nothing starts the runner again that day, so it asks while there is a session to trade
+            raise ValueError('paper account list unavailable')
+        print('account list unavailable; asked again', flush=True)
+        wait(ACCOUNT_LIST_WAIT)
     matches = [row for row in data['Output_0'] if isinstance(row, dict) and row.get('acct_no') == account]
     if len(matches) != 1 or matches[0].get('acct_type') != '03':
         raise ValueError('shared paper account unavailable or ambiguous')
@@ -435,7 +455,7 @@ def apply_settings(root):
     global AUTO, SPLIT_TRANCHE_KRW, SPLIT_SYMBOL_KRW, TREND_HALF_PCT, TREND_TRAIL_PCT, OVERNIGHT_MAX_KRW, SWING_MAX_DAYS
     global STRENGTH_TOP_N, STRENGTH_JEV_MIN, STRENGTH_CHANGE
     global IPO_DAYS, IPO_SIZE_PCT, IPO_NEAR_HIGH_PCT, IPO_STOP_PCT, IPO_HALF_PCT, IPO_TRAIL_PCT
-    global WEAK_HALF_PCT, WEAK_ALL_PCT, DIRECTION_SWITCH, ENTRY_VOLUME_RATIO, SHARED_SINGLE_ORDER_KRW, ETF7_MAX_ORDER_QTY, PAPER_MAX_TOTAL_QTY
+    global WEAK_HALF_PCT, WEAK_ALL_PCT, FADE_EXIT_PCT, DIRECTION_SWITCH, ENTRY_VOLUME_RATIO, SHARED_SINGLE_ORDER_KRW, ETF7_MAX_ORDER_QTY, PAPER_MAX_TOTAL_QTY
     global SCALE_MAX_ADDS, ADD_CONF_SIZING, ADD_SIZE_PCT, PARTIAL_SELL_CONF, PARTIAL_SELL_PCT, REENTRY_GUARD, REENTRY_ALLOW, LOSING_STREAK_GUARD, AVERAGING_DOWN_GUARD, OPPOSITE_GUARD, DIRECTION_CONFIRM
     global RISING_CHECK, IPO_ADD_GUARD, IPO_MAX_POSITIONS, ENTRY_CUTOFF, FLATTEN_AT, SESSION_CLOSE, OVERSOLD
     global IPO_SLOT, IPO_DAILY_MAX, IPO_TIME_STOP_MIN, STRENGTH_SLOT, STRENGTH_SLOT_MAX, STRENGTH_SLOT_DAILY, CAREFUL
@@ -468,6 +488,7 @@ def apply_settings(root):
     IPO_NEAR_HIGH_PCT, IPO_STOP_PCT = settings['ipo_near_high_pct'], settings['ipo_stop_pct']
     IPO_HALF_PCT, IPO_TRAIL_PCT = settings['ipo_half_pct'], settings['ipo_trail_pct']
     WEAK_HALF_PCT, WEAK_ALL_PCT = settings['weak_half_pct'], settings['weak_all_pct']
+    FADE_EXIT_PCT = float(settings.get('fade_exit_pct', 0.8))
     DIRECTION_SWITCH = bool(settings['direction_switch'])
     ENTRY_VOLUME_RATIO = settings['entry_volume_ratio']
     REENTRY_GUARD, LOSING_STREAK_GUARD = bool(settings['reentry_guard']), bool(settings['losing_streak_guard'])
@@ -514,9 +535,54 @@ TREND_HALF_PCT, TREND_TRAIL_PCT, OVERNIGHT_MAX_KRW = 2.0, 1.5, 3_000_000
 # flatten); a pending order is re-reconciled next cycle and blocks new orders, so retrying the read is safe.
 TRANSIENT_READ_ERRORS = {'quote unavailable', 'invalid bid', 'quote time unavailable or stale', 'paper signal bars unavailable',
                          'paper broker page unavailable'}
-TRANSIENT_READ_LIMIT = setting('read_failure_limit')  # consecutive cycles; then the runner stops as before
+# user 2026-11-25: a refused or broken page (11/13 13:08) or a timeout (11/11 10:43) ended the runner at once; with no order
+# unresolved it is a read like the others. Order, ledger and account errors still stop it.
+UNSENT_READ_ERRORS = {'paper broker page rejected', 'paper page or continuation unavailable', 'contradictory pagination status',
+                      'paper pagination completeness unavailable', 'paper pagination cursor invalid'}
+TRANSIENT_READ_LIMIT = setting('read_failure_limit')  # consecutive cycles; then the user is told (user 2026-11-25: it stopped before)
+
+
+def read_failed(db, exc):
+    """Whether this cycle ended on a failed read the next one may simply try again."""
+    if isinstance(exc, ValueError) and str(exc) in TRANSIENT_READ_ERRORS:
+        return True
+    if not (isinstance(exc, (TimeoutError, ConnectionError, URLError)) or isinstance(exc, ValueError) and str(exc) in UNSENT_READ_ERRORS):
+        return False
+    try:
+        return db.execute("SELECT 1 FROM intents WHERE status!='terminal'").fetchone() is None
+    except sqlite3.Error:
+        return False
+
+
+def error_text(exc):
+    return f"{type(exc).__name__} {internal_detail(exc).get('detail', '')}".strip()
+
+
+def stop_text(exc):
+    return f'⚠️ 모의 실행기가 오류로 멈췄습니다({error_text(exc)}). 모의 손절 감시와 새 매수가 없습니다. 미확인 주문과 보유를 대조한 뒤 다시 시작하세요.'
+
+
+def tell(text):
+    """Mac and real-time channel alert, best effort and at most 15 s: an alert must not end or hold the runner."""
+    if 'PYTEST_CURRENT_TEST' in os.environ:
+        return
+
+    def send():
+        try:
+            from nh_live_follow import mac_notify
+            mac_notify('모의 실행기', text)
+            from discord_notify import send_everywhere, urls_from_env
+            send_everywhere(urls_from_env().get('realtime'), text)
+        except Exception:  # noqa: BLE001 - nothing more can be done, and the runner's own error must stay the one raised
+            pass
+    thread = threading.Thread(target=send, daemon=True)
+    thread.start()
+    thread.join(15)
+
+
 # New-listing entry (user 2026-11-12); defaults, apply_settings() reads the dashboard values.
 IPO_DAYS, IPO_SIZE_PCT, IPO_NEAR_HIGH_PCT, IPO_STOP_PCT, IPO_HALF_PCT, IPO_TRAIL_PCT = 2, 50, 3.0, 3.0, 3.0, 2.0
+FADE_EXIT_PCT = 0.8  # a strength pick this % up is sold whole when its tape turns (settings, 0 = off; user 2026-11-25)
 WEAK_HALF_PCT, WEAK_ALL_PCT, DIRECTION_SWITCH = 1.0, 2.0, True  # weak-market take-profit caps; switch side (settings)
 IPO_START = setting('ipo_start')  # let the listing-day open settle
 IPO_SLOT, IPO_DAILY_MAX, IPO_TIME_STOP_MIN = True, 2, 60  # new-listing slot (user 2026-11-17); apply_settings() reads them
@@ -1078,6 +1144,14 @@ INVERSE = {'min_drop_pct': 0.5, 'crash_pct': 1.5, 'quick_tp_pct': 0.3,
 OWN_EXIT_PROFILES = ('trend', 'ipo', 'oversold', 'inverse_quick', 'inverse_crash')  # plans the tape never upgrades to a trend plan
 
 
+def index_recent(view, index):
+    """The index's change over the last 30 minutes; in the session's first 30, when there is no price that old, since the open
+    (user 2026-11-25: until 09:31 every inverse pick was refused as unknown). None when it is missing or stale (market_context)."""
+    item = ((view or {}).get('index_intraday') or {}).get(index) or {}
+    recent = item.get('change_30m_pct')
+    return recent if recent is not None else item.get('first_30m_from_open_pct')
+
+
 def inverse_gate(view, index):
     """None when every view backs an inverse buy on `index` ('코스피'/'코스닥'), else the first that does not: the
     daily regime is 하락장, the index is down at least INVERSE['min_drop_pct'] today and not rebounding over the last
@@ -1090,7 +1164,7 @@ def inverse_gate(view, index):
     if item['regime'] != '하락장':
         return 'inverse_regime_not_falling'
     change = item.get('today_change_pct')
-    recent = (((view.get('index_intraday') or {}).get(index)) or {}).get('change_30m_pct')
+    recent = index_recent(view, index)
     program = (item.get('program_net_100m_krw') or {}).get('전체')
     nasdaq = (view.get('global_last_daily_change_pct') or {}).get('나스닥100')
     if not all(type(v) in (int, float) for v in (change, recent, program, nasdaq)):
@@ -1329,6 +1403,31 @@ def volume_check(rows):
     return None
 
 
+def bar_shadow(root, cache, now):
+    """Observation only (user 2026-11-25): NH stamps a minute bar with its end, yet valid_bars leaves out the current and the
+    previous stamp, two bars that had ended. Per chart read this cycle: the newest bar the gates used and the newest that had
+    ended, each [stamp, close, rising over 5 bars, volume check passed]. Own file, so neither the ledger nor a gate reads it;
+    whether the cutoff changes is decided on 5 trading days of it."""
+    try:
+        local, codes = now.astimezone(KST), {}
+        day, used_before, ended_by = local.strftime('%Y%m%d'), (local - timedelta(minutes=1)).strftime('%H%M00'), local.strftime('%H%M00')
+        for key, reply in (cache or {}).items():
+            data = reply.get('data') if isinstance(reply, dict) else None
+            rows = [{k: r[k] for k in ('bsop_time', 'stck_prpr', 'vol')} for r in (data or {}).get('Output_1') or []
+                    if r.get('bsop_date') == day and r.get('bsop_time', '999999') <= ended_by]
+            rows.sort(key=lambda r: r['bsop_time'], reverse=True)
+            seen = {'used': [r for r in rows if r['bsop_time'] < used_before], 'newest': rows}
+            if len(seen['used']) >= 6:
+                codes[key if isinstance(key, str) else key[0]] = {
+                    name: [r[0]['bsop_time'], int(r[0]['stck_prpr']), int(r[0]['stck_prpr']) > int(r[5]['stck_prpr']), volume_check(r) is None]
+                    for name, r in seen.items()}
+        if codes:
+            with (Path(root) / 'bar-shadow.jsonl').open('a', encoding='utf-8') as stream:
+                stream.write(json.dumps({'time': now.isoformat(timespec='seconds'), 'codes': codes}, separators=(',', ':')) + '\n')
+    except Exception:  # noqa: BLE001 - a record that fails must not cost the cycle
+        pass
+
+
 SLOT_COOLDOWN_MIN = 3   # a strength / new-listing pick the order path refused rests this long (user 2026-11-19),
 SLOT_COOLDOWN_MAX = 30  # doubling with each refusal after a rest, so a one-off stale signal costs 3 minutes (review 11-19)
 _COOLING = {}  # code -> (when it may be picked again, refusals so far today); a buy clears it
@@ -1407,6 +1506,9 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=Non
         probabilities = {}
     ranked = sorted((c for c, v in probabilities.items() if c != 'NONE' and type(v) in (int, float)),
                     key=lambda c: probabilities[c], reverse=True)[:STRENGTH_TOP_N]
+    tape = market_view(root)
+    kospi = ((tape or {}).get('index_intraday') or {}).get('코스피') or {}
+    weak_tape = index_recent(tape, '코스피') is not None and type(kospi.get('from_open_pct')) in (int, float) and kospi['from_open_pct'] < 0
     best, why, whys = None, 'no_strength_candidate', {}  # whys: each ranked stock's refusal (the top one is reported)
     _STRENGTH_WHYS.clear()
     _STRENGTH_WHYS.update({code: 'not_in_movers' for code in ranked if code not in movers})
@@ -1421,6 +1523,9 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=Non
             continue
         if cooling(code, now):
             whys[code] = 'pick_cooldown'
+            continue
+        if probability < WEAK_TAPE_JEV_MIN and weak_tape:
+            whys[code] = 'strength_weak_tape'
             continue
         try:
             previous = price / (1 + change / 100)
@@ -1449,6 +1554,16 @@ def strength_candidate(root, movers, bars, now, owned=(), floors=None, sized=Non
     if best:
         _STRENGTH_WHYS[best[0]] = 'picked'
     return best if best else (None, why)
+
+
+# user 2026-11-25: KOSPI under its open and Jev's own pick weak, both at once (all six such buys of 11-12~11-25 lost)
+WEAK_TAPE_JEV_MIN = 0.3
+
+
+def strong_now(quote, price):
+    """The order's own price is inside STRENGTH_CHANGE of the previous close NH quotes with it."""
+    previous = quote.get('stck_prdy_clpr')
+    return type(previous) in (int, float) and previous > 0 and STRENGTH_CHANGE[0] <= (price / previous - 1) * 100 <= STRENGTH_CHANGE[1]
 
 
 def strength_shadow(root, movers, bars, owned, symbols, floors, blocked, cycle_id):
@@ -1517,6 +1632,43 @@ def slot_entry(read, root, owned, movers, bars, closed_today, short_codes, now, 
                                                     closed_today, code in short_codes, read=read, review=review):
                 return code, 'watchlist_strength', None, facts
     return None
+
+
+FADE_BARS, FADE_AFTER_MIN = 3, 2
+
+
+def fade_candidate(plan, avg, bid, view, index, short, now):
+    """A watchlist strength pick FADE_EXIT_PCT % up, bought at least FADE_AFTER_MIN minutes ago, in a known market that is
+    neither 상승장 nor confirmed strong (trend_mode): the positions fade_exit may sell. Other plans keep their own rules."""
+    plan, item = plan or {}, (view or {}).get(index) or {}
+    if not FADE_EXIT_PCT or plan.get('entry_source') != 'watchlist_strength' or plan.get('profile') not in ('defensive', 'trend'):
+        return False
+    if item.get('regime') not in ('하락장', '횡보장') or item.get('today_tone') is None or trend_mode(view, index, short):
+        return False
+    try:
+        held = now - datetime.fromisoformat(plan['opened'])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return held >= timedelta(minutes=FADE_AFTER_MIN) and avg > 0 and Decimal(str(bid)) >= Decimal(str(avg)) * (1 + Decimal(str(FADE_EXIT_PCT)) / 100)
+
+
+def fade_exit(rows, now):
+    """'fade_exit' when the last FADE_BARS minutes that have ended sold more than they bought: the volume of rising minutes
+    less that of falling ones (user 2026-11-25, replay .scratch/fade_options.py: 약세장 37 picks −0.45% -> −0.34% a trade). NH
+    stamps a bar with the minute it ends; a chart that is late or has a gap decides nothing."""
+    try:
+        local = now.astimezone(KST)
+        day, ended = local.strftime('%Y%m%d'), local.strftime('%H%M00')
+        last = sorted((r for r in rows if r.get('bsop_date') == day and r.get('market') != 'NXT' and r['bsop_time'] <= ended),
+                      key=lambda r: r['bsop_time'], reverse=True)[:FADE_BARS]
+        times = [datetime.strptime(r['bsop_time'], '%H%M%S') for r in last]
+        now_ = datetime.strptime(ended, '%H%M%S')
+        if len(last) < FADE_BARS or now_ - times[0] > timedelta(minutes=1) or times[0] - times[-1] != timedelta(minutes=FADE_BARS - 1):
+            return None
+        moves = [(float(r['stck_prpr']) - float(r['stck_oprc']), float(r['vol'])) for r in last]
+        return 'fade_exit' if sum(((m > 0) - (m < 0)) * v for m, v in moves) < 0 else None
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
 
 
 def ipo_time_stop(plan, now):
@@ -2096,6 +2248,21 @@ def entry_plan(root, read, symbol, short):
 STRENGTH_TREND_AT = 1.0  # user 2026-11-20 (replay .scratch/strength_trend_replay.py): a strength pick at +1% rides its own trend
 
 
+def moved_to_trend(plan, symbol, bid, view, index, short, avg=None):
+    """The trend plan this position moves to now, or None. In a confirmed market trend (trend_mode) half is sold at TREND_HALF_PCT;
+    a strength pick that is only itself +STRENGTH_TREND_AT% up sells half there and lets the rest ride (user 2026-11-25: moved to +2%
+    without a trend it had neither a profit nor a breakeven stop between +1% and +2%)."""
+    profile, trend = (plan or {}).get('profile'), trend_mode(view, index, short)
+    own = ((plan or {}).get('entry_source') == 'watchlist_strength' and profile == 'defensive'
+           and type(avg) in (int, float) and avg > 0 and bid >= avg * (1 + STRENGTH_TREND_AT / 100))
+    if profile == 'trend' or profile in OWN_EXIT_PROFILES or not (own or trend):  # new-listing / rebound / inverse plans keep their own numbers
+        return None
+    numbers = {k: v for k, v in new_plan(symbol, 'trend').items() if k in ('trend_half_pct', 'trend_trail_pct')}
+    if not trend:
+        numbers['trend_half_pct'] = STRENGTH_TREND_AT
+    return {**(plan or new_plan(symbol)), 'profile': 'trend', 'peak': max((plan or {}).get('peak') or 0, bid), **numbers}
+
+
 def save_exit_plan(root, symbol, cycle_id=None, profile='defensive', target=None, basis=None, source=None):
     """Record the exit levels in force at entry; later setting changes do not move an open position's levels.
     `source` watchlist_strength is kept on the plan (entry_source): such a position switches to the trend plan at
@@ -2150,7 +2317,7 @@ def inverse_exit(plan, avg, bid, view, index):
     reached +INVERSE['protect_at_pct'] %."""
     if (plan or {}).get('profile') not in ('inverse_quick', 'inverse_crash'):
         return None
-    recent = (((view or {}).get('index_intraday') or {}).get(index) or {}).get('change_30m_pct')
+    recent = index_recent(view, index)
     if type(recent) in (int, float) and recent >= INVERSE['rebound_exit_pct']:
         return 'inverse_market_rebound'
     peak = plan.get('peak')
@@ -2165,6 +2332,17 @@ def holding_quote_record(quote, avg, plan):
     fields = {'bid': quote.get('bidp'), 'ask': quote.get('askp'), 'quote_time': quote.get('hoga_bsop_hour'),
               'avg': avg, 'peak': (plan or {}).get('peak')}
     return {k: v for k, v in fields.items() if v is not None}
+
+
+def holding_book(root, symbol, quote, now):
+    """The waiting bid/ask quantity at one look at a holding, observation only (fade_shadow.py, user 2026-11-25). Its own
+    file, so neither the ledger nor a gate reads it; a failed write costs nothing."""
+    try:
+        with (Path(root) / 'holding-book.jsonl').open('a', encoding='utf-8') as stream:
+            stream.write(json.dumps({'time': now.isoformat(), 'symbol': symbol, 'bid_qty': quote.get('total_bidp_rsqn'),
+                                     'ask_qty': quote.get('total_askp_rsqn')}, separators=(',', ':')) + '\n')
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def v2_trail_exit(plan, avg, bid):
@@ -2776,25 +2954,14 @@ def investor_flows(read, now):
     cached = _INVESTOR_CACHE.get('value')
     if cached and 0 <= (now - cached[0]).total_seconds() < INVESTOR_TTL:
         return cached[1]
+    from watchlist import investor_days
     today = now.astimezone(KST).strftime('%Y%m%d')
-    keys = (('frgn_ntby_qty', 'foreign'), ('gigwan', 'institution'), ('person', 'individual'))
     result = {}
     try:
         for name, code in ETF7_SYMBOLS.items():
-            response = read.call_tool('call_api', {'operationId': 'krstockQuoteCurrentInvestor',
-                                                   'input': {'market_cd': 'KRX', 'iem_cd': code, 'array_cnt': '5'}})
-            data = response.get('data') if isinstance(response, dict) else None
-            if (response.get('status') != 'ok' or not isinstance(data, dict) or data.get('rsp_cd') != '00000'
-                    or not isinstance(data.get('Output_0'), list)):
-                continue  # that ETF is left out; the others still reach Jev
-            rows = [r for r in data['Output_0'] if isinstance(r, dict) and isinstance(r.get('bsop_date1'), str)
-                    and all(type(r.get(k)) in (int, float) for k, _ in keys) and any(r[k] for k, _ in keys)]
-            entry = {}
-            for label, matches in (('last_close_day', [r for r in rows if r['bsop_date1'] < today]),
-                                   ('today_provisional', [r for r in rows if r['bsop_date1'] == today])):
-                if matches:
-                    entry[label] = {'date': matches[0]['bsop_date1'], **{out: matches[0][k] for k, out in keys}}
-            result[name] = entry
+            entry = investor_days(read, code, today)
+            if entry is not None:  # an ETF that cannot be read is left out; the others still reach Jev
+                result[name] = entry
     except (AttributeError, TypeError, ValueError):
         return None
     if not result:
@@ -2852,6 +3019,11 @@ def opening_split(bars, now):
     split = lambda keep: {n: [r for r in rows if (r.get('bsop_date', today) == today and r.get('market') != 'NXT') == keep]  # noqa: E731
                           for n, rows in bars.items()}
     return {n: r for n, r in split(True).items() if r}, {n: r for n, r in split(False).items() if r}
+
+
+def session_bar(rows, now):
+    """The newest row is a KRX bar of today (a row without a date is: valid_bars leaves only today's)."""
+    return rows[0].get('market') != 'NXT' and rows[0].get('bsop_date', now.astimezone(KST).strftime('%Y%m%d')) == now.astimezone(KST).strftime('%Y%m%d')
 
 
 def opening_series(rows, now):
@@ -2935,8 +3107,12 @@ def etf7_signal_deadline(bars, decision_time, jev_time, now, *, modes=None):
         timestamps = [datetime.fromisoformat(value) for value in times]
         if any(stamp > now for stamp in timestamps):
             return None
+        # an opening chart that still starts with the NXT pre-market (08:49) or the previous session is good for the opening
+        # window (fresh_etf7_bars); taken as a KRX bar of today it refused every buy, the ETFs' too (2026-11-25)
+        from session_times import minutes, order_start
+        opened = local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=minutes(order_start(local.date())) + OPENING_REVIEW_MIN)
         bar_cutoffs = [datetime.strptime(local.strftime('%Y%m%d') + rows[0]['bsop_time'], '%Y%m%d%H%M%S').replace(tzinfo=KST)
-                       + timedelta(minutes=4) for rows in bars.values()]
+                       + timedelta(minutes=4) if session_bar(rows, now) else opened for rows in bars.values()]
         cutoffs = [*(stamp + timedelta(seconds=60) for stamp in timestamps),
                    session_close_at(local), *bar_cutoffs]
         deadline_ms = math.floor(min(cutoffs).timestamp() * 1000)
@@ -3468,12 +3644,9 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         if observing_open:
             return
         plan, changed = plans.get(symbol), False
-        own_trend = ((plan or {}).get('entry_source') == 'watchlist_strength' and (plan or {}).get('profile') == 'defensive'
-                     and type(avg) in (int, float) and avg > 0 and bid >= avg * (1 + STRENGTH_TREND_AT / 100))
-        if ((own_trend or trend_mode(view, symbol_index(root, symbol), symbol in short_codes))
-                and (plan or {}).get('profile') not in OWN_EXIT_PROFILES):  # new-listing / rebound / quick inverse plans keep their own numbers
-            plan = {**(plan or new_plan(symbol)), 'profile': 'trend', 'peak': max((plan or {}).get('peak') or 0, bid),
-                    **{k: v for k, v in new_plan(symbol, 'trend').items() if k in ('trend_half_pct', 'trend_trail_pct')}}
+        moved = moved_to_trend(plan, symbol, bid, view, symbol_index(root, symbol), symbol in short_codes, avg)
+        if moved:
+            own_trend, plan = moved['trend_half_pct'] == STRENGTH_TREND_AT, moved
             journal_event(root, 'exit_plan', symbol=symbol, reason='strength_trend' if own_trend else 'trend_upgrade', cycle_id=cycle_id, profile=plan['profile'],
                           **{k: plan[k] for k in ('stop_pct', 'half_pct', 'all_pct', 'trend_half_pct', 'trend_trail_pct')})
             changed = True
@@ -3523,6 +3696,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                               **holding_quote_record(quote, avg, plans.get(symbol)))
             except Exception:
                 pass  # a failed diagnostic write must not delay an exit
+            holding_book(root, symbol, quote, datetime.now(KST))
         # Before the runner stops at 15:00 a holding leaves unless its trend plan, a rising market, a profit, the
         # overnight limit and an open next session all allow carrying it.
         flatten = etf7 and datetime.now(KST).strftime('%H:%M') >= FLATTEN_AT
@@ -3562,9 +3736,17 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         v2_jev_sell = v2_hold and OVERSOLD.get('oversold_v2_jev_sell_on') and bid > avg  # ... or, switched on, Jev's SELL in profit
         # A user exit request or the pre-close exit uses the protective (quote-deadline) path.
         full_exit = manual or flatten or exit_now(symbol, avg, bid)
+        faded = None
+        if etf7 and not full_exit and fade_candidate(plans.get(symbol), avg, bid, view, stop_symbol_index(root, symbol) or '코스피',
+                                                     symbol in short_codes, datetime.now(KST)):
+            try:  # a chart that cannot be read leaves the other exits as they are
+                faded = fade_exit(((minute_bars(read, symbol, bar_cache).get('data') or {}).get('Output_1')) or [], datetime.now(KST))
+            except Exception:  # noqa: BLE001
+                faded = None
+        full_exit = full_exit or faded is not None
         risk_exit = full_exit
         signal_context = {}
-        jev_sell = manual or flatten or (holding_action(read, root, symbol, avg, bid, cycle_id=cycle_id, etf7=etf7,
+        jev_sell = manual or flatten or faded is not None or (holding_action(read, root, symbol, avg, bid, cycle_id=cycle_id, etf7=etf7,
                                                         signal_context=signal_context, modes=modes, stop_hit=exit_now(symbol, avg, bid),
                                                         bar_cache=bar_cache, position_quote=quote,
                                                         position_extra=position_context(symbol, avg, bid, quantity) if etf7 else None)
@@ -3691,6 +3873,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                or ipo_time_stop(plans.get(symbol), datetime.now(KST))
                                or inverse_exit(plans.get(symbol), avg, price, view, stop_symbol_index(root, symbol) or '코스피')
                                or v2_trail_exit(plans.get(symbol), avg, price)
+                               or faded
                                or ('direction_switch' if switched else 'session_flatten' if flatten else None)) if etf7 else None)
                     if etf7 and reason and not take_profit and symbol in plans and not plans[symbol].get('exiting'):
                         plans[symbol] = {**plans[symbol], 'exiting': reason}
@@ -3828,6 +4011,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             if rows and (fresh_series(rows, datetime.now(KST)) or opening_series(rows, datetime.now(KST))):
                 bars[code], movers[code] = rows, details
         symbols = {**symbols, **{code: code for code in movers}}
+        bar_shadow(root, bar_cache, datetime.now(KST))
     cycle_id = uuid.uuid4().hex
     # observation only (user 2026-11-17): what the strength path would pick when Jev's own pick is blocked or cannot add
     shadow = lambda blocked: strength_shadow(root, movers, bars, owned, symbols,
@@ -4064,6 +4248,12 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
     if type(price) is not int or price <= 0 or type(cash) not in (int,float) or not math.isfinite(cash) or cash < 0:
         raise ValueError('paper buying power or ask unavailable')
     timing = entry_timing_context(quote, price, bars.get(candidate, []), decided_at)
+    if source == 'watchlist_strength' and bars.get(candidate) and not session_bar(bars[candidate], decided_at):
+        # before the first KRX bar the pick's "up today" came from the pre-market: today's own price must say so too
+        if not strong_now(quote, price):
+            journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason='strength_change_out_of_range',
+                          cycle_id=cycle_id, entry_timing=timing)
+            return 'wait'
     if cash < price:
         journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason='insufficient_buying_power',
                       cycle_id=cycle_id, entry_timing=timing)
@@ -4200,7 +4390,8 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
     root = Path(runtime) / ('nhplug/shared-etf-paper' if shared_default else 'nhplug/isolated-paper')
     root.mkdir(parents=True, mode=0o700, exist_ok=True)
     if shared_default:
-        config = shared_default_config(configs, runtime, MCPServerAdapter)
+        config = shared_default_config(configs, runtime, MCPServerAdapter, tries=ACCOUNT_LIST_TRIES,
+                                       going=lambda: not once and session_left(root, datetime.now(KST)))
         digest = account_hash(paper_account(config))
     else:
         digest = json.loads((root / 'account.json').read_text(encoding='utf-8'))['account_sha256']
@@ -4225,7 +4416,6 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
         db = connect_journal(root/'orders.sqlite3', digest)
         stop = wake = None
         if websocket_wakeup:
-            import threading
             from nh_ws_monitor import watch, wake_on_data
             stop, wake = threading.Event(), threading.Event()
             for mode in ('quote', 'paper_notice'):
@@ -4243,14 +4433,19 @@ def run(configs, runtime, *, execute_orders=False, once=False, websocket_wakeup=
                     break
                 try:
                     status = cycle(db, read, broker, account, root, execute_orders and order_session(now), now, etf7=shared_default)
+                    if read_failures >= TRANSIENT_READ_LIMIT:
+                        tell(f'✅ 모의 실행기 조회가 다시 됩니다(연속 실패 {read_failures}번 뒤).')
                     read_failures = 0
-                except ValueError as exc:
+                except Exception as exc:
                     # A failed quote read happens before any order is sent; one bad minute must not end the runner and
-                    # its stop-loss watch (11/12 12:00 it did, for 14 minutes). Anything else, or 5 in a row, still stops it.
-                    read_failures += 1
-                    if str(exc) not in TRANSIENT_READ_ERRORS or read_failures >= TRANSIENT_READ_LIMIT:
+                    # its stop-loss watch (11/12 12:00 it did, for 14 minutes). Anything else still stops it.
+                    if not read_failed(db, exc):
                         raise
-                    journal_event(root, 'v2_error', reason='transient_read_failure', detail=str(exc), cycle_id=uuid.uuid4().hex)
+                    read_failures += 1
+                    detail = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+                    journal_event(root, 'v2_error', reason='transient_read_failure', detail=detail, cycle_id=uuid.uuid4().hex)
+                    if read_failures == TRANSIENT_READ_LIMIT:
+                        tell(f'⚠️ 모의 실행기 조회 연속 실패 {read_failures}번({detail}). 멈추지 않고 매분 다시 시도하지만, 그동안 모의 손절 감시와 새 매수가 없습니다.')
                     status = 'read_retry'
                 print(json.dumps({'status':status, 'time':now.isoformat()}), flush=True)
                 if once:
@@ -4332,7 +4527,12 @@ def main():
     if args.run:
         if args.initialize:
             parser.error('initialize and run are separate operations')
-        run(load_agent_config().mcp_servers, runtime, execute_orders=args.execute, once=args.once, websocket_wakeup=args.websocket_wakeup, shared_default=args.shared_default)
+        try:
+            run(load_agent_config().mcp_servers, runtime, execute_orders=args.execute, once=args.once, websocket_wakeup=args.websocket_wakeup, shared_default=args.shared_default)
+        except Exception as exc:
+            if args.shared_default and session_left(runtime / 'nhplug/shared-etf-paper', datetime.now(KST)):
+                tell(stop_text(exc))  # nothing starts it again by itself (user 2026-11-25)
+            raise
         return
     if args.execute or args.once or args.websocket_wakeup or args.shared_default:
         parser.error('--execute and --once require --run')

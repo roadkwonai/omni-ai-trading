@@ -101,14 +101,14 @@ def _buyable(adapter, account, symbol, fields, balance):
         return None
 
 
-def execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None):
+def execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None, previous_quote=None):
     if op == 'krstockOrderCashBuy':
         with buy_lock(guard.root):
-            return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit)
-    return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit)
+            return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit, previous_quote=previous_quote)
+    return _execute(adapter, guard, credentials, op, fields, replacement_of=replacement_of, pre_reserve_check=pre_reserve_check, quote_audit=quote_audit, previous_quote=previous_quote)
 
 
-def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None):
+def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pre_reserve_check=None, quote_audit=None, previous_quote=None):
     if op not in PATHS: raise LiveOrderBlocked('unsupported operation')
     from accounts import DEFAULT_BUDGET, LIVE_PRICE_HARD_CAP, live_limits, live_loss_realized_only, live_record
     # one accounts.json read per order, so a dashboard edit mid-order cannot mix limits (accounts.live_* use the same fields)
@@ -123,7 +123,7 @@ def _execute(adapter, guard, credentials, op, fields, *, replacement_of=None, pr
     if halt_flag_set('nhplug'): raise LiveOrderBlocked('live kill switch active')
     symbol=fields.get('iem_cd')
     if symbol not in guard.symbols: raise LiveOrderBlocked('account or symbol mismatch')
-    snapshots=collect_snapshots(adapter,guard.account,datetime.now(KST),symbol=symbol)
+    snapshots=collect_snapshots(adapter,guard.account,datetime.now(KST),symbol=symbol,previous_quote=previous_quote)
     guard.observe_loss(snapshots['pnl'],datetime.now(KST),budget['daily_loss_krw'],realized_only)
     if op=='krstockOrderCashSell':
         res=adapter.call_tool('call_api', {'operationId':'krstockInquirySellableQuantity','input':{'act_no':guard.account,'iem_cd':symbol,'cfd_lon_cd':'00'}})

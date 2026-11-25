@@ -18,8 +18,8 @@ SECTIONS = (
      '거래일, 작성·수집 시각(KST), 자료별 상태(정상·부분·빈 결과·종료 세션·실패), 직전 세션과 휴장 여부'),
     ('overnight', '2. 밤사이 시장', ('market', 'futures', 'night_futures'),
      '미국 종가, 지수 선물·야간선물의 기준 시각과 지연, 환율·원자재, 국내 전 거래일 지수·수급·테마'),
-    ('issues', '3. 핵심 이슈', ('news',),
-     '규칙 기반 별점(premarket.rank_news)과 이유, 기사 제목·매체·발행 시각(KST)·링크, 이슈 해석'),
+    ('issues', '3. 핵심 이슈', ('news', 'overnight_news'),
+     '규칙 기반 별점(premarket.rank_news)과 이유, 기사 제목·매체·발행 시각(KST)·링크, 이슈 해석, 장 마감 뒤 호재·악재 종목과 해외 재료'),
     ('impacts', '4. 시장·섹터·종목 영향', ('market', 'news', 'dart', 'krx', 'nxt_quotes'),
      '시장·섹터·관심 종목(보유·ETF·수동·스캐너·대형주)별 근거, 가능한 영향과 반대 시나리오, 개장 후 확인할 가격·수급'),
     ('strategy', '5. 오늘의 대응과 전략', ('market', 'news', 'night_futures'),
@@ -28,7 +28,7 @@ SECTIONS = (
      '기사·공시·시세 링크, 시각과 지연, 빠진 자료와 확인하지 못한 항목'),
 )
 SOURCES = {'market': '시황(지수·수급·해외 일봉)', 'news': '뉴스', 'futures': '해외 선물', 'night_futures': '코스피200 야간선물',
-           'nxt_quotes': 'NXT 장전 호가', 'krx': 'KRX 일별 통계', 'dart': '공시'}
+           'nxt_quotes': 'NXT 장전 호가', 'krx': 'KRX 일별 통계', 'dart': '공시', 'overnight_news': '장 마감 뒤 재료'}
 STATUS = {'ok': '수집됨', 'partial': '일부 수집', 'empty': '빈 결과(미공개·대상 없음)', 'closed': '종료 세션 마감값(지연)',
           'unavailable': '조회 불가', 'error': '오류', 'unknown': '확인 불가'}
 TITLE = '# 장전 분석 · '

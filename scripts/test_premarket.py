@@ -519,3 +519,57 @@ def test_nxt_premarket_leaves_out_the_bar_still_forming(monkeypatch):
     monkeypatch.setattr(toss_data, 'stock_minutes', lambda code: bars)
     row = p._nxt_premarket(datetime(2026, 11, 18, 8, 30, 40, tzinfo=kst), ['005930'], {})['data'][0]
     assert row['last_time'] == '08:01' and row['volume'] == 400000
+
+
+def _overnight_scan(root, monkeypatch, day='2026-11-26'):
+    import json
+    scan = {'day': day, 'time': f'{day}T08:20:00+09:00', 'since': '2026-11-25T15:30:00+09:00', 'scanned': 350, 'failed': 1,
+            'stocks': {'000001': {'name': '가나', 'direction': '호재', 'items': [
+                {'time': '2026-11-25T18:00:00+09:00', 'title': '가나 | 공급계약', 'source': 'P', 'link': 'https://n/1', 'type': '수주·계약', 'direction': 1}]},
+                       '000002': {'name': '다라', 'direction': '악재', 'items': [
+                           {'time': '2026-11-25T19:00:00+09:00', 'title': '유상증자결정', 'source': '공시', 'link': '', 'type': '자금', 'direction': -1}]}},
+            'overseas': [{'signal': '엔비디아', 'move_pct': 5.2, 'threshold_pct': 2.0, 'codes': ['000660'], 'names': ['SK하이닉스'], 'big': True, 'news': 'down',
+                          'items': [{'time': '2026-11-26T06:00:00+09:00', 'title': '엔비디아 하락', 'source': '로이터', 'link': 'https://n/2', 'direction': -1}]}]}
+    (root / 'overnight-morning.json').write_text(json.dumps(scan), encoding='utf-8')
+    return scan
+
+
+def test_the_overnight_material_is_a_section_with_the_pre_market_move(tmp_path, monkeypatch):
+    import kiwoom_data
+    import theme_data
+    at = lambda hhmm: datetime.fromisoformat(f'2026-11-26T{hhmm}:00+09:00')
+    assert p._overnight(at('07:40'), tmp_path)['status'] == 'empty' and p._overnight(at('08:20'), tmp_path)['status'] == 'unavailable'
+    _overnight_scan(tmp_path, monkeypatch)
+    asked = []
+    monkeypatch.setattr(kiwoom_data, 'configured', lambda: True)
+    monkeypatch.setattr(theme_data, 'kiwoom_quotes', lambda codes: (asked.append(codes) or {
+        '000001': {'change_pct': -1.5, 'as_of': '20261126 084000'}, '000002': {'change_pct': -3.0, 'as_of': '20261125 195900'}}, 1))
+    section = p._overnight(at('08:45'), tmp_path)
+    assert section['status'] == 'partial' and asked == [['000001_NX', '000002_NX']]
+    assert section['data']['nxt'] == {'000001': {'change_pct': -1.5, 'as_of': '20261126 084000'}}  # yesterday's trade is not today's move
+    later = p._overnight(at('09:10'), tmp_path, section)
+    assert later['data']['nxt'] == section['data']['nxt'] and len(asked) == 1
+    text = '\n'.join(p.overnight_lines(section))
+    assert '가나(000001)' in text and '[가나 ／ 공급계약](https://n/1)' in text and '호재인데 내리는 종목(키움): 가나 -1.50%' in text and '| **엔비디아** | +5.20% | 내림 | SK하이닉스 | [엔비디아 하락](https://n/2) (로이터 11/26 06:00) |' in text
+    assert p.overnight_lines({}) == []
+
+
+def test_the_engines_get_the_watched_stocks_material_until_half_past_ten(tmp_path, monkeypatch):
+    _overnight_scan(tmp_path, monkeypatch)
+    at = lambda hhmm: datetime.fromisoformat(f'2026-11-26T{hhmm}:00+09:00')
+    (tmp_path / 'watchlist.json').write_text('{"selected": ["000002"]}', encoding='utf-8')
+    got = p.overnight_context({'watch_codes': ['005930']}, tmp_path, at('09:01'))
+    assert list(got['stocks']) == ['000002'] and got['stocks']['000002']['direction'] == 'bad' and got['overseas'][0]['signal'] == '엔비디아'
+    assert p.overnight_context({'watch_codes': []}, tmp_path, at('10:31')) is None
+    assert p.overnight_context({'watch_codes': []}, tmp_path, at('09:01') + timedelta(days=1)) is None
+
+
+def test_a_failed_scan_does_not_fail_the_brief(tmp_path, monkeypatch, capsys):
+    import overnight_catalysts
+    monkeypatch.setattr(p, 'ROOT', tmp_path)
+    monkeypatch.setattr(p, 'collect', lambda: {'time': '2026-11-26T07:40:00+09:00', 'trading_day': '2026-11-26', 'sections': {}})
+    import research_store
+    monkeypatch.setattr(research_store, 'record', lambda *a, **k: True)
+    monkeypatch.setattr(overnight_catalysts, 'morning', lambda root: (_ for _ in ()).throw(RuntimeError('x')))
+    p.run_once()
+    assert (tmp_path / p.FILE).is_file() and 'overnight_error' in capsys.readouterr().out

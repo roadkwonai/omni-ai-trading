@@ -391,6 +391,21 @@ def test_a_long_term_account_has_no_mirror_card(tmp_path, monkeypatch):
     assert '11-17 10:00 · 엔진 원장과 같음' in html  # not today: the date shows
 
 
+def test_a_day_whose_only_fill_sells_a_carried_holding_still_draws(tmp_path, monkeypatch):
+    # 2026-11-24 morning: 삼성전자 carried overnight was the day's only fill, no bar started that day, and the tab stopped
+    import api_status_view
+    from datetime import datetime
+    monkeypatch.setattr(api_status_view, 'current_alerts', lambda now=None: [])
+    sell = {'time': datetime.now().astimezone().replace(hour=9, minute=34).isoformat(), 'symbol': '005930', 'side': 'SELL', 'qty': 1, 'price': 189050,
+            'amount': 189050, 'avg': 180000, 'pnl': 9050, 'cost': 180000, 'return_pct': 5.0, 'after': 0, 'path': '장기투자', 'basis': ''}
+    monkeypatch.setattr('trading_journal._live_rows', lambda key, label: [sell])
+    from streamlit.testing.v1 import AppTest
+    records = {'live-2': {'kind': 'live', 'engine': 'longterm', 'label': '실계좌 2'}}
+    at = AppTest.from_function(_overview_page, args=(tmp_path, records), default_timeout=60).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any('종목마다 한 줄' in c.value for c in at.caption)  # the timeline itself was drawn
+
+
 def test_totals_stay_unknown_when_no_account_knows_the_value(tmp_path):
     # review4 D-8: '오늘 변동' / '평가손익' / '매입' totals read +0원 while every account row showed '—'
     (tmp_path / 'live-balance-live-1.jsonl').write_text(json.dumps({'time': '2026-11-17T15:00:00+09:00', 'total_assets': 990_000}) + '\n')

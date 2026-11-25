@@ -1,4 +1,6 @@
 import unittest
+
+import pytest
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -282,3 +284,57 @@ def test_kiwoom_ranked_candidates_are_quoted_again_from_nh_and_the_rest_marked(m
     assert by_code['A00001']['price'] == 100 and 'source' not in by_code['A00001']
     assert candidates['A00001'] == {**kw('A00001'), 'price': 100, 'reasons': ['급상승']}
     assert by_code['A00003']['source'] == 'kiwoom' and candidates['A00002']['source'] == 'kiwoom'
+
+
+def test_opening_rounds_follow_the_clock_and_then_the_interval():
+    from zoneinfo import ZoneInfo
+    kst = ZoneInfo('Asia/Seoul')
+    at = lambda h, mi, s=0: datetime(2026, 11, 25, h, mi, s, tzinfo=kst)  # noqa: E731
+    assert m.next_scan(at(9, 0, 25), at(9, 0), 300) == 35
+    assert m.next_scan(at(9, 1, 40), at(9, 1, 0).replace(microsecond=5), 300) == 80
+    assert m.next_scan(at(9, 1, 20), at(9, 0), 300) == 0  # the 09:00 round ran past 09:01
+    assert m.next_scan(at(9, 8, 50), at(9, 8, 1), 300) == 70
+    assert m.next_scan(at(9, 10, 30), at(9, 10, 0).replace(microsecond=5), 300) == pytest.approx(270, abs=1)
+    assert m.next_scan(at(11, 4, 59), at(11, 0), 300) == 30
+
+
+def test_the_pre_open_round_picks_from_todays_nxt_pre_market_only(monkeypatch):
+    import kiwoom_data
+    import watchlist
+    from zoneinfo import ZoneInfo
+    universe = {'005930': {'name': '삼성전자', 'index': 'KOSPI200'}, '000660': {'name': 'SK하이닉스', 'index': 'KOSPI200'}}
+    clock = [datetime(2026, 11, 25, 8, 51, tzinfo=ZoneInfo('Asia/Seoul'))]
+    seen, wrote = [], []
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0]
+    def call(api, body, key, max_pages=1):
+        seen.append((api, body))
+        if api != 'ka10095':
+            return [{'stk_cd': '005930_NX'}, {'stk_cd': '000660_NX'}]
+        quote = {'cur_prc': '-110', 'base_pric': '100', 'trde_qty': '10', 'trde_prica': '5', 'dt': '20261125', 'cntr_tm': '084959'}
+        return [{'stk_cd': '005930_NX', **quote}, {'stk_cd': '000660_NX', **quote, 'dt': '20261124'}]  # yesterday's last price
+    def select(read, candidates, now, preopen=False):
+        assert preopen and set(candidates) == {'005930'} and candidates['005930']['change_pct'] == 10.0
+        return {'selected': ['005930']}
+    monkeypatch.setattr(m, 'datetime', Clock)
+    monkeypatch.setattr(kiwoom_data, 'call', call)
+    monkeypatch.setattr(watchlist, 'select', select)
+    monkeypatch.setattr(watchlist, 'write', wrote.append)
+    monkeypatch.setattr(m.research_store, 'record', lambda *a: None)
+    assert m.preopen_round(None, universe) == ['005930'] and wrote[0]['preopen'] is True
+    assert all(body['stex_tp'] == '2' for api, body in seen if api != 'ka10095')
+    assert [body['stk_cd'] for api, body in seen if api == 'ka10095'] == ['005930_NX|000660_NX']
+    clock[0] = clock[0].replace(hour=9, minute=0)
+    with pytest.raises(ValueError, match='late'):
+        m.preopen_round(None, universe)
+    assert len(wrote) == 1
+
+
+def test_a_failed_pre_open_round_is_tried_once_more_and_never_stops_the_service(monkeypatch):
+    tries, slept = [], []
+    monkeypatch.setattr(m, 'preopen_round', lambda read: tries.append(1) or (_ for _ in ()).throw(KeyError('x')))
+    m.prepare_open(None, sleep=slept.append)
+    assert len(tries) == 2

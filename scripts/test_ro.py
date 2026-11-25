@@ -19,6 +19,8 @@ def run(*args, env=None):
     ('--out', '.scratch/../x', 'longterm_audit.py', '--status'), ('pytest', '/tmp/test_x.py'), ('bash',), ('../ro',),
     ('longterm_evidence.py', '2026-11-18'),  # reconstruct() writes evidence rows into the engine database
     ('ipo_shadow.py', '--day', '2026-11-19'),  # update() rewrites the shadow rows; only --summary reads
+    ('fade_shadow.py',),  # update() rewrites the day; only --summary reads
+    ('overnight_catalysts.py', '--day', '2026-11-25'),  # update() rewrites the day; only --summary reads
     ('longterm_report.py', '--day', '2026-11-18', '--fill', '/tmp/x.json', '--reports', '/tmp/r'),  # reports only into its folders
 ])
 def test_refuses(args):
@@ -136,3 +138,26 @@ def test_stopping_ro_stops_the_script_it_runs(tmp_path):
     except ProcessLookupError:
         alive = False
     assert not alive and child.returncode == -signal.SIGTERM
+
+
+def test_json_shows_one_part_of_a_task_file():
+    """11-18, 11-19 and 11-20 runs stalled on `python3 -c` because Read cannot pick one part of a large JSON."""
+    path = RO.parents[1] / '.scratch' / 'test-ro-json.json'
+    path.parent.mkdir(exist_ok=True)
+    path.write_text('{"views": {"longterm": [{"글": "가"}, {"글": "나"}]}, "day": "2026-11-25"}', encoding='utf-8')
+    try:
+        name = '.scratch/test-ro-json.json'
+        assert run('json', name).stdout.split('\n')[:2] == ['views\t38', 'day\t12']  # the parts and their sizes
+        assert run('json', name, 'views', 'longterm', '1').stdout.strip() == '{\n "글": "나"\n}'
+        missing = run('json', name, 'views', 'nothing')
+        assert missing.returncode == 2 and 'longterm' in missing.stderr  # says what there is
+        assert run('json', name, 'views', 'longterm', '9').returncode == 2
+    finally:
+        path.unlink()
+
+
+@pytest.mark.parametrize('name', ['~/.vibe-trading/agent.json', '~/.vibe-trading/nhplug/accounts.json', '.env', 'scripts/ro.py',
+                                  '.scratch/../.env', '.scratch/no-such-file.json'])
+def test_json_reads_only_the_task_folders(name):
+    done = run('json', os.path.expanduser(name))
+    assert done.returncode == 2 and not done.stdout

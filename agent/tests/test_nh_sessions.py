@@ -173,3 +173,20 @@ def test_pytest_runs_do_not_reuse_by_default():
     out = subprocess.run([sys.executable, '-c', 'import pytest; from src.tools import nh_sessions as S; print(S.ENABLED)'], text=True,
                          capture_output=True, env={**os.environ, 'PYTHONPATH': str(Path(__file__).resolve().parents[1])})
     assert out.stdout.strip() == 'False'
+
+
+def test_a_fresh_import_keeps_using_the_same_process(nh):
+    # 2026-11-25: Streamlit drops changed modules, and every edit of the code left one more loop and NH process behind
+    import importlib
+    adapter = nh()
+    first = read(adapter)['pid']
+    kept = sys.modules.pop('src.tools.nh_sessions')
+    try:
+        import src.tools
+        again = importlib.import_module('src.tools.nh_sessions')
+        assert again is not kept and again._sessions is kept._sessions and again._background_loop() is kept._background_loop()
+        again.ENABLED, again.TOKENS = True, S.TOKENS
+        assert read(adapter)['pid'] == first
+    finally:
+        sys.modules['src.tools.nh_sessions'] = kept
+        src.tools.nh_sessions = kept

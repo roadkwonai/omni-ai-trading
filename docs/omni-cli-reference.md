@@ -559,12 +559,12 @@ HALT 걸기 계획(승인 필요: 손절 주문도 멈춤)
 
 ### omni live status
 
-실주문 스위치·HALT·신규 매수
+실주문 스위치·HALT·신규 매수 중단·하루 손실 정지
 
 - 성격: 조회
 - 인자: 없음
 - 예: `omni live status`
-- 답: `live_accounts` · `halt` · `new_live_buys_allowed`
+- 답: `live_accounts` · `halt` · `buy_paused`
 
 ### omni live unhalt
 
@@ -1405,7 +1405,7 @@ NXT 가상 매매 감사
 - 성격: 조회
 - 인자: 없음
 - 예: `omni status all`
-- 답: `engines`(jev, vibe) · `live_accounts` · `halt` · `new_live_buys_allowed` · `stop_files`[] · `services`
+- 답: `engines`(jev, vibe) · `live_accounts` · `halt` · `buy_paused` · `stop_files`[] · `services`
 
 ### omni status balance
 
@@ -1577,6 +1577,7 @@ nhplug 아래 DB를 읽기 전용 SELECT 한 문장으로 조회
 | `strategy.ipo_trail_pct` | 신규주: 고점 대비 추적 손절 % | 0.5~15.0 | `2.0` | 다음 회차 |
 | `strategy.weak_half_pct` | 약세장: 절반 익절 % (늦어도) | 0.3~5.0 | `1.0` | 다음 회차 |
 | `strategy.weak_all_pct` | 약세장: 전량 익절 % (늦어도) | 0.5~10.0 | `2.0` | 다음 회차 |
+| `strategy.fade_exit_pct` | 하락·횡보장 강도 종목: 매수세가 꺾이면 전량 매도하는 수익 % (0=끔) | 0.0~5.0 | `0.8` | 다음 회차 |
 | `strategy.entry_volume_ratio` | 진입 거래량 배수 (최근 5분 ÷ 그 전 5분, 0=확인 안 함) | 0.0~3.0 | `1.2` | 다음 회차 |
 | `strategy.direction_switch` | 방향 전환 (1=켬, 0=끔) | `0.0` \| `1.0` | `1` | 다음 회차 |
 | `strategy.reentry_guard` | 같은 날 재진입 제한 | `0.0` \| `1.0` | `1` | 다음 회차 |
@@ -1675,7 +1676,7 @@ nhplug 아래 DB를 읽기 전용 SELECT 한 문장으로 조회
 | `accounts.<실계좌>.engine` | 운용 방식 | `jev` \| `longterm` | `"jev"` | 다음 회차 |
 | `accounts.<실계좌>.budget.capital_krw` | 운용금(원) | 10000~1000000000 | `1000000` | 다음 회차 |
 | `accounts.<실계좌>.budget.order_price_max_krw` | 1주 가격 상한(원) | 1000~2000000 | `10000` | 다음 회차 |
-| `accounts.<실계좌>.budget.daily_loss_krw` | 하루 손실 한도(원) | 1000~20000 | `20000` | 다음 회차 |
+| `accounts.<실계좌>.budget.daily_loss_krw` | 하루 손실 한도(원) | 1000~30000 | `20000` | 다음 회차 |
 | `accounts.<실계좌>.limits.order_max_krw` | 회당 매수 한도(원) | 10000~1000000000 | `1000000` | 다음 회차 |
 | `accounts.<실계좌>.limits.daily_new_symbols` | 하루 새 종목 수 | 1~5 | `5` | 다음 회차 |
 | `accounts.<실계좌>.rules.take_profit_pct` | 익절 %(모의를 따르는 미러 계좌에서는 쓰지 않음) | 0.5~10.0 | `2.0` | 다음 회차 |
@@ -1818,7 +1819,7 @@ nhplug 아래 DB를 읽기 전용 SELECT 한 문장으로 조회
 | `tunables.flatten_lead_min` | 정리 뒤 더 도는 분 | 10~40 | `20` | 공유 모의 실행기와 학습 관찰기를 다시 시작해야 반영됩니다 |
 | `tunables.paper_max_order_qty` | 1회 주문 최대 수량(주) | 0~1000000 | `100` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
 | `tunables.paper_max_total_qty` | 총 보유 최대 수량(주) | 0~1000000 | `1000` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
-| `tunables.read_failure_limit` | 조회 실패 정지 횟수 | 1~20 | `5` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
+| `tunables.read_failure_limit` | 조회 실패 알림 횟수 | 1~20 | `5` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
 | `tunables.losing_streak` | 연속 손실 쉬기: 횟수 | 2~10 | `3` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
 | `tunables.losing_cooldown_min` | 연속 손실 쉬기: 분 | 5~240 | `30` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
 | `tunables.ipo_start` | 신규주 보기 시작 | 09:10~14:00 | `"09:20"` | 공유 모의 실행기를 STOP 절차로 다시 시작해야 반영됩니다 |
@@ -1834,7 +1835,7 @@ nhplug 아래 DB를 읽기 전용 SELECT 한 문장으로 조회
 | `tunables.live_session_end` | 미러 종료 시각 | 15:00~15:20 | `"15:20"` | 실계좌 미러 실행기를 다시 시작해야 반영됩니다 |
 | `tunables.quote_cache_s` | 시세 재사용(초) | 0~120 | `15` | 바로 반영됩니다 |
 | `tunables.chart_cache_s` | 차트 재사용(초) | 0~300 | `30` | 바로 반영됩니다 |
-| `tunables.account_list_cache_s` | 계좌 목록 재사용(초) | 0~600 | `60` | 바로 반영됩니다 |
+| `tunables.account_list_cache_s` | 계좌 목록 재사용(초) | 0~600 | `600` | 바로 반영됩니다 |
 | `tunables.process_cache_s` | 실행기 상태 재사용(초) | 0~60 | `5` | 바로 반영됩니다 |
 
 ### 설정 ai

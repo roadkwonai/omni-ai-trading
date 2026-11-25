@@ -232,3 +232,16 @@ def test_the_broker_is_asked_only_when_the_settled_cash_is_short_and_a_failure_k
   with pytest.raises(LiveOrderBlocked, match='insufficient'):
    x.execute(reader, LiveOrderGuard(A, tmp_path / f'g{i}'), {}, 'krstockOrderCashBuy', FIELDS)
  assert x.execute(Reader(), LiveOrderGuard(A, tmp_path / 'ok'), {}, 'krstockOrderCashBuy', FIELDS)
+
+
+def test_only_a_caller_that_waited_for_the_quote_hands_the_guard_a_previous_one(tmp_path, monkeypatch):
+ monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+ monkeypatch.setattr(x, 'halt_flag_set', lambda *_: False)
+ seen = []
+ def reached(*_args, **kw):
+  seen.append(kw.get('previous_quote'))
+  raise LiveOrderBlocked('reached')
+ monkeypatch.setattr(x, 'collect_snapshots', reached)
+ for kw in ({}, {'previous_quote': {'status': 'ok'}}):
+  with pytest.raises(LiveOrderBlocked, match='reached'): x.execute(FakeReader(), LiveOrderGuard(A, tmp_path / 'g'), {}, 'krstockOrderCashBuy', FIELDS, **kw)
+ assert seen == [None, {'status': 'ok'}]

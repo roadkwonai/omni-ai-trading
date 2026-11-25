@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from src.tools.nhplug_live_guard import LiveOrderBlocked, LiveOrderGuard
-from nh_live_broker import collect_snapshots
+from nh_live_broker import collect_snapshots, quote_before_advance
 
 A = '12345678901'
 NOW = datetime(2026, 11, 6, 11, 0, 10, tzinfo=ZoneInfo('Asia/Seoul'))
@@ -261,7 +261,7 @@ def test_snapshots_pass_their_sleep_to_the_page_gap():
 
 class TwoPageBalance(FakeReader):
     """NH gives the balance totals only once every holding is read: 0 on the first page, real on the last (11-23 live-1)."""
-    last = {'orr_pbl_amt1': 0, 'tot_aet_amt': 1500255, 'tot_byn_amt': 178700, 'tot_eal_amt': 177500, 'nas_amt': 1500255, 'tot_eal_pls': -1200}
+    last = {'orr_pbl_amt1': 0, 'tot_aet_amt': 1500255, 'tot_byn_amt': 178700, 'tot_eal_amt': 177500, 'nas_amt': 1500255, 'tot_eal_pls': -1200, 'pft_rt': -0.67}
 
     def call_tool(self, tool, args):
         response = super().call_tool(tool, args)
@@ -285,6 +285,7 @@ def test_a_paged_balance_takes_its_totals_from_the_last_page(tmp_path, monkeypat
     summary = snapshots['balance']['Output_0']
     assert summary['orr_pbl_amt1'] == 1322754  # the cash is on the first page
     assert (summary['tot_aet_amt'], summary['tot_byn_amt'], summary['tot_eal_amt']) == (1500255, 178700, 177500)
+    assert summary['pft_rt'] == -0.67  # 11-25: the desk showed +600원 with 0.00% and a grey card
     guard = LiveOrderGuard(A, tmp_path / 'guard')
     assert guard.reserve('krstockOrderCashBuy', FIELDS, now=NOW, **snapshots)  # was refused: 'capital limit exceeded'
     other = LiveOrderGuard(A, tmp_path / 'full')  # what is already held still counts against the capital
@@ -313,3 +314,45 @@ def test_orderable_cash_counts_a_sale_that_has_not_settled():
     for bad in ({'orr_pbl_amt4': 0}, {'orr_pbl_amt4': None}, {'orr_pbl_amt4': '1509321'}, {'nxt2_dd_dca': None}):
         assert orderable_cash({**summary, **bad}) == 1322755  # unsure: the settled cash, as before
     assert orderable_cash({}) is None and orderable_cash(None) is None
+
+
+class SlowQuotes(FakeReader):
+    """A thinly traded ETF: its quote clock moves once in several seconds (357870 on 2026-11-25: 6~20 s)."""
+    def __init__(self, stamps):
+        super().__init__()
+        self.stamps = [*stamps]
+
+    def call_tool(self, tool, args):
+        got = super().call_tool(tool, args)
+        if tool == 'get_stock_price':
+            got['data']['Output_0']['hoga_bsop_hour'] = self.stamps.pop(0) if len(self.stamps) > 1 else self.stamps[0]
+        return got
+
+
+def test_a_slow_quote_that_moved_on_is_handed_to_the_guard_as_the_previous_one(tmp_path, monkeypatch):
+    monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+    waits = []
+    reader = SlowQuotes(['10:59:56', '10:59:56', '10:59:56', '11:00:05'])
+    with pytest.raises(LiveOrderBlocked, match='market data stale'):  # the refusal of 09:41~09:48: two reads 2 s apart
+        LiveOrderGuard(A, tmp_path / 'old').reserve('krstockOrderCashBuy', FIELDS, now=NOW,
+                                                    **collect_snapshots(SlowQuotes(['11:00:05']), A, NOW, sleep=lambda _: None))
+    previous = quote_before_advance(reader, '114800', sleep=waits.append)
+    assert previous['data']['Output_0']['hoga_bsop_hour'] == '10:59:56' and waits == [2, 2, 2]
+    snapshots = collect_snapshots(reader, A, NOW, sleep=waits.append, symbol='114800', previous_quote=previous)
+    assert snapshots['previous_quote'] is previous and waits == [2, 2, 2]  # no second wait
+    assert LiveOrderGuard(A, tmp_path / 'guard').reserve('krstockOrderCashBuy', FIELDS, now=NOW, **snapshots)
+
+
+def test_a_quote_that_never_moves_or_cannot_be_read_leaves_the_guard_its_own_two_reads():
+    waits = []
+    assert quote_before_advance(SlowQuotes(['11:00:05']), '114800', sleep=waits.append) is None and sum(waits) == 20
+    broken = SimpleNamespace(call_tool=lambda *a: {'status': 'error'})
+    assert quote_before_advance(broken, '114800', sleep=waits.append) is None
+
+
+def test_an_old_previous_quote_is_still_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv('VIBE_TRADING_HOME', str(tmp_path / 'runtime'))
+    old = SlowQuotes(['10:58:00']).call_tool('get_stock_price', {})
+    snapshots = collect_snapshots(SlowQuotes(['11:00:05']), A, NOW, sleep=lambda _: None, symbol='114800', previous_quote=old)
+    with pytest.raises(LiveOrderBlocked, match='market data stale'):
+        LiveOrderGuard(A, tmp_path / 'guard').reserve('krstockOrderCashBuy', FIELDS, now=NOW, **snapshots)

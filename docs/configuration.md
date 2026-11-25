@@ -118,7 +118,7 @@ flowchart LR
 | 운용 방식 | `engine` | — | `jev`(Jev 트레이딩 미러) · `longterm`(장기투자) |
 | 운용금 | `budget.capital_krw` | 1,000,000원 | 1만 \~ 계좌 잔고(총자산). 코드 상한 10억은 오타 방지용 |
 | 1주 가격 상한(매수) | `budget.order_price_max_krw` | 10,000원(설정 없는 계좌) | 1,000 \~ 2,000,000 |
-| 하루 손실 한도 | `budget.daily_loss_krw` | 20,000원 | 1,000 \~ 20,000 (계좌별) |
+| 하루 손실 한도 | `budget.daily_loss_krw` | 20,000원 | 1,000 \~ 30,000 (계좌별) |
 | 회당 매수 한도 | `limits.order_max_krw` | 1,000,000원 | 1만 \~ 운용금 |
 | 하루 새 종목 수 | `limits.daily_new_symbols` | 5 | 1 \~ 5 |
 | 실주문 스위치 | `live_orders` | 꺼짐 | 켜려면 확인 문구 |
@@ -351,7 +351,7 @@ flowchart LR
 | `flatten_lead_min` | 장 시간 | 정리 뒤 더 실행하는 시간(분) | 20 | 10\~40 |
 | `paper_max_order_qty` | 공유 모의 실행기 | 1회 주문 최대 수량(주) | 100 | 0\~1,000,000 |
 | `paper_max_total_qty` | 공유 모의 실행기 | 총 보유 최대 수량(주) | 1000 | 0\~1,000,000 |
-| `read_failure_limit` | 공유 모의 실행기 | 조회 실패 정지 횟수 | 5 | 1\~20 |
+| `read_failure_limit` | 공유 모의 실행기 | 조회 실패 알림 횟수 | 5 | 1\~20 |
 | `losing_streak` | 공유 모의 실행기 | 연속 손실 쉬기: 횟수 | 3 | 2\~10 |
 | `losing_cooldown_min` | 공유 모의 실행기 | 연속 손실 쉬기: 분 | 30 | 5\~240 |
 | `ipo_start` | 공유 모의 실행기 | 신규주 보기 시작 | 09:20 | 09:10\~14:00 |
@@ -367,7 +367,7 @@ flowchart LR
 | `live_session_end` | 실계좌 미러 | 미러 종료 시각 | 15:20 | 15:00\~15:20 |
 | `quote_cache_s` | 대시보드 | 시세 재사용(초) | 15 | 0\~120 |
 | `chart_cache_s` | 대시보드 | 차트 재사용(초) | 30 | 0\~300 |
-| `account_list_cache_s` | 대시보드 | 계좌 목록 재사용(초) | 60 | 0\~600 |
+| `account_list_cache_s` | 대시보드 | 계좌 목록 재사용(초) | 600 | 0\~600 |
 | `process_cache_s` | 대시보드 | 실행기 상태 재사용(초) | 5 | 0\~60 |
 
 </details>
@@ -421,7 +421,7 @@ flowchart LR
 
 | 상한 | 값 | 위치 |
 | --- | --- | --- |
-| 하루 손실 한도(계좌별) | 20,000원 | `nhplug_live_guard.LIMIT`, `accounts.BUDGET_LIMITS` |
+| 하루 손실 한도(계좌별) | 30,000원(값이 없으면 20,000원) | `nhplug_live_guard.LIMIT_MAX`, `accounts.BUDGET_LIMITS` |
 | 1주 가격 상한(매수) | 2,000,000원 | `nhplug_live_guard.MAX_PRICE`, `accounts.LIVE_PRICE_HARD_CAP` |
 | 운용금 오타 방지 상한 | 10억 원 | `nhplug_live_guard.CAPITAL_MAX` = `accounts.LIVE_CAPITAL_MAX` |
 | 1회 주문 최대 수량 | 1,000주 | `nhplug_live_guard.ORDER_QTY_MAX` |

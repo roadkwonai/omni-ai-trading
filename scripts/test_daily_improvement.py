@@ -42,6 +42,20 @@ class DailyImprovementTests(unittest.TestCase):
                  {'symbol': 'A', 'open': '13:20:00', 'close': '13:30:00', 'pnl': -70}]
         self.assertEqual({k: v for k, v in d.reentries(trips).items() if k != 'trips'}, {'n': 2, 'realized_krw': -120})
 
+    def test_a_carried_holding_sold_today_is_one_of_todays_trips(self):
+        # 11-24: the report said one trip +8,400 won while its own history said two, +19,350
+        row = lambda time, side, after, pnl=None: {'time': time, 'symbol': '005930', 'side': side, 'after': after, 'pnl': pnl,
+                                                   'cost': 178200.0, 'path': 'oversold_v2' if side == 'BUY' else 'trailing_stop'}
+        rows = [row('2026-11-23T14:33:00+09:00', 'BUY', 1), row('2026-11-24T09:34:00+09:00', 'SELL', 0, 10950.0),
+                row('2026-11-24T10:50:00+09:00', 'BUY', 1), row('2026-11-24T11:00:00+09:00', 'SELL', 0, -100.0),
+                row('2026-11-24T14:40:00+09:00', 'BUY', 1)]
+        trips = d.round_trips(rows, '2026-11-24', {('005930', '2026-11-23T14:33'): {'mfe_pct': 8.0}})
+        self.assertEqual([(t['open'], t['close'], t['carried'], t['pnl']) for t in trips],
+                         [('11-23 14:33:00', '09:34:00', True, 10950), ('10:50:00', '11:00:00', False, -100), ('14:40:00', None, False, 0)])
+        self.assertEqual(trips[0]['mfe_pct'], 8.0)
+        self.assertEqual(d.reentries(trips)['n'], 2)  # both buys of the day came after the carried lot was sold
+        self.assertEqual([t['open'] for t in d.round_trips(rows, '2026-11-23', {})], ['14:33:00'])  # its own day: as before
+
     def test_stats_group_by_route(self):
         trips = [{'entry_route': 'x', 'pnl': 10, 'return_pct': 1.0}, {'entry_route': 'x', 'pnl': -4, 'return_pct': -0.5},
                  {'entry_route': None, 'pnl': 1, 'return_pct': 0.1}]
@@ -133,6 +147,28 @@ def test_blocked_outcomes_settle_and_candidates(tmp_path):
                     ('ipo', '493260', '2026-11-17T09:20:00+09:00', 'below_base', 0)]  # once per name; old listing out
 
 
+def test_what_the_last_strength_checks_refused_is_followed_every_half_hour(tmp_path):
+    # 11-23 and 11-24 had no strength row at all: strength_shadow is written only when Jev's own pick is blocked
+    import json
+    import sqlite3
+    from datetime import datetime
+    import blocked_outcomes as b
+    gate = lambda clock, **why: {'time': f'2026-11-24T{clock}:00+09:00', 'event': 'v2_entry_gate', 'strength_reasons': why}
+    events = [gate('10:00', **{'005930': 'careful_reentry_weak', '009150': 'one_share_over_buy', '090710': 'jev_below_min'}),
+              gate('10:01', **{'005930': 'careful_reentry_weak', '009150': 'trend_not_rising'}),  # a minute later: the same stretch
+              gate('10:31', **{'005930': 'careful_reentry_weak', '307950': 'strength_change_out_of_range'}),
+              {'time': '2026-11-24T10:32:00+09:00', 'event': 'v2_entry_gate', 'strength_reasons': None}]
+    rows = b.candidates(tmp_path, '2026-11-24', events, {})
+    assert [(kind, code, when[11:16], why) for kind, code, when, why, _ in rows] == [
+        ('strength_gate', '005930', '10:00', 'careful_reentry_weak'), ('strength_gate', '009150', '10:00', 'one_share_over_buy'),
+        ('strength_gate', '009150', '10:01', 'trend_not_rising'), ('strength_gate', '005930', '10:31', 'careful_reentry_weak')]
+    (tmp_path / 'events.jsonl').write_text('\n'.join(json.dumps(e) for e in events))
+    bars = [(datetime(2026, 11, 24, h, m, tzinfo=b.KST), 100, 101, 99, 100) for h, m in ((9, 50), (10, 0), (10, 30), (11, 5), (14, 55))]
+    out = b.update(tmp_path, '2026-11-24', research=tmp_path / 'r.sqlite3', fetch=lambda *a: bars)
+    with sqlite3.connect(tmp_path / 'r.sqlite3') as db:
+        assert out['rows'] == 4 and db.execute("SELECT COUNT(DISTINCT key) FROM blocked_outcomes WHERE kind='strength_gate'").fetchone() == (4,)
+
+
 def test_a_morning_crash_belongs_to_the_day_it_happened(tmp_path):
     """Review 4 (2026-11-19): the real 11-17 -> 11-18 log; the 11-18 08:12 start failed on the NH account list and was
     reported under 11-17 (the anchor kept the previous day's last status)."""
@@ -191,3 +227,12 @@ def test_direction_mass_counts_answers_half_an_hour_apart(tmp_path):  # user 202
     assert (today['n'], today['split'], today['settled']['n'], today['separate']) == (5, 4, 4, {'n': 2, 'avg_move_30m_pct': 0.1, 'hit_rate_30m': 0.5})
     assert out['last_2_days']['inverse'] == {'n': 1, 'days': 1, 'split': 0, 'settled': {'n': 1, 'avg_move_30m_pct': 0.5, 'hit_rate_30m': 1.0},
                                              'separate': {'n': 1, 'avg_move_30m_pct': 0.5, 'hit_rate_30m': 1.0}}
+
+
+def test_paths_of_the_day_include_the_positions_closed_on_it(tmp_path):
+    with sqlite3.connect(tmp_path / 'market-research.sqlite3') as db:
+        db.execute('CREATE TABLE position_paths (symbol, opened, closed)')
+        db.executemany('INSERT INTO position_paths VALUES (?,?,?)', [
+            ('A', '2026-11-23T14:33:00+09:00', '2026-11-24T09:34:00+09:00'), ('B', '2026-11-24T10:50:00+09:00', None),
+            ('C', '2026-11-23T10:00:00+09:00', '2026-11-23T11:00:00+09:00')])
+    assert set(d.paths_today(tmp_path, '2026-11-24')) == {('A', '2026-11-23T14:33'), ('B', '2026-11-24T10:50')}

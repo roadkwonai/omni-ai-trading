@@ -91,6 +91,16 @@ REGISTRY = {
         'cause': 'NH는 총자산·총매수·총평가를 잔고 마지막 쪽에만 주는데 첫 쪽 합계(0)를 씀: 매매한 종목의 0주 행까지 2쪽이 된 14:42부터 총자산 0, 같은 값을 읽는 실계좌 가드는 새 매수를 capital limit exceeded로 막음',
         'fix': 'nh_live_broker._pages·BALANCE_TOTALS(합계는 마지막 쪽, 없으면 미확인), live_fills.plausible(기록·읽기에서 거름)·balance-rejected.jsonl, intraday_audit.zero_totals',
         'guard': 'test_a_rejected_live_balance_fires'},  # also test_a_paged_balance_takes_its_totals_from_the_last_page, test_an_impossible_balance_is_rejected_and_never_read
+    'cli.mismatch': {
+        'title': 'omni CLI의 답이 원본 기록과 다름', 'since': '2026-11-25',
+        'cause': 'live status가 신규 매수 중단 파일만 보고 하루 손실 정지(live_halts)를 읽지 않아, 실계좌 1이 정지된 11:09~11:25에 새 매수 가능이라고 답함',
+        'fix': 'streamlit_namuh/overview.py loss_halts(주의 항목·omni live status), intraday_audit.cli_health',
+        'guard': 'test_a_cli_answer_that_disagrees_with_the_records_fires'},  # also test_a_daily_loss_halt_is_told_per_account
+    'cli.failed': {
+        'title': 'omni CLI의 조회 명령 실패', 'since': '2026-11-25',
+        'cause': 'CLI를 점검하는 감사가 없어 실패를 사용자가 먼저 만남(11-25 compare check가 장중에 거짓 실패)',
+        'fix': 'scripts/strategy_compare.py check(표를 만든 시각까지 비교), intraday_audit.cli_health',
+        'guard': 'test_the_cli_check_reaches_the_findings_and_its_absence_resolves_nothing'},
     'learning.error': {
         'title': '학습 관찰기가 실행 중인데 매 회차 실패', 'since': '2026-11-19',
         'cause': '오래 돈 프로세스가 다른 프로세스가 지운 원장 WAL 파일 핸들을 붙잡아 매 회차 sqlite3.DatabaseError(09:03~10:26, 새 프로세스는 정상)',

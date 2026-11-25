@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from collections import Counter
@@ -146,6 +147,67 @@ def nh_limits(nhplug, now, since):
     for caller, code, n in rows:
         out.setdefault(caller, {})[code] = n
     return out
+
+
+REPO = Path(__file__).resolve().parents[1]
+CLI_READS = ('status trades', 'live status', 'status alerts', 'status balance', 'jev positions', 'jev blocks', 'account list', 'settings export', 'ops services')
+CLI_STALE = 5  # the CLI's own word for old or missing data: an answer, not a failure
+
+
+def _omni(args):
+    """(exit code, data) of one local read of the omni CLI; (-1, None) when it gives no JSON or no answer in time."""
+    import sys
+    try:
+        done = subprocess.run([sys.executable, '-m', 'cli_anything.omni_trading', '--json', *args], capture_output=True, text=True, encoding='utf-8',
+                              timeout=60, cwd=REPO, env={**os.environ, 'PYTHONPATH': str(REPO / 'agent-harness')})
+        return done.returncode, json.loads(done.stdout).get('data')
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return -1, None
+
+
+def _cli_reference():
+    import sys
+    try:
+        return subprocess.run([sys.executable, str(REPO / 'agent-harness/build_reference.py'), '--check'], capture_output=True, timeout=60,
+                              cwd=REPO).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def cli_health(nhplug, now, omni=_omni, reference=_cli_reference):
+    """{finding key: detail}: local reads of the omni CLI that fail, and answers that disagree with the records they are
+    read from (11-25: the CLI said new buys were allowed while live-1's daily loss halt was on). It makes no plan and
+    asks no broker. A record that changes while it is read is compared with both its states."""
+    day, nhplug, found = now.date().isoformat(), Path(nhplug), {}
+
+    def fills():
+        rows = _query(nhplug / 'shared-etf-paper' / 'orders.sqlite3',
+                      'SELECT side, symbol, SUM(quantity) FROM fills WHERE time LIKE ? GROUP BY side, symbol', (day + '%',))
+        return None if rows is None else {(side, symbol): qty for side, symbol, qty in rows}
+
+    def halts():
+        rows = _query(nhplug / 'live-orders.sqlite3', 'SELECT COUNT(*) FROM live_halts WHERE day=?', (day.replace('-', ''),))
+        return rows[0][0] if rows else None
+
+    before, answers = (fills(), halts()), {}
+    for name in CLI_READS:
+        code, answers[name] = omni(name.split())
+        if code not in (0, CLI_STALE):
+            found['cli.failed:' + name.replace(' ', '-')] = f'omni {name} 종료 {code}'
+        if name == 'live status':
+            after = (fills(), halts())
+    told = Counter()
+    for row in (answers['status trades'] or {}).get('trades') or ():
+        if row['account'].startswith('모의계좌'):
+            told[row['side'], row['symbol']] += row['qty']
+    if 'cli.failed:status-trades' not in found and None not in (before[0], after[0]) and dict(told) not in (before[0], after[0]):
+        found['cli.mismatch:paper-fills'] = 'omni status trades의 모의 체결이 주문 원장과 다름'
+    said = [a.get('loss_halt_today') for a in ((answers['live status'] or {}).get('live_accounts') or {}).values()]
+    if 'cli.failed:live-status' not in found and '확인 불가' not in said and None not in (before[1], after[1]) and said.count(True) not in (before[1], after[1]):
+        found['cli.mismatch:loss-halt'] = f'omni live status의 하루 손실 정지 {said.count(True)}개, 가드 기록 {after[1]}개'
+    if not reference():
+        found['cli.reference_stale'] = '참조 문서(docs/omni-cli-reference.md)가 코드와 다름: agent-harness/build_reference.py'
+    return found
 
 
 def ledger(root, day, since):
@@ -547,6 +609,8 @@ def anomalies(facts, now, skipped=None):
     if ran(in_session, 'live.zero_total'):
         for key, n in (facts.get('zero_totals') or {}).items():
             found[f'live.zero_total:{key}'] = f'잘못된 잔고 {n}건을 기록하지 않음(balance-rejected.jsonl), 같은 값을 읽는 가드가 새 매수를 막을 수 있음'
+    if ran(facts.get('cli') is not None, 'cli.failed', 'cli.mismatch', 'cli.reference_stale'):
+        found.update(facts['cli'])
     for key, on in facts['live']['live_orders'].items():
         if on is True:
             found[f'live.switch_on:{key}'] = '실계좌 실주문 스위치 켜짐'
@@ -600,7 +664,7 @@ def checks(reviews, path=CHECKS):
     return {check: done.get(check) for check in ids}
 
 
-def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=None, checks_file=CHECKS, incidents_db=None):
+def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=None, checks_file=CHECKS, incidents_db=None, cli=None):
     now = now or datetime.now(KST)
     day = now.date().isoformat()
     if holidays is None:
@@ -627,7 +691,8 @@ def collect(nhplug=NHPLUG, now=None, since=None, run=subprocess.run, holidays=No
              'learning': learning_rounds(Path(nhplug) / 'shared-etf-paper' / 'com.vibetrading.shared-etf-learning.log', day),
              'jev_inputs': jev_inputs(Path(nhplug) / 'shared-etf-paper', day, since),
              'sources': sources(Path(nhplug) / 'shared-etf-paper'), 'nh_limits': nh_limits(nhplug, now, since),
-             'zero_totals': zero_totals(nhplug, now, since), 'api_load': api_load.findings(api_load.collect(nhplug, now))}
+             'zero_totals': zero_totals(nhplug, now, since), 'api_load': api_load.findings(api_load.collect(nhplug, now)),
+             'cli': cli(nhplug, now) if cli else None}  # None = the omni CLI was not asked
     reviews = Path(nhplug) / 'shared-etf-paper' / 'reviews'
     facts['checks'] = checks(reviews, checks_file)
     skipped = set()
@@ -651,7 +716,7 @@ def main():
     if args.since:
         hour, minute = map(int, args.since.split(':'))
         since = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    print(json.dumps(collect(now=now, since=since, incidents_db=args.incidents_db), ensure_ascii=False, indent=1, default=str))
+    print(json.dumps(collect(now=now, since=since, incidents_db=args.incidents_db, cli=cli_health), ensure_ascii=False, indent=1, default=str))
 
 
 if __name__ == '__main__':

@@ -49,6 +49,7 @@ SERVICES = {
     'trading-backup': (['scripts/backup_trading_data.py'], 'shared-etf-paper', False, (15, 50, WEEKDAYS)),
     # 2026-11-17: the runtime data synced into the project (state/settings sanitized for git, state/backups archives)
     'state-sync': (['scripts/state_sync.py', 'export'], 'shared-etf-paper', False, (16, 55, WEEKDAYS)),
+    'ai-schedule-runner': (['scripts/schedule_dispatch.py'], 'scheduled-ai', True, None),
     # 2026-11-17: Jev → DISCORD_WEBHOOK_REALTIME, long-term → DISCORD_WEBHOOK_LONGTERM (reads only; cursor file)
     'discord-notify': (['scripts/discord_notify.py', '--watch'], 'shared-etf-paper', True, None),
     'exit-replay': (['scripts/exit_replay.py'], 'shared-etf-paper', False, (16, 10, (5,))),
@@ -87,6 +88,8 @@ def render(name, repo=REPO, home=None):
     if schedule:
         plist['StartCalendarInterval'] = [{'Weekday': day, 'Hour': hour, 'Minute': minute}
                                           for hour, minute, days in _times(schedule) for day in days]
+    if name == 'ai-schedule-runner':
+        plist['StartInterval'] = 60
     return plist
 
 

@@ -65,6 +65,8 @@ def num(text):
 
 def naver(path):
     import requests
+    if '://' in path:  # 2026-11-25: a whole address after the base asked Naver twelve times for nothing
+        raise ValueError('naver path expected, not a URL')
     response = requests.get(f'{NAVER}/{path}', headers=HEADERS, timeout=10)
     response.raise_for_status()
     return response.json()
@@ -503,11 +505,14 @@ def summary(payload, now=None):
     if quotes:
         view['global_intraday'] = quotes
     if not pre_open:
+        from session_times import shifted
         view.update(intraday_view(payload))
         clock = _minutes(now.astimezone(KST).strftime('%H:%M'))
         for item in (view.get('index_intraday') or {}).values():  # the rest of the index path stays
             if clock - _minutes(item['as_of']) > CHANGE_30M_MAX_AGE:
                 item['change_30m_pct'] = None
+            elif item.get('change_30m_pct') is None and _minutes(item['as_of']) <= _minutes(shifted('09:00', now.date())) + 30:
+                item['first_30m_from_open_pct'] = item.get('from_open_pct')  # there is no price 30 minutes ago yet (user 2026-11-25)
     return view
 
 

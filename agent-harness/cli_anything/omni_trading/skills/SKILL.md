@@ -22,7 +22,7 @@ description: Omni AI Trading(국내 주식·ETF 장중 매매와 장기투자)�
 | 모의 보유 | `omni jev positions` |
 | 매수가 막힌 이유(많은 순) | `omni jev blocks` |
 | 왜 팔았나·샀나 | `omni status trades` → `omni jev events --symbol <코드>` (사유는 `reason`·`trigger`, 다른 날은 `--day`) |
-| 실계좌 | `omni live status` · `omni live log live-1` · `omni live fills live-1` |
+| 실계좌(손실 정지는 `loss_halt_today`) | `omni live status` · `omni live log live-1` · `omni live fills live-1` |
 | 장기투자 | `omni lt today` · `levels` · `nav` · `orders --why --day <날짜>` · 적립식은 `dca-preview <장부>` |
 | 서비스 일정·상태 | `omni ops services`(정의 파일 만들기는 `ops service-files`, 등록·시작은 사용자가 직접) |
 | 리포트·매매일지 | `omni report list` · `omni report read <종류> <키> --lines 20` |

@@ -283,3 +283,47 @@ def test_turning_on_a_phrase_switch_is_explained_with_its_real_level(home):
 def test_a_long_term_stop_says_what_it_does_not_stop(home):
     from cli_anything.omni_trading.core.actions import ACTIONS
     assert '실계좌' in ACTIONS['lt_stop'].title
+
+
+def latch(nh, number, day):
+    import hashlib
+    import sqlite3
+    with sqlite3.connect(nh / 'live-orders.sqlite3') as db:
+        db.execute('CREATE TABLE IF NOT EXISTS live_halts (scope TEXT, day TEXT)')
+        db.execute('INSERT INTO live_halts VALUES (?,?)', (hashlib.sha256(('nh-live:' + number).encode()).hexdigest(), day))
+
+
+def test_a_daily_loss_halt_is_told_per_account(home, monkeypatch):
+    """11-25 11:25: live-1 bought nothing more that day and the CLI said new buys were allowed, with no alert."""
+    import os
+    from pathlib import Path
+
+    import accounts
+    number, today = '12345678901', datetime.now(reads.KST).strftime('%Y%m%d')
+    Path(os.environ['VIBE_TRADING_ENV_FILE']).write_text(f'ACCOUNT_NUMBER={number}\n')
+    write(home, {'paper-shared': account(False), 'live-1': account(hash=accounts.digest(number)), 'live-2': account(engine='longterm', label='실계좌 2')})
+    latch(home, number, '20200101')  # another day's
+    got = data('live', 'status')
+    assert [a['loss_halt_today'] for a in got['live_accounts'].values()] == [False, False] and got['buy_paused'] is False
+    assert not any('손실 정지' in a for a in data('status', 'alerts')['alerts'])
+    latch(home, number, today)
+    code, got = run('live', 'status')
+    assert got['data']['live_accounts']['live-1']['loss_halt_today'] is True and got['data']['live_accounts']['live-2']['loss_halt_today'] is False
+    assert any('실계좌 1' in w and '손실 정지' in w for w in got['warnings'])
+    assert any('실계좌 1' in a and '손실 정지' in a for a in data('status', 'alerts')['alerts'])
+    assert data('status', 'all')['live_accounts']['live-1']['loss_halt_today'] is True
+    assert number not in json.dumps(got, ensure_ascii=False)
+
+
+def test_a_halt_nobody_can_match_is_not_told_as_none(home):
+    latch(home, '99999999999', datetime.now(reads.KST).strftime('%Y%m%d'))  # .env lists no account
+    assert data('live', 'status')['live_accounts']['live-1']['loss_halt_today'] == '확인 불가'
+    assert any('손실 정지' in a for a in data('status', 'alerts')['alerts'])
+    (home / 'live-orders.sqlite3').write_text('not a database')
+    assert data('live', 'status')['live_accounts']['live-1']['loss_halt_today'] == '확인 불가'
+
+
+def test_every_refusal_of_the_day_has_a_korean_name():
+    from entry_reasons import ENTRY
+    from restrictions import REASONS
+    assert not [r for group in REASONS.values() for r in group if r not in ENTRY] and 'add_cutoff' in ENTRY

@@ -20,6 +20,8 @@ BASE = 'https://api.kiwoom.com'
 TOKEN_FILE = Path.home() / '.vibe-trading/kiwoom/token.json'
 ALLOWED = {'ka90005': '/api/dostk/mrkcond',  # 프로그램매매추이 시간대별
            'ka10080': '/api/dostk/chart',  # 주식분봉차트 (about a year back)
+           'ka10046': '/api/dostk/mrkcond',  # 체결강도추이 시간별 (fade_shadow, after the close)
+           'ka10059': '/api/dostk/stkinfo',  # 종목별투자자기관별 (the closed day's foreign net quantity)
            'ka10037': '/api/dostk/rkinfo',  # 외국계창구매매상위
            'ka11370': '/api/dostk/rkinfo',  # KRX/NXT괴리율순위
            'ka10032': '/api/dostk/rkinfo',  # 거래대금상위
@@ -51,14 +53,14 @@ def _keys():
     return values.get('KIWOOM_APP_KEY') or '', values.get('KIWOOM_APP_SECRET') or ''
 
 
-def _post(path, body, headers=None):
+def _post(path, body, headers=None, timeout=10):
     import requests
     import time
 
     # shortcut: paces this process only; parallel processes could still exceed 5/s together (add a file lock if they do)
     time.sleep(max(0.0, _last[0] + GAP - time.monotonic()))
     _last[0] = time.monotonic()
-    response = requests.post(BASE + path, json=body, timeout=10,
+    response = requests.post(BASE + path, json=body, timeout=timeout,
                              headers={'Content-Type': 'application/json;charset=UTF-8', **(headers or {})})
     response.raise_for_status()
     return response.headers, response.json()
@@ -77,7 +79,7 @@ def _token(stale=None):
     return broker_token.token(TOKEN_FILE, issue, stale)
 
 
-def call(api_id, body, list_key, max_pages=5):
+def call(api_id, body, list_key, max_pages=5, timeout=10):
     """Rows of `list_key` across continuation pages (cont-yn / next-key); with `list_key` None, the first answer itself.
 
     Only an authentication failure (return_code 3, '8005 Token이 유효하지 않습니다', checked 2026-11-17) renews the
@@ -87,7 +89,8 @@ def call(api_id, body, list_key, max_pages=5):
     endpoint = f'api.kiwoom.com{ALLOWED[api_id]}#{api_id}'
     token, renewed, rows, cont, pages = _token(), False, [], {}, 0
     while pages < max_pages:
-        headers, data = _post(ALLOWED[api_id], body, {'api-id': api_id, 'authorization': 'Bearer ' + token, **cont})
+        headers, data = _post(ALLOWED[api_id], body, {'api-id': api_id, 'authorization': 'Bearer ' + token, **cont},
+                              timeout)
         code = data.get('return_code')
         if code != 0:
             api_calls.problem('kiwoom', endpoint, f'return_code {code}')
@@ -148,6 +151,16 @@ def num(text):
         return float(s)
     except ValueError:
         return None
+
+
+def foreign_net(code, day):
+    """Foreign net buying (shares) of one closed day 'YYYYMMDD' (ka10059), or None when there is no row of that day."""
+    for r in call('ka10059', {'dt': day, 'stk_cd': code, 'amt_qty_tp': '2', 'trde_tp': '0', 'unit_tp': '1'}, 'stk_invsr_orgn',
+                  max_pages=1, timeout=2):
+        if r.get('dt') == day:
+            value = num(r.get('frgnr_invsr'))
+            return None if value is None else int(value)
+    return None
 
 
 def krx_minute_rows(code, prior=False, now=None):

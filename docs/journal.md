@@ -251,7 +251,7 @@ scripts/ro daily_improvement.py --day 2026-11-19 --days 10
 | `health`, `jev_calls_30m` | 실행기 오류·중단, Jev 판단 30분 정산 |
 | `signal_calibration` | Jev 진입 후보·보유 HOLD/SELL 신호의 5·15·30분 뒤 적중률을 신뢰도 구간별로 오늘과 최근 10거래일 묶음. 구간당 20건 이상일 때 '높은 구간이 더 맞았는지'(`calibrated`)를 표시 |
 | `add_sizing` | 최근 10거래일 모든 추가 매수가 그 포지션을 판 가격까지 몇 % 났는지, 승률, 오늘 막힌 추가 매수(`add_not_better`·`add_count_limit`), 일부 매도 횟수. 10건 이상이면 `add_size_pct` 상향·하향·유지 제안 문구(`hint`) |
-| `blocked_outcomes` | 막힌 관심종목 강도 후보와 사지 않은 신규 상장주가 그 뒤 30분·15:00까지 어떻게 움직였는지, 막힌 이유별 평균 |
+| `blocked_outcomes` | 막힌 관심종목 강도 후보(`strength`: Jev 선택이 막힌 회차, `strength_gate`: 마지막 확인에서 막힌 종목을 이유별 30분 간격으로)와 사지 않은 신규 상장주가 그 뒤 30분·15:00까지 어떻게 움직였는지, 막힌 이유별 평균 |
 | `oversold` | 낙폭과대 발동·엔진 판단, 선별 v2 판정·후보·표본, 사후 결과, 최근 20거래일 묶음 |
 | `settings`, `history`, `daily_review_lessons` | 지금 설정, 최근 10거래일 성적, 15:10 복기 교훈 |
 

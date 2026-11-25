@@ -79,14 +79,16 @@ def scan(read, universe, gap=0.0, clock=time.monotonic, sleep=time.sleep):
     return rows
 
 
-def kiwoom_scan(universe):
+def kiwoom_scan(universe, suffix='', keep=lambda s: True):
     """scan()'s rows from Kiwoom ka10095 (2026-11-20 NH call plan P2, docs/nh-call-reduction-plan.md): one call per 100
     codes instead of one NH quote each. Same fields and units (value_mil in 백만원 like NH acml_tr_pbmn); a halted or
     unpriced code is dropped as scan() drops it. Raises when Kiwoom fails, so the caller can fall back to NH."""
     import kiwoom_data
     codes, rows = list(universe), []
     for i in range(0, len(codes), 100):
-        for s in kiwoom_data.call('ka10095', {'stk_cd': '|'.join(codes[i:i + 100])}, 'atn_stk_infr', max_pages=1):
+        for s in kiwoom_data.call('ka10095', {'stk_cd': '|'.join(c + suffix for c in codes[i:i + 100])}, 'atn_stk_infr', max_pages=1):
+            if not keep(s):
+                continue
             code = str(s.get('stk_cd') or '').split('_')[0]  # '090430_AL' (KRX+NXT) -> '090430'
             price, previous, volume, value = (kiwoom_data.num(s.get(k)) for k in ('cur_prc', 'base_pric', 'trde_qty', 'trde_prica'))
             if code not in universe or None in (price, previous, volume, value):
@@ -143,7 +145,7 @@ KIWOOM_RANKINGS = (
 )
 
 
-def preselect(universe, pages=5):
+def preselect(universe, pages=5, exchange='1'):
     """Universe codes that lead Kiwoom's KRX market-wide rankings (trading value, volume, rise, fall), PRESELECT per
     ranking in Kiwoom's order. Only picks which codes NH quotes; every figure written still comes from NH (scan())."""
     import kiwoom_data
@@ -151,7 +153,7 @@ def preselect(universe, pages=5):
     picked = []
     for api_id, body, key in KIWOOM_RANKINGS:
         found = []
-        for row in kiwoom_data.call(api_id, body, key, max_pages=pages):
+        for row in kiwoom_data.call(api_id, {**body, 'stex_tp': exchange}, key, max_pages=pages):  # 1 KRX, 2 NXT
             code = str(row.get('stk_cd') or '').split('_')[0]
             if code in universe and code not in found:
                 found.append(code)
@@ -365,11 +367,62 @@ def running(now):
     return now.weekday() < 5 and '09:00' <= now.strftime('%H:%M') < shifted('15:05', now.date())
 
 
-def wait_for_open(now, sleep=time.sleep):
+def preopen_round(read, universe=None):
+    """The watchlist before the bell (user 2026-11-25): Kiwoom's NXT rankings and figures of today's pre-market (over at
+    08:50), Jev's pick of them, written so the runner's 09:00:00 cycle has stocks to choose. Raises; never written once the
+    session is open (the 09:01 round picks from KRX figures). movers.json stays KRX-only."""
+    import watchlist
+    universe = universe or constituents(read)
+    today = datetime.now(KST).strftime('%Y%m%d')
+    picked = preselect(universe, exchange='2')
+    rows = kiwoom_scan({c: universe[c] for c in picked}, '_NX',
+                       lambda s: str(s.get('dt')) == today and '080000' <= str(s.get('cntr_tm')).zfill(6) < '085100')
+    _, candidates, _ = rank(rows)
+    record = watchlist.select(read, candidates, datetime.now(KST), preopen=True)
+    if datetime.now(KST).strftime('%H:%M') >= '09:00':
+        raise ValueError('too late for the open')
+    watchlist.write({**record, 'preopen': True})
+    research_store.record('watchlist', record)
+    return record['selected']
+
+
+def prepare_open(read, sleep=time.sleep):
+    """preopen_round after the pre-market's last trade; a failure only leaves the first minute with the ETFs."""
+    now = datetime.now(KST)
+    sleep(max(0.0, (now.replace(hour=8, minute=50, second=30, microsecond=0) - now).total_seconds()))
+    for attempt in range(2):
+        try:
+            print(json.dumps({'preopen_watchlist': preopen_round(read)}), flush=True)
+            return
+        except Exception as exc:  # noqa: BLE001 - the open must come either way
+            print(json.dumps({'preopen_watchlist_error': type(exc).__name__, 'attempt': attempt + 1}), flush=True)
+            sleep(20)
+
+
+OPENING_SCANS = ('09:01', '09:03', '09:05', '09:08', '09:10')  # moved with the exchange clock; then every --interval
+QUICK_SCANS = ('09:01', '09:03', '09:08')  # candidates only: the shadow quotes would hold the runner's first minutes up
+
+
+def next_scan(now, started, interval):
+    """Seconds until the next ranking round: the opening ones by the clock, then `interval` after the last one started."""
+    from session_times import shifted
+    for text in OPENING_SCANS:
+        hour, minute = map(int, shifted(text, now.date()).split(':'))
+        at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if at > now:
+            return (at - now).total_seconds()
+        if at > started:  # its time came while the last round ran: at once
+            return 0.0
+    return max(30, interval - (now - started).total_seconds())
+
+
+def wait_for_open(now, sleep=time.sleep, prepare=None):
     """Started before 09:00 on a weekday: take a pre-open market snapshot (last US close), then wait for the open."""
     if now.weekday() >= 5 or now.strftime('%H:%M') >= '09:00':
         return False
     threading.Thread(target=refresh_cases, daemon=True).start()  # ~100 Yahoo reads; must never delay the open
+    if prepare is not None:  # in its own thread: it must never delay the open
+        threading.Thread(target=prepare, daemon=True).start()
     collect_context()
     sleep(max(0.0, (now.replace(hour=9, minute=0, second=0, microsecond=0) - datetime.now(KST)).total_seconds()))
     return True
@@ -385,7 +438,7 @@ def main():
     read = MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly'])
     universe, universe_day = None, None
     if not args.once:
-        wait_for_open(datetime.now(KST))  # the service starts at 08:50; without this the loop below exited at once
+        wait_for_open(datetime.now(KST), prepare=lambda: prepare_open(read))  # the service starts at 08:50; without this the loop below exited at once
     stop = threading.Event()
     if not args.once:
         threading.Thread(target=context_watch, args=(stop, args.interval), daemon=True).start()
@@ -417,8 +470,6 @@ def main():
             research_store.record('movers', payload)
             print(json.dumps({'time': now.isoformat(timespec='seconds'), 'scanned': len(rows),
                               'candidates': list(candidates)}, ensure_ascii=False), flush=True)
-            shadow_round(read, universe, lambda line: print(line, flush=True))
-            fill_index(datetime.now(KST))
             import watchlist
             if candidates and watchlist.due(datetime.now(KST)):
                 try:
@@ -428,12 +479,16 @@ def main():
                     print(json.dumps({'watchlist': record['selected'], 'jev_choice': record['jev_choice']}), flush=True)
                 except Exception as exc:  # the previous watchlist stays until it expires
                     print(json.dumps({'watchlist_error': type(exc).__name__}), flush=True)
+            from session_times import shifted
+            if now.strftime('%H:%M') not in {shifted(t, now.date()) for t in QUICK_SCANS}:
+                shadow_round(read, universe, lambda line: print(line, flush=True))
+                fill_index(datetime.now(KST))
         except Exception as exc:  # a failed scan only leaves the previous file to expire
             print(json.dumps({'time': now.isoformat(timespec='seconds'), 'error': type(exc).__name__,
                               'reason': str(exc) if str(exc) in ('ETF components unavailable', 'too few constituents') else 'scan failed'}), flush=True)
         if args.once:
             break
-        time.sleep(max(30, args.interval - (time.time() - now.timestamp())))
+        time.sleep(next_scan(datetime.now(KST), now, args.interval))
     stop.set()
 
 

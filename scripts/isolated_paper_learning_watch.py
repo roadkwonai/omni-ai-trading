@@ -89,6 +89,11 @@ def main(argv=None):
                     print(json.dumps({'ipo_shadow': ipo_shadow.update(root)}), flush=True)
                 except Exception as exc:
                     print(json.dumps({'ipo_shadow_error': type(exc).__name__}), flush=True)
+                try:  # 수익 중 약화 그림자 기록: what the tape showed at each look at a holding (research only, user 2026-11-25)
+                    import fade_shadow
+                    print(json.dumps({'fade_shadow': fade_shadow.update(root)}), flush=True)
+                except Exception as exc:
+                    print(json.dumps({'fade_shadow_error': type(exc).__name__}), flush=True)
                 try:  # 낙폭과대 반등 outcome log: today, and the previous session again so a held trade's result fills in
                     from oversold_outcomes import collect, market_data
                     import oversold
@@ -116,6 +121,11 @@ def main(argv=None):
                     print(json.dumps({'strategy_compare': strategy_compare.build(root.parent)}), flush=True)
                 except Exception as exc:
                     print(json.dumps({'strategy_compare_error': type(exc).__name__}), flush=True)
+                try:  # 전날 재료 그림자 기록 (research only, user 2026-11-25): last, its news reads take about six minutes
+                    import overnight_catalysts
+                    print(json.dumps({'overnight_catalysts': overnight_catalysts.run(root)}, ensure_ascii=False), flush=True)
+                except Exception as exc:
+                    print(json.dumps({'overnight_catalysts_error': type(exc).__name__}), flush=True)
             break
         try:
             n = ingest(root / 'events.jsonl', root / 'trading-ledger.sqlite3')

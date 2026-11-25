@@ -33,7 +33,7 @@ BUSY_TIMEOUT = 0.5  # seconds; recording sits on every HTTP call, so a lock must
 HOSTS = (  # host suffix -> provider key (api_catalog.CATALOG); first match wins
     ('nhplug.com', 'nh'), ('kiwoom.com', 'kiwoom'), ('tossinvest.com', 'toss'), ('naver.com', 'naver'),
     ('kind.krx.co.kr', 'kind'), ('krx.co.kr', 'krx'), ('fss.or.kr', 'opendart'), ('news.google.com', 'google_news'),
-    ('bing.com', 'bing_news'), ('yahoo.com', 'yahoo'), ('tradingview.com', 'tradingview'), ('openai.com', 'openai'),
+    ('bing.com', 'bing_news'), ('daum.net', 'daum'), ('hankyung.com', 'hankyung'), ('yahoo.com', 'yahoo'), ('tradingview.com', 'tradingview'), ('openai.com', 'openai'),
     ('typesafe.ai', 'jev'), ('stlouisfed.org', 'fred'), ('federalreserve.gov', 'fed'), ('sec.gov', 'sec'), ('discord.com', 'discord'), ('api.telegram.org', 'telegram'), ('hooks.slack.com', 'slack'),
     ('github.io', 'report_pages'), ('api.github.com', 'report_pages'), ('jsdelivr.net', 'report_pages'),
     ('platform.liner.com', 'liner'))
@@ -50,9 +50,10 @@ CREATE TABLE IF NOT EXISTS seconds (time TEXT, provider TEXT, endpoint TEXT, cal
 SECONDS_DAYS = 7
 LOCAL_START = 'MCP 시작 실패(로컬)'  # the NH MCP process did not start in time; no request reached NH
 LOCAL = {'127.0.0.1', 'localhost', '::1'}
-_lock = threading.Lock()
+_kept = sys.__dict__.setdefault('_api_calls_kept', {'lock': threading.Lock(), 'conn': {}})  # outlives a Streamlit re-import
+_lock = _kept['lock']
 _depth = threading.local()  # nested sends (redirect hops) inside one outer call
-_conn = {}  # pid -> connection (a forked child opens its own)
+_conn = _kept['conn']  # pid -> connection (a forked child opens its own)
 
 
 def provider_of(host):
@@ -178,7 +179,8 @@ def _http(url, api_id, started, status, size, error):
         host = urlsplit(url).hostname
         if not host or host in LOCAL:
             return
-        ok = error is None and status is not None and status < 400
+        waiting = status == 404 and host.endswith('.github.io')  # report_pages asking whether a page it just pushed is up yet
+        ok = waiting or (error is None and status is not None and status < 400)
         record(provider_of(host), endpoint_of(url, api_id), ok, (time.monotonic() - started) * 1000, status=status, size=size,
                error=type(error).__name__ if error is not None else f'HTTP {status}' if not ok else None)
     except Exception:  # noqa: BLE001 - the request already went out; never turn logging into its failure

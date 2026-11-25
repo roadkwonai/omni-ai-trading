@@ -195,6 +195,35 @@ class ReviewFixTests(unittest.TestCase):
         self.assertEqual(got['issues'], {'시황': [{'title': 'a'}], '코인': [{'title': 'c'}]})
         self.assertEqual((got['engine_news'], got['analysts']), ([{'title': 'n'}], {'X': {}}))
 
+    def test_a_topic_the_news_search_refused_is_asked_again(self):
+        # 11-24 15:31: five HTTP 429 left four topics stored as "no article", and nothing asked again
+        asked = []
+        def search(query, day, **kw):
+            asked.append(query)
+            return None if asked.count(query) == 1 else [{'title': query}]
+        with patch.object(tj, 'ISSUES', {'시황': 'q1', '원자재': 'q2'}), patch.object(tj, 'headlines', side_effect=search), \
+             patch.object(tj.time, 'sleep') as rest:
+            self.assertEqual(tj.issues('2026-11-24'), {'시황': [{'title': 'q1'}], '원자재': [{'title': 'q2'}]})
+        rest.assert_called_once()
+        with patch.object(tj, 'ISSUES', {'시황': 'q1'}), patch.object(tj, 'headlines', return_value=[]) as once, \
+             patch.object(tj.time, 'sleep', side_effect=AssertionError('nothing failed')):
+            self.assertEqual(tj.issues('2026-11-24'), {'시황': []})  # an answer without articles is not a failure
+        once.assert_called_once()
+
+    def test_a_failed_search_is_told_from_an_empty_one(self):
+        with patch.object(tj.urllib.request, 'urlopen', side_effect=OSError('429')):
+            self.assertIsNone(tj.headlines('q', '2026-11-24'))
+
+    def test_merge_fills_only_the_topics_that_stayed_empty(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(tj, 'REVIEWS', Path(d)), \
+             patch.object(tj, 'ISSUES', {'시황': 'q1', '원자재': 'q2', '반도체': 'q3'}), \
+             patch.object(tj, 'headlines', side_effect=lambda q, day, **kw: None if q == 'q3' else [{'title': q}]) as search:
+            db = Path(d) / 'j.sqlite3'
+            tj.store({'day': '2026-11-24', 'books': {}, 'issues': {'시황': [{'title': 'kept'}], '원자재': [], '반도체': []}}, db)
+            tj.merge('2026-11-24', db)
+            self.assertEqual(tj.load('2026-11-24', db)['issues'], {'시황': [{'title': 'kept'}], '원자재': [{'title': 'q2'}], '반도체': []})
+            self.assertEqual([c.args[0] for c in search.call_args_list], ['q2', 'q3'])
+
     def test_market_is_as_of_the_korean_close_of_that_day(self):
         from zoneinfo import ZoneInfo
         ny, utc = ZoneInfo('America/New_York'), ZoneInfo('UTC')

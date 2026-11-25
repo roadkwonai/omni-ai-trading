@@ -1,7 +1,7 @@
 """API 부하·분산 감사 (user 2026-11-24): are the external APIs shared out well, is any of them called too much, is any refused?
 
-Reads only the call log of scripts/api_calls.py (10-minute slots, failures, calls started per second). No API call, no
-model, no order; nothing is changed. It finds facts and names the usual remedy; applying one stays with the user.
+Reads only the call log of scripts/api_calls.py (10-minute slots, failures, calls started per second) and, in the watch, how
+many files each service holds open (user 2026-11-25). No API call, no model, no order; nothing is changed. It finds facts and names the usual remedy; applying one stays with the user.
 
     PYTHONPATH=agent:scripts .venv/bin/python scripts/api_load.py            # the report of today so far
     ... --watch                                                              # the launchd service: every minute until 15:40,
@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sqlite3
+import subprocess
 import time
 from collections import Counter
 from datetime import datetime, timedelta
@@ -21,6 +23,7 @@ from statistics import median
 
 import api_calls
 import api_catalog as cat
+import os_services
 from config_store import write_json, write_text
 from sqlite_ro import ro_connect
 
@@ -35,6 +38,8 @@ SURGE_TIMES, SURGE_CALLS, SURGE_FROM = 2, 150, '09:35'  # the open's volume move
 BURST_SECONDS = 3  # the log counts a call in the second it started, NH a moment later: one second at the limit proves little
 REPEAT_MIN = 30    # a finding gone this long is reported again when it returns
 END = '15:40'
+FILES_AT = (0.7, 0.9)  # of a service's open-file limit: told at each
+FILES_ADVICE = '한도에 닿으면 그 서비스의 모든 조회가 실패합니다. 무엇이 쌓이는지(NH 연결 프로그램·이벤트 루프) 보고, 닿기 전에 그 서비스를 재시작합니다'
 LIMITS = {'nh': (5, False), 'kiwoom': (5, True)}  # calls a second: of the app key / of each TR (docs/broker-data-sources-research.md)
 ADVICE = {
     'refused': '같은 조회를 여러 프로그램이 겹쳐 부르는지 보고, 공유 기록·캐시를 읽게 하거나 조회 간격을 벌립니다',
@@ -151,6 +156,34 @@ def findings(f):
     return out
 
 
+def open_files(run=subprocess.run):
+    """({service: files it holds open}, the limit each was started with); ({}, 0) when this cannot be read (not macOS)."""
+    try:
+        pids = {row['pid']: name for name, row in os_services.states(run=run).items() if row['pid']}
+        ask = lambda *args: run(args, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15).stdout  # noqa: E731
+        limit = re.search(r'maxfiles\s+(\d+)', ask('launchctl', 'limit', 'maxfiles'))
+        counts, name = Counter(), None
+        for line in ask('lsof', '-n', '-P', '-F', 'pf', '-p', ','.join(map(str, pids))).splitlines() if pids else ():
+            if line.startswith('p'):
+                name = pids.get(int(line[1:]))
+            elif name and re.fullmatch(r'f\d+', line):  # not its folder, program or mapped files
+                counts[name] += 1
+        return dict(counts), int(limit.group(1)) if limit else 0
+    except (os_services.Unknown, OSError, ValueError, subprocess.SubprocessError):
+        return {}, 0
+
+
+def file_findings(files, limit):
+    """A service whose open files near its limit: at it every new connection of that service fails (2026-11-25 dashboard)."""
+    out = []
+    for name, n in sorted(files.items()):
+        reached = [at for at in FILES_AT if limit and n >= at * limit]
+        if reached:
+            out.append({'key': f'api.files:{name}' + (f':{reached[-1] * 100:.0f}' if reached[-1] > FILES_AT[0] else ''),
+                        'detail': f'서비스 {name}의 열린 파일 {n}/{limit}개({n / limit:.0%})', 'advice': FILES_ADVICE})
+    return out
+
+
 def table(f):
     """One row per API called today, busiest first (report and dashboard)."""
     top, out = peaks(f['seconds']), []
@@ -208,7 +241,7 @@ def seen(root, now):
 
 def step(send, root, now):
     """One round: what is new (or back after REPEAT_MIN) goes out, and counts as reported only once it arrived."""
-    found, known, stamp = findings(collect(root, now)), seen(root, now), now.isoformat(timespec='seconds')
+    found, known, stamp = findings(collect(root, now)) + file_findings(*open_files()), seen(root, now), now.isoformat(timespec='seconds')
     new = [x for x in found if x['key'] not in known or now - datetime.fromisoformat(known[x['key']]['last']) > timedelta(minutes=REPEAT_MIN)]
     if new and not send(f'📡 API 부하 감사 · {now:%m-%d %H:%M}\n' + '\n'.join(f"⚠️ {x['detail']}\n→ {x['advice']}" for x in new)):
         fresh = {x['key'] for x in new}

@@ -16,7 +16,21 @@ RATE_LIMIT_WAITS = (0.5, 1.0, 2.0)  # NH's per-app call limit (IGW42902) is retr
 # 0.5 s after the previous one's start was refused with IGW42903, 1.0 s passed); a continuation page waits this long.
 PAGE_GAP = 1.1
 # NH gives these balance totals only once every holding is read, so a paged balance carries 0 until its last page
-BALANCE_TOTALS = ('nas_amt', 'tot_aet_amt', 'tot_byn_amt', 'tot_eal_amt', 'tot_eal_pls')
+BALANCE_TOTALS = ('nas_amt', 'tot_aet_amt', 'tot_byn_amt', 'tot_eal_amt', 'tot_eal_pls', 'pft_rt')
+
+
+def linked_accounts(reader, until, wait=60):
+    """The broker's linked accounts ([] when none came by `until()` turning True). A service starts once a day, so a call
+    that fails there (the NH process missed its 8 s start, 2026-11-25) is asked again, never taken as "no account"."""
+    while True:
+        answer = reader.call_tool('list_accounts', {})
+        data = answer.get('data') if isinstance(answer, dict) and answer.get('status') == 'ok' else None
+        if rows := (data or {}).get('Output_0'):
+            return rows
+        if until():
+            return []
+        print('account list unavailable; asked again', flush=True)
+        time.sleep(wait)
 
 
 def orderable_cash(summary):
@@ -121,10 +135,27 @@ def read_linked_balance(adapter, account_key, record):
     return result, datetime.now(KST)
 
 
-def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL):
+def quote_before_advance(reader, symbol, limit=20, step=2, sleep=time.sleep):
+    """The quote of `symbol` read just before its clock moved on, for collect_snapshots(previous_quote=); None when it did not
+    move within `limit` seconds or could not be read. The guard buys only on a quote that moved between its two reads, 2 s
+    apart; a thinly traded ETF's moves every 6~20 s (357870, refused from 09:41 to 09:48 on 2026-11-25)."""
+    stamp = lambda quote: str((quote['data'].get('Output_0') or {}).get('hoga_bsop_hour') or '')  # noqa: E731
+    try:
+        first = _request(reader, 'get_stock_price', {'stock_code': symbol}, sleep=sleep)
+        for _ in range(limit // step):
+            sleep(step)
+            if stamp(first) < stamp(_request(reader, 'get_stock_price', {'stock_code': symbol}, sleep=sleep)):
+                return first
+    except LiveOrderBlocked:
+        pass
+    return None
+
+
+def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL, previous_quote=None):
     """Fetch guard inputs (quotes for `symbol`) from the configured read-only broker; never place an order.
     `symbol=None` skips the two quotes and their 2-second gap and the account list (the live mirror's per-minute read,
-    which quotes its own symbols and uses neither; its orders re-read everything through nh_guarded_live)."""
+    which quotes its own symbols and uses neither; its orders re-read everything through nh_guarded_live).
+    `previous_quote` (quote_before_advance): read moments ago, so only the current one is read here; the guard checks both."""
     if not isinstance(account, str) or len(account) != 11 or not account.isascii() or not account.isdigit():
         raise LiveOrderBlocked('invalid account')
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
@@ -140,8 +171,9 @@ def collect_snapshots(adapter, account, now, sleep=time.sleep, symbol=SYMBOL):
         'iqr_dit_cd1':'0', 'fee_dit_cd':'1', 'qut_dit_cd':'KRX', 'aly_qut_cd':'1'}})['data']
     if symbol is None:
         return {'history':history, 'balance':balance, 'pnl':pnl}
-    previous_quote = _request(adapter, 'get_stock_price', {'stock_code':symbol})
-    sleep(2)
+    if previous_quote is None:
+        previous_quote = _request(adapter, 'get_stock_price', {'stock_code':symbol})
+        sleep(2)
     quote = _request(adapter, 'get_stock_price', {'stock_code':symbol})
     return {'accounts':accounts, 'history':history, 'balance':balance, 'pnl':pnl,
             'previous_quote':previous_quote, 'quote':quote}

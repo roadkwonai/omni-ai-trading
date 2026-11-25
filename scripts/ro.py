@@ -4,6 +4,7 @@ rule (Bash(scripts/ro *) in .claude/settings.local.json) lets an unattended task
 
   scripts/ro [--out FILE] <script.py> [args...]     a listed script (PYTHONPATH set)
   scripts/ro sql <db under ~/.vibe-trading> "<SELECT|WITH|PRAGMA ...>"   read-only SQLite query, rows as JSON lines
+  scripts/ro json <file> [key ...]                     its parts and their sizes, or the one part those keys name
   scripts/ro services                                  the registered services (pid, last exit, label)
   scripts/ro pytest <scripts/test_*.py|streamlit_namuh/test_*.py>...
   scripts/ro vibe-status                               whether the long-term engine is switched on
@@ -29,8 +30,9 @@ FORBIDDEN = ('--execute', '--live', '--watch')
 SCRIPTS = set('''longterm_report.py longterm_audit.py longterm_cases.py us_ideas.py intraday_audit.py
  oversold_outcomes.py oversold_research.py oversold_cases.py daily_improvement.py trading_journal.py journal_template.py
  premarket.py premarket_template.py preflight.py launchd_services.py nh_live_shadow.py etf_regime_observer.py market_movers.py
- jev_explain.py audit_incidents.py strategy_compare.py ipo_shadow.py api_load.py'''.split())
-NEEDS = {'market_movers.py': '--once', 'ipo_shadow.py': '--summary'}
+ jev_explain.py audit_incidents.py strategy_compare.py ipo_shadow.py fade_shadow.py api_load.py
+ overnight_catalysts.py mirror_gap.py'''.split())
+NEEDS = {'market_movers.py': '--once', 'ipo_shadow.py': '--summary', 'fade_shadow.py': '--summary', 'overnight_catalysts.py': '--summary'}
 PATHS = ['agent', 'scripts', 'streamlit_namuh']
 
 
@@ -75,6 +77,28 @@ def sql(out, db, query):
     con.row_factory = sqlite3.Row
     for row in con.execute(query):
         print(json.dumps(dict(row), ensure_ascii=False, default=str), file=out)
+    return 0
+
+
+def show_json(out, path, keys):
+    """One part of a large JSON file: Read cannot pick one, and the `python3 -c` used instead waits for an approval."""
+    if not task_path(path) or not Path(path).is_file():
+        raise Refused(f'json: {path}: a file under .scratch/ or the report folders')
+    try:
+        value = json.loads(Path(path).read_text(encoding='utf-8'))
+    except ValueError:
+        raise Refused(f'json: {path} is not JSON') from None
+    for key in keys:
+        try:
+            value = value[int(key)] if isinstance(value, list) else value[key]
+        except (KeyError, IndexError, ValueError, TypeError):
+            has = ', '.join(value) if isinstance(value, dict) else f'{len(value)} items' if isinstance(value, list) else 'a value'
+            raise Refused(f'json: no {key}; there is: {has}') from None
+    if not keys and isinstance(value, dict):
+        for key, part in value.items():
+            print(f'{key}\t{len(json.dumps(part, ensure_ascii=False))}', file=out)
+        return 0
+    print(json.dumps(value, ensure_ascii=False, indent=1), file=out)
     return 0
 
 
@@ -138,6 +162,10 @@ def plan(argv):
     name, args = (argv[0], argv[1:]) if argv else ('', [])
     if name == 'vibe-status':
         return target, ['-c', "import engine_ops, pathlib; print(engine_ops.status(pathlib.Path.home() / '.vibe-trading/nhplug')['vibe'])"]
+    if name == 'json':
+        if not args:
+            raise Refused('json: a file')
+        return target, lambda out: show_json(out, args[0], args[1:])
     if name == 'services':
         return target, services
     if name == 'sql':
@@ -148,7 +176,7 @@ def plan(argv):
         return target, ['-m', 'pytest', *pytest_args(args)]
     if fnmatch.fnmatchcase(name, '*.py'):
         return target, script_args(name, args)
-    raise Refused(f"not allowed: {name or '<none>'} (scripts: {' '.join(sorted(SCRIPTS))}; or sql, services, pytest, vibe-status)")
+    raise Refused(f"not allowed: {name or '<none>'} (scripts: {' '.join(sorted(SCRIPTS))}; or sql, json, services, pytest, vibe-status)")
 
 
 def main(argv):

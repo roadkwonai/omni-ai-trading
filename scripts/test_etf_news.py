@@ -91,10 +91,12 @@ class EtfNewsTests(unittest.TestCase):
             self.assertEqual(etf_news.headlines7(NOW + timedelta(minutes=4)), first)
             self.assertEqual(etf_news.headlines7(NOW + timedelta(minutes=6)), first)  # backoff: no retry yet
             self.assertEqual(urlopen.call_count, 1)
-            with self.assertRaises(HTTPError):  # past STALE_OK the failure is reported, not hidden
-                etf_news.headlines7(NOW + timedelta(minutes=31))
-        self.assertEqual(self.run_feeds([feed('코스피 새 소식', 'Wed, 11 Nov 2026 11:40:00 +0900'), *good[1:]],
-                                        NOW + timedelta(minutes=45))[0]['title'], '코스피 새 소식')
+            # user 2026-11-25: the cached stories serve until they leave RECENT, however long the feeds stay down
+            self.assertEqual(etf_news.headlines7(NOW + timedelta(minutes=31)), first)
+            with self.assertRaises(HTTPError):  # then the failure is reported, not hidden
+                etf_news.headlines7(NOW + timedelta(minutes=62))
+        self.assertEqual(self.run_feeds([feed('코스피 새 소식', 'Wed, 11 Nov 2026 12:10:00 +0900'), *good[1:]],
+                                        NOW + timedelta(minutes=75))[0]['title'], '코스피 새 소식')
 
     def test_cached_rows_older_than_a_day_are_not_reused(self):
         from datetime import timedelta
@@ -126,6 +128,9 @@ class RotationTests(unittest.TestCase):
         """routes: host fragment -> callable(url) returning bytes or raising."""
         calls = []
         def urlopen(request, timeout=None):
+            for host, body in (('finance.daum.net', b'{"data": []}'), ('hankyung.com', b'<rss><channel></channel></rss>')):
+                if host in request.full_url and host not in routes:  # quiet unless the test is about them
+                    return Response(body)
             calls.append(request.full_url)
             for host, answer in routes.items():
                 if host in request.full_url:
@@ -155,10 +160,11 @@ class RotationTests(unittest.TestCase):
             calls.clear()
             naver_titles.append('반도체 수출')
             rows = etf_news.headlines7(NOW + timedelta(minutes=4))  # the next fetch starts at Naver, its two lists for all topics
-            self.assertEqual({r['source'] for r in rows}, {'naver_finance_news'})
+            self.assertEqual([r['source'] for r in rows if r['title'] == '반도체 수출'], ['naver_finance_news'])
+            self.assertIn('반도체 업황', [r['title'] for r in rows])  # Bing's earlier story is still recent: kept
             self.assertEqual((len(calls), rows[0]['published']), (2, '2026-11-11T01:30:00+00:00'))
             calls.clear()
-            etf_news.headlines7(NOW + timedelta(minutes=8))  # ... then Google again, never Bing first
+            etf_news.headlines7(NOW + timedelta(minutes=11))  # ... then Google again (its ten minutes' rest is over), never Bing first
             self.assertIn('google', calls[0])
             self.assertFalse(any('bing' in c for c in calls))
 
@@ -282,7 +288,7 @@ def test_jev_backfill_checks_missing_topics_from_alternate_sources_and_caches_re
         assert cached == improved
         assert warm['probes'] == 0
         assert stats['missing_before'] == ['kosdaq150', 'semiconductor']
-        assert calls == [('naver_finance_news', 'kosdaq150'), ('bing_news_rss', 'kosdaq150'),
+        assert calls == [('naver_finance_news', 'kosdaq150'), ('daum_finance_news', 'kosdaq150'), ('hankyung_rss', 'kosdaq150'), ('bing_news_rss', 'kosdaq150'),
                          ('google_news_rss', 'semiconductor')]
         result = etf_news.jev_market_headlines(improved, now)
         assert [row['topic'] for row in result] == ['market', 'semiconductor']
@@ -296,7 +302,7 @@ class NewsBackoffTests(unittest.TestCase):
         from datetime import timedelta
         calls = []
 
-        def fake(source, topic, query, shared):
+        def fake(source, topic, query, shared, *, timeout=None):
             calls.append(source)
             return items(source)
         with tempfile.TemporaryDirectory() as td, patch.dict(os.environ, {'VIBE_TRADING_NEWS_CACHE': td + '/c.json'}), \
@@ -373,3 +379,164 @@ class NoFreshNewsTests(unittest.TestCase):
         told = etf_news.no_fresh_news(later)
         self.assertEqual((told['news_status'], [(r['title'], r['age_min']) for r in told['earlier_news_headlines']]),
                          ('unavailable', [('오전 속보', 110)]))
+
+
+class CacheAndFailoverTests(unittest.TestCase):
+    serve = RotationTests.serve
+
+    """User 2026-11-25: keep the newest stories coming, go round a source that fails at once, and use what is cached."""
+    ALL = ('코스피 상승', '코스닥 강세', '반도체 수출')
+
+    def at(self, minutes, seconds=0):
+        from datetime import timedelta
+        return NOW + timedelta(minutes=minutes, seconds=seconds)
+
+    def stamp(self, at):
+        return at.strftime('%Y%m%d%H%M%S')
+
+    def google(self, titles=ALL):
+        def answer(url):
+            query = next(k for k, q in (('코스피', '%EC%BD%94%EC%8A%A4%ED%94%BC'), ('코스닥', '%EC%BD%94%EC%8A%A4%EB%8B%A5'), ('반도체', '%EB%B0%98')) if 'q=' + q in url)
+            return feed(next((t for t in titles if query in t), '무관한 기사'))
+        return answer
+
+    @staticmethod
+    def refused(url):
+        from urllib.error import HTTPError
+        raise HTTPError(url, 429, 'Too Many Requests', {}, None)
+
+    def test_a_story_a_later_fetch_no_longer_lists_is_kept_until_it_is_old(self):
+        calls, patcher = self.serve({'news.google.com': self.google(), 'stock.naver.com': lambda url: naver('무관한 기사'), 'bing.com': lambda url: bing('무관한 기사')})
+        with patcher:
+            etf_news.headlines7(NOW)
+        calls, patcher = self.serve({'news.google.com': self.google(('코스피 새 소식',)), 'stock.naver.com': lambda url: naver('코스피 속보', dt=self.stamp(self.at(4))),
+                                     'bing.com': lambda url: bing('무관한 기사')})
+        with patcher:
+            rows = etf_news.headlines7(self.at(5))
+            self.assertEqual({r['topic'] for r in rows}, {'market', 'kosdaq150', 'semiconductor'})
+            self.assertEqual([r['title'] for r in rows if r['topic'] == 'market'], ['코스피 속보', '코스피 상승'])  # newest first
+        with patch.object(etf_news, '_fetch7', side_effect=OSError('offline')):  # published 10:30: past 90 minutes it is no recent story
+            self.assertEqual([r['title'] for r in etf_news.headlines7(self.at(61))], ['코스피 속보'])
+
+    def test_naver_brings_the_newest_stories_every_cycle_without_asking_google_again(self):
+        stories = ['코스피 상승']
+        calls, patcher = self.serve({'news.google.com': self.google(), 'stock.naver.com': lambda url: naver(*stories, dt=self.stamp(self.at(1)))})
+        with patcher:
+            etf_news.headlines7(NOW)
+            self.assertEqual(len(calls), 3)  # Google's three topics
+            calls.clear()
+            stories[:] = ['코스피 급락 속보']
+            rows = etf_news.headlines7(self.at(1, 5))
+            self.assertEqual(rows[0]['title'], '코스피 급락 속보')
+            self.assertTrue(len(calls) == 2 and all('naver' in c for c in calls))
+            etf_news.headlines7(self.at(1, 30))  # the same cycle's other callers read the cache
+            self.assertEqual(len(calls), 2)
+
+    def test_a_failed_top_up_costs_nothing(self):
+        def down(url):
+            raise OSError('offline')
+        calls, patcher = self.serve({'news.google.com': self.google(), 'stock.naver.com': down})
+        with patcher:
+            first = etf_news.headlines7(NOW)
+            self.assertEqual(etf_news.headlines7(self.at(1, 5)), first)
+            self.assertEqual(etf_news.headlines7(self.at(2, 10)), first)
+            self.assertEqual(sum('naver' in c for c in calls), 2)  # resting two minutes: not asked again
+
+    def test_a_refused_google_is_left_alone_for_ten_minutes_and_naver_serves_at_once(self):
+        calls, patcher = self.serve({'news.google.com': self.refused, 'stock.naver.com': lambda url: naver(*self.ALL, dt=self.stamp(NOW))})
+        with patcher:
+            self.assertEqual({r['source'] for r in etf_news.headlines7(NOW)}, {'naver_finance_news'})
+            for minutes in (4, 8):
+                etf_news.headlines7(self.at(minutes))
+            self.assertEqual(sum('google' in c for c in calls), 1)
+            etf_news.headlines7(self.at(12))
+            etf_news.headlines7(self.at(16))
+            self.assertEqual(sum('google' in c for c in calls), 2)
+
+    def test_every_source_down_is_not_asked_again_and_the_first_to_return_serves(self):
+        down = [True]
+        def flaky(url):
+            if down[0]:
+                raise OSError('offline')
+            return naver(*self.ALL, dt=self.stamp(self.at(2)))
+        calls, patcher = self.serve({'news.google.com': self.refused, 'bing.com': self.refused, 'stock.naver.com': flaky})
+        with patcher:
+            with self.assertRaises(OSError):
+                etf_news.headlines7(NOW)
+            first = len(calls)
+            with self.assertRaises(OSError):
+                etf_news.headlines7(self.at(1))
+            self.assertEqual(len(calls), first)
+            down[0] = False
+            self.assertEqual(len({r['topic'] for r in etf_news.headlines7(self.at(2, 5))}), 3)  # not the whole five minutes
+            self.assertEqual(sum('google' in c for c in calls), 1)
+
+    def test_one_slow_source_may_not_hold_the_cycle(self):
+        waits = []
+        def urlopen(request, timeout=None):
+            waits.append(timeout)
+            raise TimeoutError('timed out')
+        with patch.object(etf_news.urllib.request, 'urlopen', side_effect=urlopen), self.assertRaises(OSError):
+            etf_news.headlines7(NOW)
+        self.assertLessEqual(sum(waits), 10)
+
+    def test_daum_and_hankyung_fill_what_google_and_naver_miss_before_bing(self):
+        import json
+        asked = []
+        def daum(url):
+            asked.append('daum')
+            rows = [{'title': '코스피 &quot;상승&quot;', 'cpKorName': '한 매체', 'createdAt': '2026-11-11 10:50:00'},
+                    {'title': '코스피 속보', 'cpKorName': '연합뉴스', 'createdAt': '2026-11-11 10:55:00'},
+                    {'title': '코스피 시각 오류', 'cpKorName': '한 매체', 'createdAt': 'x'}, 'x', {'title': '코스피 오래됨', 'cpKorName': '한 매체', 'createdAt': '2026-11-11 08:00:00'}]
+            return json.dumps({'data': rows}, ensure_ascii=False).encode()
+        def hankyung(url):
+            asked.append('hankyung')
+            return ('<rss><channel><item><title>반도체 수출</title><pubDate>Wed, 11 Nov 2026 10:40:00 +0900</pubDate></item></channel></rss>').encode()
+        def bings(url):
+            asked.append('bing')
+            return bing('무관한 기사')
+        calls, patcher = self.serve({'news.google.com': self.refused, 'stock.naver.com': lambda url: naver('코스닥 강세'),
+                                     'finance.daum.net': daum, 'hankyung.com': hankyung, 'bing.com': bings})
+        with patcher:
+            rows = etf_news.headlines7(NOW)
+        self.assertEqual({(r['topic'], r['source']) for r in rows if r['topic'] != 'market'},
+                         {('kosdaq150', 'naver_finance_news'), ('semiconductor', 'hankyung_rss')})
+        self.assertEqual(asked, ['daum', 'hankyung'])  # Bing is not needed
+        self.assertEqual([r['publisher'] for r in rows if r['source'] == 'hankyung_rss'], ['한국경제'])
+        calls, patcher = self.serve({'news.google.com': self.refused, 'stock.naver.com': self.refused, 'finance.daum.net': daum, 'hankyung.com': hankyung, 'bing.com': bings})
+        with patch.object(etf_news, '_read_cache', return_value={}), patch.object(etf_news, '_rests', return_value={}), patcher:
+            rows = etf_news.headlines7(NOW)
+        self.assertEqual([r['title'] for r in rows if r['source'] == 'daum_finance_news'], ['코스피 "상승"'])
+
+    def test_a_changed_daum_answer_moves_on(self):
+        calls, patcher = self.serve({'news.google.com': self.refused, 'stock.naver.com': self.refused, 'finance.daum.net': lambda url: b'<html>',
+                                     'hankyung.com': lambda url: b'<rss><channel><item><title>\xec\xbd\x94\xec\x8a\xa4\xed\x94\xbc</title><pubDate>Wed, 11 Nov 2026 10:40:00 +0900</pubDate></item></channel></rss>',
+                                     'bing.com': self.refused})
+        with patcher:
+            self.assertEqual([r['source'] for r in etf_news.headlines7(NOW)], ['hankyung_rss'])
+
+    def test_a_broken_reply_moves_on_to_the_next_source(self):
+        import http.client
+        def broken(url):
+            raise http.client.IncompleteRead(b'')
+        calls, patcher = self.serve({'news.google.com': broken, 'stock.naver.com': lambda url: naver(*self.ALL)})
+        with patcher:
+            self.assertEqual(len({r['topic'] for r in etf_news.headlines7(NOW)}), 3)
+
+    def test_google_and_naver_giving_one_story_count_once(self):
+        row = {'topic': 'market', 'published': NOW.isoformat(), 'publisher': '한 매체', 'source': 'g'}
+        self.assertEqual(len(etf_news._merge([{**row, 'title': '코스피 상승 - 한 매체'}, {**row, 'title': '코스피 상승'}, {'title': 1}, 'x'], NOW)), 1)
+
+    def test_status_reads_what_the_shared_files_say_and_asks_nobody(self):
+        empty = etf_news.status(NOW)
+        self.assertEqual((empty['fetched'], empty['topped'], [t['count'] for t in empty['topics']]), (None, None, [0, 0, 0]))
+        calls, patcher = self.serve({'news.google.com': self.refused, 'stock.naver.com': lambda url: naver('코스피 상승', dt=self.stamp(self.at(-5))), 'bing.com': lambda url: bing('무관한 기사')})
+        with patcher:
+            etf_news.headlines7(NOW)
+        with patch.object(etf_news.urllib.request, 'urlopen', side_effect=AssertionError('no network')):
+            told = etf_news.status(self.at(1))
+        self.assertEqual([(t['topic'], t['count'], t['newest_min']) for t in told['topics']], [('market', 1, 6), ('kosdaq150', 0, None), ('semiconductor', 0, None)])
+        by = {s['source']: s for s in told['sources']}
+        self.assertEqual((by['google_news_rss']['rest_until'], by['naver_finance_news']['rest_until']), (self.at(10), None))
+        self.assertEqual((by['naver_finance_news']['count'], by['naver_finance_news']['newest_min']), (1, 6))
+        self.assertIsNone({s['source']: s for s in etf_news.status(self.at(11))['sources']}['google_news_rss']['rest_until'])

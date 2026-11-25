@@ -441,3 +441,19 @@ def test_a_stale_30_minute_index_change_is_not_offered_as_current():
     assert late['change_30m_pct'] is None and late['high'] == 2500 and late['as_of'] == '10:00'  # the rest stays
     payload['index_intraday']['markets']['KOSPI']['as_of'] = '10:18'
     assert M.summary(payload, now=paid + timedelta(minutes=5))['index_intraday']['코스피']['change_30m_pct'] == -0.4
+
+
+def test_only_the_first_half_hour_offers_the_change_since_the_open():
+    # user 2026-11-25: no price is 30 minutes old before 09:31; the inverse gate reads the open instead, never a stale one
+    import market_context as M
+    at = lambda h, mi: datetime(2026, 11, 25, h, mi, tzinfo=M.KST)  # noqa: E731
+    def early(as_of, now, change=None):
+        item = {'name': '코스피', 'regime': {'label': '하락장', 'reasons': [], 'drawdown_pct': -5}, 'change_pct': -4.3, 'flow': '약세',
+                'investors_100m': {}, 'program_100m': {'전체': -800}, 'breadth': {'상승': 100, '하락': 700}}
+        payload = {'time': now.isoformat(), 'indices': {'KOSPI': item}, 'index_intraday': {'markets': {'KOSPI': {'as_of': as_of, 'change_pct': -4.3, 'from_open_pct': -0.5, 'change_30m_pct': change}}}}
+        return (M.summary(payload, now=now).get('index_intraday') or {}).get('코스피', {}).get('first_30m_from_open_pct')
+    assert early('09:11', at(9, 13)) == -0.5
+    assert early('09:30', at(9, 31)) == -0.5
+    assert early('09:31', at(9, 32), change=-0.2) is None  # the 30 minutes are there
+    assert early('09:11', at(9, 25)) is None               # ten minutes late
+    assert early('10:11', at(10, 12)) is None              # a gap later in the day stays unknown

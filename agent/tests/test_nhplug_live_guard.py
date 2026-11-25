@@ -130,6 +130,12 @@ def test_loss_observation_latches_even_when_quotes_are_stale(tmp_path):
     with pytest.raises(LiveOrderBlocked): reserve(guard,pnl=pnl,quote=quote('10:55:00'))
     with pytest.raises(LiveOrderBlocked,match='latch'): reserve(guard)
 
+@pytest.mark.parametrize('limit,loss,halted',[(30_000,20_786,False),(30_000,30_000,True),(50_000,30_000,True),(None,20_000,True),(20_000,20_000,True),(10_000,10_000,True)])
+def test_an_account_may_set_its_loss_limit_up_to_30000(tmp_path,limit,loss,halted):
+    # user decision 2026-11-25: live 1 to 30,000 KRW; an account that sets none keeps 20,000
+    pnl={**PNL, 'Output_0':{'sby_pls_amt':-loss,'sdr_xps':0,'eal_pls_amt':0}}
+    assert LiveOrderGuard(A,tmp_path).observe_loss(pnl,NOW,limit)['halted'] is halted
+
 def test_global_halt_and_business_error_fail_closed(tmp_path):
     from src.live.halt import halt_path
     path = halt_path()

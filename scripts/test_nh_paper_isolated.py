@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -200,6 +201,30 @@ class IsolatedTests(unittest.TestCase):
                 p.submit(db,object(),ALT,'20261106','005930','BUY',1,100,etf7=True)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM intents').fetchone()[0],0)
             db.close()
+
+    def test_a_stock_charted_from_the_pre_market_does_not_refuse_every_opening_buy(self):
+        # 2026-11-25: one chart starting with the 08:49 NXT bar put the deadline at 08:53 and no buy could leave, the ETFs' included
+        from etf_universe import SYMBOLS as ETF7
+        now = datetime.fromisoformat('2026-11-25T09:00:20+09:00')
+        row = lambda day, at, **k: {'bsop_date': day, 'bsop_time': at, **k}  # noqa: E731
+        bars = {name: [row('20261124', '153000')] for name in ETF7}
+        expected = int((now + timedelta(seconds=60)).timestamp() * 1000)  # the model answer's own minute
+        for stock in ([row('20261125', '084900', market='NXT')], [row('20261124', '153000')], [row('20261125', '090000')]):
+            self.assertEqual(p.etf7_signal_deadline({**bars, '005930': stock}, now.isoformat(), now.isoformat(), now), expected)
+        late = now.replace(minute=7, second=30)  # an opening chart is good until the opening window ends
+        self.assertEqual(p.etf7_signal_deadline(bars, late.isoformat(), late.isoformat(), late), int(late.replace(minute=8, second=0).timestamp() * 1000))
+        self.assertIsNone(p.etf7_signal_deadline(bars, late.isoformat(), late.isoformat(), late.replace(minute=8, second=0)))
+
+    def test_a_stock_strong_before_the_bell_must_be_strong_at_its_own_opening_price(self):
+        with patch.object(p, 'STRENGTH_CHANGE', (2.0, 25.0)):
+            self.assertEqual([p.strong_now({'stck_prdy_clpr': 10000}, price) for price in (10600, 10100, 9800, 12600)], [True, False, False, False])
+            self.assertFalse(p.strong_now({}, 10600))
+
+    def test_session_bar_tells_todays_krx_bar_from_what_stands_in_for_it(self):
+        now = datetime.fromisoformat('2026-11-25T09:00:20+09:00')
+        self.assertTrue(p.session_bar([{'bsop_time': '090100'}], now) and p.session_bar([{'bsop_date': '20261125', 'bsop_time': '090100'}], now))
+        self.assertFalse(p.session_bar([{'bsop_date': '20261125', 'bsop_time': '084900', 'market': 'NXT'}], now))
+        self.assertFalse(p.session_bar([{'bsop_date': '20261124', 'bsop_time': '153000'}], now))
 
     def test_etf7_deadline_is_earliest_model_bar_or_session_cutoff(self):
         from etf_universe import SYMBOLS as ETF7
@@ -792,6 +817,78 @@ class IsolatedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'account'):
                 p.shared_default_config(configs(), root, Unknown)
 
+    def _shared_account(self, answers, **kw):
+        """shared_default_config with these list_accounts answers in turn: (config or the refusal, asks, seconds waited)."""
+        class Guard:
+            def __init__(self, args): self.scope = 'a' * 64
+            def paper_policy(self):
+                return {'enabled': True, 'auto_loss_stop': True, 'krx_session_check': True}
+        asks, waited = [], []
+        class Answers(Fake):
+            def call_tool(self, tool, params):
+                asks.append(tool)
+                return answers[min(len(asks), len(answers)) - 1]
+        with tempfile.TemporaryDirectory() as temp, patch.object(p, 'NHOrderGuard', Guard):
+            registry = Path(temp) / 'nhplug' / 'paper-account-owners.json'
+            registry.parent.mkdir(parents=True)
+            registry.write_text(json.dumps({'version': 1, 'accounts': {'a' * 64: 'nhplug_paper_isolated'}}))
+            try:
+                result = p.shared_default_config(configs(), Path(temp), Answers, wait=waited.append, **kw)
+            except ValueError as exc:
+                result = str(exc)
+        return result, len(asks), sum(waited)
+
+    def test_the_runner_asks_the_account_list_again_when_a_login_is_too_busy_to_answer(self):
+        # 2026-11-25 06:40: the NH MCP process did not start within its 8 seconds and the runner quit at once
+        failed = {'status': 'error'}
+        good = {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': [{'acct_no': DEFAULT, 'acct_type': '03'}]}}
+        config, asks, _ = self._shared_account([failed, failed, good], tries=p.ACCOUNT_LIST_TRIES)
+        self.assertEqual((p.paper_account(config), asks), (DEFAULT, 3))
+
+    def test_the_account_list_is_given_up_after_the_last_try(self):
+        refusal, asks, waited = self._shared_account([{'status': 'error'}], tries=p.ACCOUNT_LIST_TRIES)
+        self.assertEqual((refusal, asks), ('paper account list unavailable', p.ACCOUNT_LIST_TRIES))
+        # trading-day-start counts a runner alive after 30 s as started: ask at least as long as its own restarts did
+        from trading_day_start import START_ATTEMPTS, START_CHECK_SECONDS
+        self.assertGreaterEqual(waited, START_ATTEMPTS * START_CHECK_SECONDS)
+
+    def test_the_account_list_is_asked_for_as_long_as_the_session_can_still_be_traded(self):
+        # 2026-11-25: after 16 tries the runner quit and nothing started it again that day
+        failed = {'status': 'error'}
+        good = {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': [{'acct_no': DEFAULT, 'acct_type': '03'}]}}
+        config, asks, _ = self._shared_account([failed] * 40 + [good], tries=p.ACCOUNT_LIST_TRIES, going=lambda: True)
+        self.assertEqual((p.paper_account(config), asks), (DEFAULT, 41))
+        left = [True] * 5
+        refusal, asks, _ = self._shared_account([failed], going=lambda: bool(left) and left.pop())
+        self.assertEqual((refusal, asks), ('paper account list unavailable', 6))
+
+    def test_only_a_session_ahead_or_under_way_keeps_the_runner_asking(self):
+        at = lambda text: datetime.fromisoformat(f'2026-11-25T{text}:00+09:00')  # noqa: E731 - a Wednesday
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.assertEqual([p.session_left(root, at(t)) for t in ('06:40', '08:55', '09:00', '14:00', '15:30')],
+                             [False, True, True, True, False])
+            self.assertFalse(p.session_left(root, datetime.fromisoformat('2026-11-28T10:00:00+09:00')))
+            (root / 'STOP').touch()
+            self.assertFalse(p.session_left(root, at('10:00')))
+
+    def test_a_wrong_account_is_refused_at_once(self):
+        wrong = {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': [{'acct_no': DEFAULT, 'acct_type': '01'}]}}
+        refusal, asks, waited = self._shared_account([wrong], tries=p.ACCOUNT_LIST_TRIES)
+        self.assertEqual((asks, waited), (1, 0))
+        self.assertIn('ambiguous', refusal)
+
+    def test_a_check_asks_the_account_list_once(self):  # preflight must not hold up its 08:53 alert
+        refusal, asks, waited = self._shared_account([{'status': 'error'}])
+        self.assertEqual((refusal, asks, waited), ('paper account list unavailable', 1, 0))
+
+    def test_the_shared_runner_starts_with_the_retries(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(p, 'shared_default_config', side_effect=ValueError('stop here')) as check:
+            with self.assertRaisesRegex(ValueError, 'stop here'):
+                p.run(configs(), Path(temp), shared_default=True)
+        self.assertEqual(check.call_args.kwargs.get('tries'), p.ACCOUNT_LIST_TRIES)
+
     def test_shared_runner_uses_different_journal_and_preserves_isolated_record(self):
         class Guard:
             def __init__(self, args): self.scope = 'a' * 64
@@ -839,9 +936,65 @@ class IsolatedTests(unittest.TestCase):
                 self.assertEqual(events.call_args.kwargs['reason'], 'transient_read_failure')
                 with patch.object(p, 'cycle', side_effect=ValueError('order history ambiguous')), self.assertRaisesRegex(ValueError, 'ambiguous'):
                     run(None)  # a safety stop still stops
+                # user 2026-11-25: too many in a row is told, not a stop (nothing starts the runner again that day)
                 with patch.object(p, 'cycle', side_effect=ValueError('quote unavailable')), patch.object(p, 'TRANSIENT_READ_LIMIT', 1), \
-                     self.assertRaisesRegex(ValueError, 'quote unavailable'):
-                    run(None)  # too many in a row: stop as before
+                     patch.object(p, 'tell') as tell:
+                    run(None)
+                self.assertIn('quote unavailable', tell.call_args.args[0])
+                # a timeout or a refused page before any order (11/11 10:43, 11/13 13:08) no longer ends the runner either
+                for error in (TimeoutError('The read operation timed out'), ConnectionResetError(), ValueError('paper broker page rejected')):
+                    with patch.object(p, 'cycle', side_effect=error):
+                        run(None)
+                    self.assertEqual(events.call_args.kwargs['reason'], 'transient_read_failure')
+                for error in (ValueError('submission uncertain; no retry'), ValueError('broker holdings differ from journal'), KeyError('x'), PermissionError()):
+                    with patch.object(p, 'cycle', side_effect=error), self.assertRaises(type(error)):
+                        run(None)
+
+    def test_a_read_that_fails_while_an_order_is_unresolved_is_not_retried_blindly(self):
+        db = sqlite3.connect(':memory:')
+        db.execute('CREATE TABLE intents (id TEXT, status TEXT)')
+        self.assertTrue(p.read_failed(db, TimeoutError()) and p.read_failed(db, ValueError('paper broker page rejected')))
+        db.execute("INSERT INTO intents VALUES ('a','uncertain')")
+        self.assertFalse(p.read_failed(db, TimeoutError()) or p.read_failed(db, ValueError('paper broker page rejected')))
+        self.assertTrue(p.read_failed(db, ValueError('paper broker page unavailable')))  # as before: the next cycle reconciles first
+        db.close()
+        self.assertFalse(p.read_failed(db, TimeoutError()))  # a journal that cannot be read says nothing is safe
+
+    def test_repeated_read_failures_are_told_once_and_the_recovery_too(self):
+        class Guard:
+            def __init__(self, args): self.scope = 'a' * 64
+            def paper_policy(self):
+                return {'enabled': True, 'auto_loss_stop': True, 'krx_session_check': True}
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None): return NOW
+        down = ValueError('quote unavailable')
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'nhplug').mkdir(parents=True)
+            (root / 'nhplug' / 'paper-account-owners.json').write_text(json.dumps({'version': 1, 'accounts': {'a' * 64: 'nhplug_paper_isolated'}}))
+            with patch.object(p, 'NHOrderGuard', Guard), patch.object(p, 'MCPServerAdapter', Fake), patch.object(p, 'datetime', Clock), \
+                 patch.object(p, 'refresh_clock'), patch.object(p, 'in_observation_session', return_value=True), patch.object(p, 'journal_event'), \
+                 patch.object(p, 'TRANSIENT_READ_LIMIT', 3), patch.object(p, 'tell') as tell, patch.object(p.time, 'sleep'), \
+                 patch.object(p, 'cycle', side_effect=[down] * 7 + ['wait', down, 'wait', KeyError('end')]):
+                with self.assertRaises(KeyError):
+                    p.run(configs(), root, execute_orders=True, shared_default=True)
+        self.assertEqual(['실패' in c.args[0] and '3' in c.args[0] for c in tell.call_args_list], [True, False])
+        self.assertIn('다시', tell.call_args_list[1].args[0])
+
+    def test_a_runner_that_stops_on_an_error_in_the_session_says_so(self):
+        for left, told in ((True, 1), (False, 0)):
+            with self.subTest(left=left), patch('sys.argv', ['x', '--run', '--shared-default', '--execute']), patch.object(p, 'load_agent_config'), \
+                 patch.object(p, 'run', side_effect=ValueError('order history ambiguous')), patch.object(p, 'session_left', return_value=left), \
+                 patch.object(p, 'tell') as tell, self.assertRaisesRegex(ValueError, 'ambiguous'):
+                p.main()
+            self.assertEqual(tell.call_count, told)
+        self.assertNotIn('1234567', p.stop_text(ValueError('account 12345678901 wrong')))
+
+    def test_a_test_never_sends_an_alert(self):
+        with patch('discord_notify.send_everywhere') as send:
+            p.tell('x')
+        send.assert_not_called()
 
     def test_shared_runner_waits_a_minute_between_cycles(self):
         class Guard:
@@ -1689,8 +1842,8 @@ class MultiSymbolTests(unittest.TestCase):
                     {'bsop_date1': '20261104', 'frgn_ntby_qty': 0, 'gigwan': 0, 'person': 0}]}}
         p._INVESTOR_CACHE.clear()
         flows = p.investor_flows(Reader(), NOW)
-        self.assertEqual(flows['K200'], {'last_close_day': {'date': '20261105', 'foreign': 5, 'institution': 6, 'individual': -11},
-                                         'today_provisional': {'date': '20261106', 'foreign': -100000, 'institution': 0, 'individual': 0}})
+        # the closed day's foreign figure is Kiwoom's (not readable in tests) and an ETF's of today is never sent (2026-11-25)
+        self.assertEqual(flows['K200'], {'last_close_day': {'date': '20261105', 'institution': 6, 'individual': -11}})
         self.assertEqual(Reader.calls, 7)
         p.investor_flows(Reader(), NOW + timedelta(seconds=540))
         self.assertEqual(Reader.calls, 7)  # cached for ten minutes
@@ -2348,6 +2501,32 @@ class MultiSymbolTests(unittest.TestCase):
                 _, submit, _, events = self.run_cycle(self.root, self.db, holdings, bids={'069500': 1300})
                 self.assertEqual([c.args[4:7] for c in submit.call_args_list if c.args[5] == 'SELL'], sold)
         self.assertEqual([c.kwargs.get('reason') for c in events.call_args_list if c.args[1] == 'v2_risk_exit'], ['ipo_time_stop'])
+
+    def test_a_strength_pick_in_profit_is_sold_whole_when_its_tape_turns(self):
+        # user 2026-11-25: a weak-market strength pick gave its gain back before +1% (한라캐스트 +0.63%, 코스메카코리아 +1.28%)
+        holdings = self.own(K200=10)
+        ended = NOW.replace(second=0, microsecond=0)
+        rows = lambda moves: [{'bsop_date': f'{NOW:%Y%m%d}', 'bsop_time': f'{ended - timedelta(minutes=i):%H%M}00', 'stck_oprc': '1300',  # noqa: E731
+                               'stck_prpr': str(1300 + m), 'vol': str(v)} for i, (m, v) in enumerate(moves)]
+        selling, buying = rows([(-1, 100), (1, 50), (-1, 100)]), rows([(1, 100), (-1, 50), (1, 100)])
+        weak, strong = {'regime': '하락장', 'today_tone': '약세'}, {'regime': '하락장', 'today_tone': '강세'}
+        plan = {**p.new_plan('069500', 'defensive'), 'entry_source': 'watchlist_strength', 'opened': (NOW - timedelta(minutes=5)).isoformat()}
+        for name, bid, bars, index, sold in (('fading', 1311, selling, weak, True), ('bought', 1311, buying, weak, False),
+                                             ('small gain', 1309, selling, weak, False), ('strong day', 1311, selling, strong, False)):
+            with self.subTest(name):
+                (self.root/'exit-plans.json').write_text(json.dumps({'069500': plan}))
+                with patch.object(p, 'market_view', return_value={'코스피': index}), \
+                     patch.object(p, 'minute_bars', return_value={'status': 'ok', 'data': {'Output_1': bars}}):
+                    _, submit, holding, events = self.run_cycle(self.root, self.db, holdings, bids={'069500': bid})
+                sells = [c.args[4:7] for c in submit.call_args_list if c.args[5] == 'SELL']
+                self.assertEqual(sells, [('069500', 'SELL', 10)] if sold else [])
+                if sold:
+                    self.assertFalse(holding.called)  # it does not wait for Jev
+                    self.assertEqual([c.kwargs.get('reason') for c in events.call_args_list if c.args[1] == 'v2_risk_exit'], ['fade_exit'])
+        with patch.object(p, 'market_view', return_value={'코스피': weak}), patch.object(p, 'minute_bars', side_effect=[OSError('down')] + [{'status': 'ok', 'data': {}}] * 20):
+            (self.root/'exit-plans.json').write_text(json.dumps({'069500': plan}))
+            _, submit, _, _ = self.run_cycle(self.root, self.db, holdings, bids={'069500': 1311})
+        self.assertEqual([c.args[4:7] for c in submit.call_args_list if c.args[5] == 'SELL'], [])  # no chart: the other exits as they were
 
     def test_only_a_take_profit_sale_arms_the_breakeven_stop(self):  # X2
         from etf_universe import SYMBOLS as ETF7
@@ -3050,6 +3229,36 @@ class ReentryTests(unittest.TestCase):
         self.assertEqual((data['ask_vs_decision_pct'], data['ask_vs_recent_low_pct']), (0.593, 1.345))
         self.assertNotIn('recent_low', p.entry_timing_context({}, 33900, rows[:3], at))
 
+    def _bar_reply(self, closes, vols, at, **more):
+        """An NH minute answer whose newest row ends at `at`'s minute (NH stamps a bar with the minute it ends)."""
+        day = at.strftime('%Y%m%d')
+        rows = [{'bsop_date': day, 'bsop_time': (at - timedelta(minutes=i)).strftime('%H%M00'), 'stck_oprc': str(c), 'stck_hgpr': str(c),
+                 'stck_lwpr': str(c), 'stck_prpr': str(c), 'vol': str(v)} for i, (c, v) in enumerate(zip(closes, vols))]
+        return {'status': 'ok', 'data': {'rsp_cd': '00000', 'Output_0': {'iem_cd': '005930'}, 'Output_1': rows}, **more}
+
+    def test_bar_shadow_records_what_the_two_newest_ended_bars_would_have_said(self):
+        # NH's stamp is the bar's end, so valid_bars leaves out two bars that had ended (improvement report 11-24, item 1)
+        at = NOW.replace(hour=10, minute=49, second=1)
+        closes = [110, 109, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]
+        reply = self._bar_reply(closes, [50, 50] + [10] * 11, at)
+        with tempfile.TemporaryDirectory() as d:
+            p.bar_shadow(Path(d), {'005930': reply, '000660': {**self._bar_reply(closes[:5], [1] * 5, at)}}, at)
+            row, = (json.loads(line) for line in (Path(d) / 'bar-shadow.jsonl').read_text().splitlines())
+        self.assertEqual(row['time'], at.isoformat(timespec='seconds'))
+        self.assertEqual(row['codes'], {'005930': {'used': ['104700', 100, False, False], 'newest': ['104900', 110, True, True]}})
+        self.assertEqual(p.valid_bars(reply['data'], '005930', at)[0]['bsop_time'], '104700')  # the gate itself is unchanged
+
+    def test_bar_shadow_reads_only_todays_bars_and_never_stops_a_cycle(self):
+        at = NOW.replace(hour=9, minute=3, second=1)
+        reply = self._bar_reply([100] * 12, [10] * 12, at)
+        for row in reply['data']['Output_1'][3:]:
+            row['bsop_date'] = '20261105'
+        with tempfile.TemporaryDirectory() as d:
+            p.bar_shadow(Path(d), {('005930', 'prior'): reply}, at)  # three bars of today: nothing to compare
+            self.assertFalse((Path(d) / 'bar-shadow.jsonl').exists())
+            p.bar_shadow(Path(d), {'005930': {'status': 'ok', 'data': None}, '000660': None}, at)
+            p.bar_shadow(Path(d) / 'missing', {'005930': self._bar_reply([100] * 12, [10] * 12, at)}, at)
+
     def test_strength_skips_a_floored_stock_until_it_trades_above_its_last_exit(self):
         import json
         with tempfile.TemporaryDirectory() as d:
@@ -3325,6 +3534,18 @@ class InverseGuardTests(unittest.TestCase):
         self.assertEqual(p.inverse_gate({**self.falling, 'index_intraday': {'코스피': {'change_30m_pct': 0.0}}}, '코스피'),
                          'inverse_index_not_falling_now')  # flat: not a rebound, but not falling now either (user 2026-11-20)
 
+    def test_the_first_half_hour_is_judged_from_the_open(self):
+        # user 2026-11-25: there is no price 30 minutes ago before 09:31, and Jev's inverse picks were all refused as unknown
+        early = lambda value, **more: {**self.falling, 'index_intraday': {'코스피': {'change_30m_pct': None, 'first_30m_from_open_pct': value, **more}}}  # noqa: E731
+        self.assertIsNone(p.inverse_gate(early(-0.4), '코스피'))
+        self.assertEqual(p.inverse_gate(early(0.2), '코스피'), 'inverse_index_rebounding')
+        self.assertEqual(p.inverse_gate(early(-0.1), '코스피'), 'inverse_index_not_falling_now')
+        self.assertEqual(p.inverse_gate(early(None), '코스피'), 'inverse_market_unknown')
+        self.assertEqual(p.inverse_gate({**early(-0.4), '코스피': {**self.falling['코스피'], 'today_change_pct': -4.4}}, '코스피'), 'inverse_too_late')
+        self.assertEqual(p.inverse_gate(early(-0.4, change_30m_pct=0.3), '코스피'), 'inverse_index_rebounding')  # the 30 minutes once there are
+        plan = {'profile': 'inverse_crash'}
+        self.assertEqual(p.inverse_exit(plan, 1000, 1001, early(0.3), '코스피'), 'inverse_market_rebound')
+
     def test_entry_block_refuses_an_inverse_pick_the_views_do_not_back(self):
         rows = [{'vol': '200'}] * 5 + [{'vol': '100'}] * 5
         with tempfile.TemporaryDirectory() as d, patch.object(p, 'market_view', return_value=self.view(regime='횡보장')):
@@ -3589,6 +3810,41 @@ def test_a_strength_pick_rides_its_own_trend_from_plus_one_percent(tmp_path):  #
     assert trading_ledger.sanitize(event)['reason'] == 'strength_trend'  # the ledger takes the new reason
 
 
+def test_a_strength_pick_takes_half_at_plus_one_percent_unless_the_market_trend_is_confirmed():
+    # user 2026-11-25: 241710 reached +1.28% in a falling market, its +1% half sale had moved to +2% and it ended at the stop
+    plan = {**p.new_plan('241710'), 'entry_source': 'watchlist_strength', 'half_pct': 1.0, 'all_pct': 1.45}
+    falling = {'코스피': {'regime': '하락장', 'today_tone': '약세'}}
+    rising = {'코스피': {'regime': '상승장', 'today_tone': '강세'}}
+    moved = p.moved_to_trend(plan, '241710', 126700, falling, '코스피', False, 125300)
+    assert (moved['profile'], moved['trend_half_pct'], moved['trend_trail_pct'], moved['peak']) == ('trend', 1.0, p.TREND_TRAIL_PCT, 126700)
+    assert p.plan_levels(moved)['half'] == p.Decimal('1.01') and p.plan_levels(moved)['all'] is None  # the rest rides the trend
+    assert p.moved_to_trend(plan, '241710', 126700, rising, '코스피', False, 125300)['trend_half_pct'] == p.TREND_HALF_PCT  # confirmed: +2% as before
+    assert p.moved_to_trend(plan, '241710', 126500, falling, '코스피', False, 125300) is None  # +0.96%
+    assert p.moved_to_trend({**plan, 'entry_source': None}, '241710', 126700, falling, '코스피', False, 125300) is None
+    assert p.moved_to_trend(moved, '241710', 127000, falling, '코스피', False, 125300) is None  # once
+    assert p.moved_to_trend(None, '069500', 100, rising, '코스피', False, 100)['trend_half_pct'] == p.TREND_HALF_PCT
+
+
+def test_a_weak_tape_and_a_weak_pick_together_stop_a_strength_buy(tmp_path):
+    # user 2026-11-25: all six such buys of 11-12~11-25 lost (-1.56% on average); small sample, reviewed as it grows
+    now = datetime.now(p.KST)
+    movers = {'000001': {'price': 100, 'change_pct': 0.0}}
+    bars = {'000001': [{'stck_prpr': '105'}] + [{'stck_prpr': '103'}] * 5}
+    def pick(probability, from_open, recent=-0.1):
+        (tmp_path / 'watchlist.json').write_text(json.dumps({'time': now.isoformat(), 'probabilities': {'000001': probability}}))
+        view = {'index_intraday': {'코스피': {'from_open_pct': from_open, 'change_30m_pct': recent}}}
+        with patch.object(p, 'market_view', return_value=view), patch.object(p, 'STRENGTH_CHANGE', (2.0, 25.0)), patch.object(p, 'STRENGTH_JEV_MIN', 0.15):
+            return p.strength_candidate(tmp_path, movers, bars, now)
+    assert pick(0.21, -0.5) == (None, 'strength_weak_tape')
+    assert pick(0.30, -0.5)[0] == '000001' and pick(0.21, 0.1)[0] == '000001'
+    assert pick(0.21, -0.5, recent=None)[0] == '000001'  # a stale or missing index says nothing
+    import trading_ledger
+    event = {'time': now.isoformat(), 'event': 'v2_entry_gate', 'reason': 'jev_wait', 'strength_reasons': {'000001': 'strength_weak_tape'}}
+    assert trading_ledger.sanitize(event)['strength_reasons'] == {'000001': 'strength_weak_tape'}
+    import entry_reasons
+    assert 'strength_weak_tape' in entry_reasons.ENTRY
+
+
 def test_a_kiwoom_priced_ranking_row_never_replaces_the_nh_figures_jev_reads():
     # 2026-11-20 NH call plan P2 (option 1): only NH figures reach Jev
     details = {'price': 110, 'change_pct': 10.0, 'volume': 5, 'value_mil': 1}
@@ -3744,3 +4000,35 @@ class KiwoomBarsTests(unittest.TestCase):
         out = subprocess.run([sys.executable, '-c', 'import pytest, nh_paper_isolated as p; print(p.KIWOOM_BARS)'], capture_output=True, text=True,
                              cwd=Path(p.__file__).parent, env={**os.environ, 'PYTHONPATH': f"{Path(p.__file__).parent}:{Path(p.__file__).parents[1] / 'agent'}"})
         self.assertEqual(out.stdout.strip(), 'False')
+
+
+def test_the_fade_exit_is_for_strength_picks_in_a_market_that_is_not_strong():
+    weak = {'코스피': {'regime': '하락장', 'today_tone': '약세'}}
+    flat = {'코스피': {'regime': '횡보장', 'today_tone': '혼조'}}
+    plan = {**p.new_plan('053800'), 'entry_source': 'watchlist_strength', 'opened': (NOW - timedelta(minutes=3)).isoformat()}
+    ok = lambda plan=plan, bid=100_800, view=weak, now=NOW: p.fade_candidate(plan, 100_000, bid, view, '코스피', False, now)  # noqa: E731
+    assert ok() and ok(view=flat) and ok({**plan, 'profile': 'trend'})
+    assert not ok(bid=100_799)
+    assert not ok({**plan, 'entry_source': 'jev'}) and not ok({**plan, 'profile': 'oversold'}) and not ok(None)
+    assert not ok({**plan, 'opened': (NOW - timedelta(seconds=90)).isoformat()}) and not ok({**plan, 'opened': None})
+    for item in ({'regime': '상승장', 'today_tone': '혼조'}, {'regime': '하락장', 'today_tone': '강세'}, {'regime': '하락장'}, {'today_tone': '약세'}):
+        assert not ok(view={'코스피': item})
+    assert not ok(view=None)
+    with patch.object(p, 'FADE_EXIT_PCT', 0):
+        assert not ok()
+
+
+def test_the_fade_exit_reads_only_the_last_ended_minutes():
+    now = NOW.replace(second=30)
+    bar = lambda minutes, move, vol, **kw: {'bsop_date': f'{now:%Y%m%d}', 'bsop_time': f'{now - timedelta(minutes=minutes):%H%M}00',  # noqa: E731
+                                            'stck_oprc': '1000', 'stck_prpr': str(1000 + move), 'vol': str(vol), **kw}
+    falling = [bar(0, -5, 300), bar(1, 2, 100), bar(2, 2, 100)]
+    assert p.fade_exit(falling, now) == 'fade_exit'
+    assert p.fade_exit([bar(-1, 9, 9_999), *falling], now) == 'fade_exit'  # the minute still running is not counted
+    assert p.fade_exit([bar(0, -5, 100), bar(1, 2, 100), bar(2, 2, 100)], now) is None  # bought more than it sold
+    assert p.fade_exit([bar(0, 0, 900), bar(1, 1, 1), bar(2, -1, 1)], now) is None  # even
+    assert p.fade_exit(falling[:2], now) is None
+    assert p.fade_exit([bar(0, -5, 300), bar(1, 2, 100), bar(3, 2, 100)], now) is None  # a gap
+    assert p.fade_exit([bar(2, -5, 300), bar(3, 2, 100), bar(4, 2, 100)], now) is None  # a late chart
+    assert p.fade_exit([bar(0, -5, 300), bar(1, 2, 100), bar(2, 2, 100, market='NXT')], now) is None
+    assert p.fade_exit([{'bsop_time': None}], now) is None and p.fade_exit([], now) is None and p.fade_exit(None, now) is None

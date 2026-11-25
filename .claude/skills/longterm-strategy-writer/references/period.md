@@ -14,13 +14,11 @@
 2. 리포트는 key로 만든다. 분석 파일을 쓰고 `scripts/ro longterm_report.py --day <key> --fill .scratch/lt-fill-<key>.json`을 실행한다. 제목이 key의 종류(주간·월간)로 나온다. 사실 표 미리보기는 `--day <key> --report --blank`다.
 3. 기간 숫자는 기록에서 직접 읽는다(읽기 전용).
    ```bash
-   sqlite3 -readonly ~/.vibe-trading/nhplug/vibe-longterm/longterm.sqlite3 \
-     "SELECT day, book, value FROM nav WHERE day BETWEEN '<시작>' AND '<끝>' ORDER BY day"
-   sqlite3 -readonly ~/.vibe-trading/nhplug/vibe-longterm/longterm.sqlite3 \
-     "SELECT time, kind, regime, reason FROM decisions WHERE day BETWEEN '<시작>' AND '<끝>' ORDER BY time"
+   scripts/ro sql ~/.vibe-trading/nhplug/vibe-longterm/longterm.sqlite3 "SELECT day, book, value FROM nav WHERE day BETWEEN '<시작>' AND '<끝>' ORDER BY day"
+   scripts/ro sql ~/.vibe-trading/nhplug/vibe-longterm/longterm.sqlite3 "SELECT time, kind, regime, reason FROM decisions WHERE day BETWEEN '<시작>' AND '<끝>' ORDER BY time"
    ```
    그 기간의 일일 리포트(`R/strategy-YYYY-MM-DD.json`)를 모두 읽는다.
-4. 리서치는 일일 절차 4단계와 같이 한다. 그 기간의 지수 흐름, 다음 주(다음 달) 일정, 테마 뉴스를 각각 한 번씩 본다. 기간 리포트도 외부 근거와 출처 링크가 있어야 한다.
+4. 리서치는 일일 절차 4단계와 같이 한다. 그 기간의 지수 흐름, 다음 주(다음 달) 일정, 테마 뉴스를 각각 한 번씩 본다. 기간 리포트도 외부 근거와 출처 링크가 있어야 한다. 예약 실행에서는 웹 검색 없이 자료 `news`와 그 기간 일일 리포트의 출처 링크를 쓴다.
 5. 절별로 일일 리포트와 다르게 쓰는 것:
    - 1절: 기간 성과(실제·기본 그림자·자동 그림자 순자산 변화)와 다음 기간 방향
    - 2절: 기간 동안 국면이 어떻게 바뀌었고 왜 그랬는지

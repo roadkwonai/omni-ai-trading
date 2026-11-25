@@ -108,9 +108,14 @@ def status(nh):
     from automation_status import processes
     from nh_live_buy_control import buy_allowed
     from src.live.halt import halt_flag_set
-    live = {k: {'engine': r['engine'], 'auto': r['auto'], 'live_orders': r.get('live_orders') is True} for k, r in records(nh).items() if r['kind'] == 'live'}
-    return {'engines': engine_ops.status(nh), 'live_accounts': live, 'halt': halt_flag_set('nhplug'), 'new_live_buys_allowed': buy_allowed(nh),
-            'stop_files': [name for name in ('shared-etf-paper/STOP', 'vibe-longterm/STOP') if (nh / name).exists()], 'services': dict(processes())}
+    import overview
+    accounts = records(nh)
+    halts = overview.loss_halts(nh, accounts, today())
+    live = {k: {'engine': r['engine'], 'auto': r['auto'], 'live_orders': r.get('live_orders') is True, 'loss_halt_today': '확인 불가' if halts[k] is None else halts[k]}
+            for k, r in accounts.items() if r['kind'] == 'live'}
+    warn = [f"{accounts[k].get('label', k)}: 하루 손실 정지{'로 오늘 새 매수가 없습니다.' if on else ' 여부를 확인할 수 없습니다.'}" for k, on in halts.items() if on is not False]
+    return Answer({'engines': engine_ops.status(nh), 'live_accounts': live, 'halt': halt_flag_set('nhplug'), 'buy_paused': not buy_allowed(nh),
+                   'stop_files': [name for name in ('shared-etf-paper/STOP', 'vibe-longterm/STOP') if (nh / name).exists()], 'services': dict(processes())}, warnings=warn)
 
 
 def items(nh):
@@ -141,13 +146,9 @@ def trades(nh, day):
 
 
 def names(nh):
-    """Display names by code, as the screen's stock_names(): the ETF universe, the latest scan and the watchlist."""
-    from etf_universe import NAMES, SYMBOLS
-    out = {code: NAMES[key] for key, code in SYMBOLS.items()}
-    for file, part in (('movers.json', 'rows'), ('watchlist.json', 'stocks')):
-        found = (read_json(nh / 'shared-etf-paper' / file, {}) or {}).get(part)
-        out |= {c: r.get('name', c) for c, r in found.items() if isinstance(r, dict)} if isinstance(found, dict) else {}
-    return out
+    """Display names by code, the same map the screen uses."""
+    import stock_names
+    return stock_names.load(nh)
 
 
 def timeline(nh, day, limit):

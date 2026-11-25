@@ -36,12 +36,12 @@ def _stats(items, key):
 
 
 def paths_today(root, day):
-    """position_paths rows of the day keyed by (symbol, opened minute): best/worst point while held, move after exit."""
+    """position_paths rows opened or closed on the day keyed by (symbol, opened minute): best/worst point while held, move after exit."""
     try:
         with ro_connect(Path(root) / 'market-research.sqlite3') as db:
             db.row_factory = sqlite3.Row
             return {(r['symbol'], r['opened'][:16]): dict(r) for r in db.execute(
-                'SELECT * FROM position_paths WHERE opened LIKE ?', (day + '%',))}
+                'SELECT * FROM position_paths WHERE opened LIKE ? OR closed LIKE ?', (day + '%', day + '%'))}
     except sqlite3.Error:
         return {}
 
@@ -51,7 +51,8 @@ def round_trips(rows, day, paths, events=()):
     submitted = [e for e in events if e.get('event') == 'submitted' and ('high_gap_pct' in e or 'entry_timing' in e)]
     out = []
     for e in ec.episodes(rows):
-        if not e['open'].startswith(day):
+        carried = not e['open'].startswith(day)
+        if carried and not (e['close'] or '').startswith(day):
             continue
         path = paths.get((e['symbol'], e['open'][:16]), {})
         held = None
@@ -60,7 +61,7 @@ def round_trips(rows, day, paths, events=()):
         buy = next((r for r in rows if r['time'] == e['open'] and r['symbol'] == e['symbol']), {})
         sent = [x for x in submitted if x.get('symbol') == e['symbol'] and x['time'] <= e['open']]  # the order behind the first fill
         context = sent[-1] if sent else {}
-        out.append({'symbol': e['symbol'], 'open': e['open'][11:19], 'close': (e['close'] or '')[11:19] or None,
+        out.append({'symbol': e['symbol'], 'open': f"{e['open'][5:10]} {e['open'][11:19]}" if carried else e['open'][11:19], 'close': (e['close'] or '')[11:19] or None, 'carried': carried,
                     'held_min': held, 'entry_route': e['entry'], 'entry_basis': buy.get('basis'), 'exit': e['exit'] or None,
                     'pnl': round(e['pnl']), 'return_pct': e['return_pct'], 'cost': round(e['cost']),
                     'entry_vs_day_high_pct': context.get('high_gap_pct'), 'entry_vs_open_pct': context.get('open_gap_pct'),
@@ -75,7 +76,7 @@ def round_trips(rows, day, paths, events=()):
 def reentries(trips):
     """Same symbol bought again the same day after a closed round trip: count and P&L of the later trips."""
     seen, later = set(), []
-    for t in sorted(trips, key=lambda t: t['open']):
+    for t in sorted(trips, key=lambda t: (not t.get('carried'), t['open'])):  # a carried lot came first
         if t['symbol'] in seen:
             later.append(t)
         if t['close']:
@@ -315,6 +316,20 @@ def blocked_outcomes(root, day, days=10):
         return {}
 
 
+def mirror_gaps(days=10):
+    """모의–실계좌 차이 (user 2026-11-25, mirror_gap.py): per mirrored account, before costs; + slips mean better than the paper."""
+    from accounts import load
+    import mirror_gap
+    return {key: mirror_gap.summary(RUNTIME, key, days) for key, r in load(RUNTIME / 'accounts.json').items()
+            if r.get('kind') == 'live' and r.get('engine') == 'jev'}
+
+
+def overnight_summary(root, day, days=10):
+    """전날 재료 그림자 (user 2026-11-25): the moves from 09:10 of stocks with overnight news, by direction and price reaction."""
+    from overnight_catalysts import summary
+    return summary(Path(root) / 'market-research.sqlite3', day, days)
+
+
 def ipo_shadow_summary(root, day, days=10):
     """신규주 그림자 기록 (user 2026-11-19, ipo_shadow.py): per variant (지금 규칙 / A. VWAP 기준가 / C. A + 눌림 재매수) the
     listing-days, replayed trades, summed % and win rate over the last `days` recorded days. A replay on Yahoo 1-minute bars,
@@ -322,6 +337,16 @@ def ipo_shadow_summary(root, day, days=10):
     import ipo_shadow
     try:
         return ipo_shadow.summary(Path(root) / 'market-research.sqlite3', day, days)
+    except sqlite3.Error:
+        return {}
+
+
+def fade_summary(root, day, days=10):
+    """수익 중 약화 그림자 (user 2026-11-25, fade_shadow.py): selling at the first weak look in profit against the actual sale.
+    Judge a rule only after five trading days and 20+ positions; the live account sells about a minute later (`late`)."""
+    import fade_shadow
+    try:
+        return fade_shadow.summary(Path(root) / 'market-research.sqlite3', day, days)
     except sqlite3.Error:
         return {}
 
@@ -451,6 +476,9 @@ def build(day, days=10):
         'news_gap': news_gap_outcomes(root, day, days),
         'blocked_outcomes': blocked_outcomes(root, day, days),
         'ipo_shadow': ipo_shadow_summary(root, day, days),
+        'fade_shadow': fade_summary(root, day, days),
+        'overnight_catalysts': overnight_summary(root, day, days),
+        'mirror_gap': mirror_gaps(days),
         'vibe_legacy_settled_excluded': unverified_calls(root, day),
         'vibe_settlements_note': '게시 시각 미확인 기존 vibe 정산 제외. 30분 방향성은 실제 체결 성과가 아닙니다.',
         'vibe_entry_study': vibe_entry_study(RUNTIME, day),

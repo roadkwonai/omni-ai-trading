@@ -21,7 +21,7 @@ EXITS = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market
          'split_take_profit': '분할 익절', 'vibe-trading': 'vibe 매도 점수', 'model': 'Jev 매도 판단',
          'regime_exit': '국면 청산', 'protective': '보호 매도', 'direction_switch': '방향 전환 매도',
          'take_profit_all': '전량 익절', 'take_profit_half': '절반 익절', 'weak_market_targets': '약세장 익절',
-         'ipo_time_stop': '신규주 시간 손절'}
+         'ipo_time_stop': '신규주 시간 손절', 'fade_exit': '매수세 약화 익절'}
 
 
 def _cycles(events_path, wanted):

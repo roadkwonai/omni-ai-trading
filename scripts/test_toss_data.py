@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+
+import pytest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -198,6 +200,29 @@ class GetTests(unittest.TestCase):
             self.assertEqual(t.get('/api/v1/stocks', {}), [1])
         self.assertEqual(tokens, [None, 'cached'])
         self.assertEqual(get.call_args.kwargs['headers']['Authorization'], 'Bearer fresh')
+
+
+def test_a_refused_burst_is_asked_once_more_after_the_wait_it_names(monkeypatch):
+    # 2026-11-25 08:30: one of five candle calls 0.25 s apart was refused and that stock lost its bars for five minutes
+    from unittest.mock import Mock
+    import toss_data as t
+    waits = []
+    monkeypatch.setattr(t, '_token', lambda stale=None: 'x')
+    monkeypatch.setattr(t.time, 'sleep', waits.append)
+
+    def run(*answers):
+        waits.clear()
+        monkeypatch.setattr('requests.get', Mock(side_effect=answers))
+        return t.get('/api/v1/candles', {})
+    refused = lambda **headers: Mock(status_code=429, headers=headers)  # noqa: E731
+    good = Mock(status_code=200, json=lambda: {'result': [1]})
+    assert run(refused(), good) == [1] and 1.0 in waits
+    assert run(refused(**{'Retry-After': '2'}), good) == [1] and 2.0 in waits
+    assert run(refused(**{'Retry-After': 'x'}), good) == [1] and 1.0 in waits
+    with pytest.raises(t.TossError, match='429'):
+        run(refused(), refused())
+    with pytest.raises(t.TossError, match='429'):  # a long wait is the caller's: it has a backup source
+        run(refused(**{'Retry-After': '60'}))
 
 
 def test_stock_minutes_reads_dated_one_minute_candles(monkeypatch):

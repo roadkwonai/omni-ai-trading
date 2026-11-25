@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import tempfile
+import time
 from decimal import Decimal
 import unittest
 from datetime import datetime
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import nh_live_follow as f
-from src.tools.nhplug_live_guard import LiveOrderGuard
+from src.tools.nhplug_live_guard import LiveOrderBlocked, LiveOrderGuard
 
 KST = ZoneInfo('Asia/Seoul')
 NOW = datetime(2026, 11, 6, 11, 0, tzinfo=KST)
@@ -302,7 +303,7 @@ def test_cancelled_live_sell_rechecks_and_replaces_in_same_cycle(tmp_path, remai
         assert collect.call_count == 2
         send.assert_not_called()
     else:
-        assert (plan['action'], plan['qty'], plan['price']) == ('SELL', 29, 5280)
+        assert (plan['action'], plan['qty'], plan['price']) == ('SELL', 29, 5260)  # two ticks under the bid (2026-11-25)
         assert collect.call_count == 2
         assert send.call_args.kwargs['replacement_of'] == 'original'
         assert plan['same_cycle_replacement'] is True
@@ -403,6 +404,21 @@ class Step(unittest.TestCase):
             self.assertEqual(plan['execution_reason'], 'above the account price cap')
             send.assert_not_called()
 
+    def test_a_mirror_buy_fits_in_what_is_left_of_todays_loss_limit(self):
+        """11-25: 17,022원 of 20,000원 was lost and the mirror still bought 435,000원; one stop would have ended the day."""
+        rules = {'sizing': 'amount', 'tranche_krw': 500_000}
+        fills = [('005930', 'BUY', 6, 50_000, '06T10:58:00')]
+        for loss, expect in ((0, 10), (17_022, 2), (19_000, 0)):  # 2% stop + 0.23% costs: about 1,117원 a share
+            with tempfile.TemporaryDirectory() as d:
+                plan, send = self.run_step(d, fills=fills, rules=rules, loss=loss, execute=True)
+                room = plan['loss_room']['005930']
+                if expect:
+                    self.assertEqual((plan['action'], plan['qty']), ('BUY', expect), (loss, plan))
+                    self.assertEqual(room["wanted"], 10)
+                else:
+                    self.assertNotEqual(plan['action'], 'BUY')
+                    self.assertEqual((room['fits'], send.called, plan['reason']), (0, False, 'too little of the daily loss limit left for one share'))
+
     def test_amount_sizing_buys_several_shares_in_one_order_without_the_share_cap(self):
         rules = {'sizing': 'amount', 'tranche_krw': 200_000, 'max_order_qty': 3}
         # 200,000 at 50,000 = 4 shares, at 50,050 = 3.996: 7.996 -> 8, in one order (amount sizing ignores max_order_qty)
@@ -448,7 +464,7 @@ class Step(unittest.TestCase):
                 db.execute('INSERT INTO live_adoptions VALUES (?,?,?,?)', (g.scope, '20261106', '005930', 1))
             fills = [('005930', 'BUY', 4, 50_000, '06T10:00:00'), ('005930', 'SELL', 4, 50_500, '06T10:59:00')]
             plan, _ = self.run_step(d, fills=fills, holdings=[('005930', 1, 50_000)])
-            self.assertEqual((plan['action'], plan['symbol'], plan['price']), ('SELL', '005930', 50_000))
+            self.assertEqual((plan['action'], plan['symbol'], plan['price']), ('SELL', '005930', 49_900))
         with tempfile.TemporaryDirectory() as d:  # an engine without a paper ledger mirrors nothing
             plan, _ = self.run_step(d, fills=[('005930', 'BUY', 4, 50_100, '06T10:58:00')], engine='longterm')
             self.assertEqual((plan['action'], plan['target'], plan['warning']), ('HOLD', {}, 'no paper ledger for engine longterm'))
@@ -531,7 +547,7 @@ class Step(unittest.TestCase):
                 db.execute('INSERT INTO live_adoptions VALUES (?,?,?,?)', (g.scope, '20261106', '005930', 1))
             fills = [('005930', 'BUY', 4, 50_000, '06T10:00:00')]
             plan, _ = self.run_step(d, fills=fills, holdings=[('005930', 1, '50000')], bid=49_000, ask=49_100)
-            self.assertEqual((plan['action'], plan['symbol'], plan['price'], plan['execution']), ('SELL', '005930', 49_000, 'DRY_RUN'))
+            self.assertEqual((plan['action'], plan['symbol'], plan['price'], plan['execution']), ('SELL', '005930', 48_900, 'DRY_RUN'))
             plan, _ = self.run_step(d, fills=fills, holdings=[('005930', 1, 50_000)], bid=50_500, ask=50_600)
             self.assertEqual(plan['action'], 'SELL')  # latched: a rebound does not cancel the stop
 
@@ -1332,7 +1348,7 @@ class HandTrades(unittest.TestCase):
                 patch('nh_guarded_live.execute', return_value='intent-1'):
             paper(self.d / 'shared-etf-paper', fills)
             plan = f.step(rd, A, {}, {**RECORD, 'hash': None}, execute_orders=True, root=self.d, now=NOW, key='live-1')
-        self.assertEqual((plan['action'], plan['symbol'], plan['price']), ('SELL', '005930', 48_500))
+        self.assertEqual((plan['action'], plan['symbol'], plan['price']), ('SELL', '005930', 48_400))
 
     def test_the_failed_view_alert_is_sent_once_a_day_across_restarts(self):
         """M9: the once-a-day memory lived in the process; a restart alerted the same symbol again."""
@@ -1364,3 +1380,127 @@ def test_amount_sizing_uses_the_ratio_the_user_set():  # user 2026-11-20: 한진
     assert float(ratio) == 1.0 and shares(226_000, 2) == 2  # 모의 수량 그대로
     assert shares(226_000, 3) < 3  # still capped by 체결 1건당 최대 50만
     assert any('모의 대비 비율' in i for i in problems({**manual, 'name': 'x', 'rules': {**manual['rules'], 'follow_pct': 150}}))
+
+
+DOWN = {'status': 'error', 'error': 'MCP server did not start'}
+
+
+def start_main(tmp_path, monkeypatch, *argv, answers=(), over=False, step=None):
+    """main() with its broker, .env and accounts.json replaced by fakes, ended by its first cycle: (cycles, seconds waited)."""
+    import sys
+    from types import SimpleNamespace
+    import accounts
+    linked = {'status': 'ok', 'data': {'Output_0': [{'acct_no': A, 'acct_type': '01'}]}}
+    cycles, waits, left = [], [], [*answers]
+    monkeypatch.setattr(sys, 'argv', ['nh_live_follow.py', '--account', 'live-1', *argv])
+    monkeypatch.setattr(accounts, 'load', lambda *a, **k: {'live-1': {**RECORD, 'hash': accounts.digest(A)}})
+    monkeypatch.setattr('src.config.paths.get_runtime_root', lambda: tmp_path)
+    monkeypatch.setattr('src.config.loader.load_agent_config', lambda: SimpleNamespace(mcp_servers={'nhplug_readonly': None}))
+    monkeypatch.setattr('src.tools.mcp.MCPServerAdapter', lambda *a: SimpleNamespace(call_tool=lambda *a: left.pop(0) if left else linked))
+    monkeypatch.setattr('dotenv.dotenv_values', lambda *a, **k: {'ACCOUNT_NUMBER': A, 'APP_KEY': 'k', 'APP_SECRET': 's'})
+    monkeypatch.setattr(f.os, 'umask', lambda mask: 0o022)
+    monkeypatch.setattr('nh_live_broker.time.sleep', waits.append)
+    monkeypatch.setattr(f, 'session_over', lambda now: over)
+    monkeypatch.setattr(f, 'step', step or (lambda *a, **k: cycles.append(k) or {'action': 'STOP'}))
+    f.main()
+    return cycles, waits
+
+
+def test_the_mirror_asks_the_account_list_again_when_it_fails_at_the_start(tmp_path, monkeypatch):
+    # started once a day at 08:58 and never again: one failed call would leave the day without its stops (2026-11-25)
+    cycles, waits = start_main(tmp_path, monkeypatch, answers=[DOWN, {'status': 'ok', 'data': None}])
+    assert len(cycles) == 1 and cycles[0]['execute_orders'] is False
+    assert waits == [f.ACCOUNT_LIST_WAIT] * 2
+
+
+def test_the_mirror_stops_asking_when_the_session_is_over(tmp_path, monkeypatch):
+    with pytest.raises(SystemExit, match='account list unavailable'):
+        start_main(tmp_path, monkeypatch, answers=[DOWN] * 3, over=True)
+
+
+def test_one_mirror_cycle_by_hand_asks_the_account_list_once(tmp_path, monkeypatch):
+    with pytest.raises(SystemExit, match='account list unavailable'):
+        start_main(tmp_path, monkeypatch, '--once', answers=[DOWN] * 3)
+
+
+def test_the_mirror_refuses_an_account_the_broker_does_not_list_at_once(tmp_path, monkeypatch):
+    other = {'status': 'ok', 'data': {'Output_0': [{'acct_no': '00000000000', 'acct_type': '01'}]}}
+    with pytest.raises(SystemExit, match='not linked'):
+        start_main(tmp_path, monkeypatch, answers=[other])
+
+
+def test_a_sell_limit_sits_two_ticks_under_the_bid_and_never_under_the_guards_floor():
+    # 11-25 안랩: the limit was the bid itself, the bid fell and the last share waited 3 m 22 s for 1,300원 less
+    assert [f.sell_limit(b) for b in (143_700, 200_000, 5_000, 2_000, 1_375, 700_000)] == [143_500, 199_800, 4_990, 1_998, 1_373, 698_000]
+    assert f.sell_limit(30) == 30  # one tick is over 3% there: the bid itself
+    from src.tools.nhplug_live_guard import SELL_FLOOR_PCT
+    for bid in range(50, 600_000, 977):
+        bid = bid // f.tick_size(bid) * f.tick_size(bid)
+        limit = f.sell_limit(bid)
+        assert limit % f.tick_size(limit) == 0 and limit * 100 >= bid * (100 - SELL_FLOOR_PCT) and limit <= bid
+
+
+def test_an_unfilled_sell_is_cancelled_after_ten_seconds_and_a_buy_after_sixty(tmp_path):
+    for operation, age, cancelled in (('krstockOrderCashSell', 11, True), ('krstockOrderCashSell', 5, False),
+                                      ('krstockOrderCashBuy', 11, False), ('krstockOrderCashBuy', 61, True)):
+        folder = tmp_path / f'{operation}{age}'
+        folder.mkdir()
+        guard = LiveOrderGuard(A, folder, symbols=('005930',))
+        with guard._db() as db:
+            db.execute('CREATE TABLE IF NOT EXISTS observed_pending (fingerprint TEXT PRIMARY KEY, first_seen REAL NOT NULL)')
+            db.execute('INSERT INTO live_intents VALUES (?,?,?,?,?,?,?,?,?)', ('o', guard.scope, '20261106', operation, '005930', 1, 42, 'acknowledged', 0))
+            db.execute('INSERT INTO observed_pending VALUES (?,?)', ('o', time.time() - age))
+        snap = snapshots()
+        with patch('nh_guarded_live.execute', return_value='cancel') as send, patch('src.live.halt.halt_flag_set', return_value=False), \
+                patch.object(guard, 'reconcile', side_effect=LiveOrderBlocked('open')):
+            result = f.pending_step(None, guard, {}, A, snap, {}, True, f.SELL_CANCEL_SECONDS)
+        assert (result['action'] == 'CANCEL_PENDING') is cancelled, (operation, age)
+        assert send.called is cancelled
+        with patch('nh_guarded_live.execute', return_value='cancel') as send, patch('src.live.halt.halt_flag_set', return_value=False), \
+                patch.object(guard, 'reconcile', side_effect=LiveOrderBlocked('open')):
+            f.pending_step(None, guard, {}, A, snap, {}, True)  # a long-term account keeps the minute for both
+        assert send.called is (age >= 60)
+
+
+def test_a_paper_fill_wakes_the_mirror_and_open_orders_are_checked_in_seconds(tmp_path):
+    folder = paper(tmp_path / 'shared-etf-paper', [])
+    source = folder / 'orders.sqlite3'
+    seen, waits = f.paper_stamp(source), []
+    assert f.wait_for_fill(lambda: f.paper_stamp(source), seen, 3, sleep=waits.append, clock=iter([0, 0, 1, 2, 3]).__next__) is False
+
+    def fill(_):
+        with sqlite3.connect(source) as db:
+            db.execute('INSERT INTO fills VALUES (?,?,?,?,?,?)', ('new', '005930', 'BUY', 1, 1000, '2026-11-06T10:10:00+09:00'))
+    assert f.wait_for_fill(lambda: f.paper_stamp(source), seen, 60, sleep=fill, clock=lambda: 0) is True
+    assert f.wait_for_fill(lambda: f.paper_stamp(source), seen, 60, sleep=waits.append, clock=lambda: 0) is True  # filled during the cycle
+    assert f.paper_stamp(None) is None and f.paper_stamp(tmp_path / 'none.sqlite3') is None
+    assert f.wait_for_fill(lambda: None, (1, 1), 1, sleep=waits.append, clock=iter([0, 0, 1]).__next__) is False  # unreadable: the minute
+    wait = lambda **k: f.next_wait(k)
+    assert [wait(action='BUY', execution='ACKNOWLEDGED_NOT_FILLED'), wait(action='RECONCILED'), wait(action='RECONCILE'), wait(action='CANCEL_PENDING'),
+            wait(action='BLOCK'), wait(action='HOLD'), wait(action='BUY', execution='NO_ORDER'), wait(action='WAIT')] == [4, 1, 5, 5, 10, 60, 60, 60]
+
+
+def test_quick_cycles_fall_back_to_the_minute(tmp_path, monkeypatch):
+    """An order the broker never settles must not be asked about every 5 s until the close."""
+    waits = []
+    monkeypatch.setattr(f, 'paper_stamp', lambda source: (1, 1))
+    monkeypatch.setattr(f, 'wait_for_fill', lambda stamp, seen, seconds: waits.append(seconds) or False)
+    results = iter([{'action': 'RECONCILE'}] * 30 + [{'action': 'STOP'}])
+    cycles = []
+    monkeypatch.setattr(f, 'session_over', lambda now: False)
+    start_main(tmp_path, monkeypatch, step=lambda *a, **k: cycles.append(1) or next(results))
+    assert waits == [5] * f.FAST_CYCLES + [60] * 6 and len(cycles) == 31
+
+
+def test_the_loss_room_takes_off_todays_loss_and_what_the_holdings_would_lose_at_their_stops():
+    assert f.loss_room(20_000, 17_022, []) == 2_978
+    # the account's own limit, inside the guard's approved ceiling (30,000 since 2026-11-25)
+    from src.tools.nhplug_live_guard import LIMIT, LIMIT_MAX
+    budget = lambda krw: f.loss_limit({'budget': {'daily_loss_krw': krw}})
+    assert (budget(30_000), budget(LIMIT_MAX + 1), budget(5_000), f.loss_limit({})) == (30_000, LIMIT_MAX, 5_000, LIMIT)
+    assert f.loss_room(20_000, 5_000, [(10, 10_100, 10_000, 1.0)]) == 13_000  # 10 shares still 200 above the stop of 9,900
+    assert f.loss_room(20_000, 5_000, [(10, 9_800, 10_000, 1.0)]) == 15_000  # under its stop: its loss is already counted
+    assert f.loss_room(20_000, 19_500, [(10, None, 10_000, 2.0)]) == 0
+    assert f.loss_room_shares(2_978, 145_000, 1.0, '053800') == 1  # 3 shares would have been 5,350원
+    assert f.loss_room_shares(100, 145_000, 1.0, '053800') == 0
+    assert f.cost_pct('069500') < f.cost_pct('005930')

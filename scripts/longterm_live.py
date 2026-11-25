@@ -259,7 +259,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
     from accounts import DEFAULT_BUDGET, LIVE_PRICE_HARD_CAP, live_limits
     from live_fills import record as record_fills
     from nh_guarded_live import execute
-    from nh_live_broker import collect_snapshots, orderable_cash
+    from nh_live_broker import collect_snapshots, orderable_cash, quote_before_advance
     from nh_live_follow import bid_ask, cancelled_sell, pending_step
     from src.tools.nhplug_live_guard import ORDER_QTY_MAX, LiveOrderBlocked, LiveOrderGuard
     hhmm, day = now.strftime('%H:%M'), now.date().isoformat()
@@ -357,7 +357,8 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             state['book_next' if orders else 'book'] = new_book
         save_state(root, key, state)
         return {'action': 'PLAN', 'orders': orders, **plan_info, **info, 'execution': execution}
-    if alert_due and not sendable:  # 적립 알림: what the 적립식 would buy today, logged for Discord; never an order
+    if alert_due and (not sendable or hhmm >= longterm_dca.TIMES[1]):  # 적립 알림: what the 적립식 would buy today, logged for Discord;
+        # never an order, so at the last check it does not wait for one that keeps being refused (user 2026-11-25)
         prices = {k: q[1] for k, q in quotes.items()}
         if not longterm_dca.ready(cfg, plan.get('indicators') or {}, dca_want(state, plan, yeo), prices, now):
             return {'action': 'WAIT', 'reason': 'dca alert: automatic time waits for a price at or under yesterday close', **info}
@@ -401,6 +402,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             state['book']['sold']['krw'] += order['qty'] * order['price']  # the planned size: the sent one was not saved
         save_state(root, key, state)
         return {'action': order['side'], 'symbol': order['code'], 'execution': 'SENT_BEFORE_RESTART', **info}
+    previous = None if order['side'] == 'SELL' else quote_before_advance(reader, order['code'])  # before the price: it can wait 20 s
     quote = bid_ask(reader, order['code'])
     if quote is None:
         return {'action': 'WAIT', 'reason': f"quote unavailable {order['code']}", **info}
@@ -438,7 +440,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
             replaces = cancelled_sell(guard, code) if sell else None  # a sell cancelled after 60 s unfilled is re-sent as its replacement
             kwargs = {'replacement_of': replaces}
             if not sell:
-                kwargs['quote_audit'] = result['quote_gap_audit']
+                kwargs.update(quote_audit=result['quote_gap_audit'], previous_quote=previous)
             result['intent'] = execute(reader, guard, credentials, CASH[order['side']], fields, **kwargs)
         except LiveOrderBlocked as exc:  # a refusal that clears on its own is retried until END; any other is final
             retry = str(exc) in TRANSIENT
@@ -459,6 +461,7 @@ def cycle(reader, account, credentials, record, key, *, now, execute_orders, may
 def commit_sent(state, order):
     """An order is out: it and the day state it carries (the book, the 적립식) are real now."""
     order['status'] = 'sent'
+    order.pop('reason', None)  # the screen would show an earlier passing refusal as this order's result
     for source in order['source'].split('+'):
         if (pending_state := state.pop(f'{COMMITS[source]}_next', None)) is not None:
             state[COMMITS[source]] = pending_state
@@ -478,6 +481,12 @@ def worth_logging(event, last, idle):
     return True
 
 
+def day_over(now=None):
+    from session_times import shifted
+    now = now or datetime.now(KST)
+    return now.strftime('%H:%M') > shifted(STOP_AT, now.date())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--account', required=True, help='accounts.json key of a live account set to 장기투자')
@@ -487,6 +496,7 @@ def main():
     from dotenv import dotenv_values
     from accounts import load, resolve
     from nh_guarded_live import ENV
+    from nh_live_broker import linked_accounts
     from nh_live_follow import configured_accounts
     from src.config.loader import load_agent_config
     from src.config.paths import get_runtime_root
@@ -505,8 +515,9 @@ def main():
     if not record:
         raise SystemExit('live account unavailable, invalid or not set to 장기투자')
     reader = MCPServerAdapter('nhplug_readonly', load_agent_config().mcp_servers['nhplug_readonly'])
-    linked = reader.call_tool('list_accounts', {})
-    rows = ((linked.get('data') or {}).get('Output_0') if isinstance(linked, dict) and linked.get('status') == 'ok' else None) or []
+    rows = linked_accounts(reader, lambda: args.once or day_over(), CHECK_INTERVAL_SECONDS)
+    if not rows:
+        raise SystemExit('account list unavailable')
     account = resolve({args.account: record}, rows).get(args.account)
     if not account:
         raise SystemExit('live account not linked at the broker')
@@ -544,7 +555,7 @@ def main():
                     stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
                 print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
             last = fold
-            if args.once or now.strftime('%H:%M') > __import__('session_times').shifted(STOP_AT, now.date()):
+            if args.once or day_over(now):
                 break
             time.sleep(CHECK_INTERVAL_SECONDS)
 
