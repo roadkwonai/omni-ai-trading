@@ -68,7 +68,8 @@ def sha256(path):
 def is_secret(rel):
     parts = rel.lower().split('/')
     name = parts[-1]
-    return (any(s in name for s in SECRET_PARTS) or name.startswith('.env') or name.endswith(SKIP_SUFFIX) or '.plist' in name
+    return (name in ('scheduled-ai.sqlite3', 'schedule-runner-status.json')
+            or any(s in name for s in SECRET_PARTS) or name.startswith('.env') or name.endswith(SKIP_SUFFIX) or '.plist' in name
             or any(p == 'tokens' or p.startswith('restore-backup-') for p in parts[:-1]))
 
 

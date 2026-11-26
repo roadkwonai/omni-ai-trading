@@ -28,3 +28,12 @@ class StatusCardTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_signed_percent_preserves_small_moves_and_neutral_zero():
+    from status_cards import cell_tone, signed_percent
+
+    assert signed_percent(-0.0018) == '-0.0018%'
+    assert signed_percent(0.00000002) == '+0.00000002%'
+    assert cell_tone(signed_percent(0)) == ''
+    assert cell_tone(signed_percent(None)) == ''

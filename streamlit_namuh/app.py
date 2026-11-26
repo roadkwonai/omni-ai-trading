@@ -97,7 +97,7 @@ def rerun_when_read_completes(start):
     armed = False
     future = None
 
-    @st.fragment(run_every='300ms')
+    @st.fragment(run_every=0.3)
     def check():
         nonlocal armed, future
         if not armed:
@@ -318,7 +318,7 @@ def watch_live_order(read, number, key, snapshot, state):
     the page drawn again when that brought something new."""
     armed = False
 
-    @st.fragment(run_every=f'{MOVED_EVERY_S}s')
+    @st.fragment(run_every=MOVED_EVERY_S)
     def look():
         nonlocal armed
         if not armed:
@@ -358,6 +358,30 @@ def live_broker_snapshot(read, account, now):
             or not isinstance(history.get('Output_0'), list)):
         raise ValueError('실계좌 전체 조회 결과를 확인할 수 없습니다.')
     return broker_snapshot(balance, history, now)
+
+
+def trade_history_holdings(read, paper, paper_number, records, keys):
+    """Read only the balances for the selected keys, using the dashboard's verified NH paths."""
+    snapshots, errors = {}, {}
+    live_numbers = live_linked_numbers(read, records) if any(key.startswith('live-') for key in keys) else {}
+    for key in keys:
+        try:
+            if key == 'paper-shared':
+                verify_account(read, paper_number, {'03'}, ACCOUNT_LIST_CACHE_S)
+                balance = paper_pages(paper, 'krstockInquiryBalance', {'act_no': paper_number, **BALANCE}, 'Output_1')
+            else:
+                balance = read_balance(read, live_numbers[key])
+            if not isinstance(balance.get('Output_0'), dict) or not isinstance(balance.get('Output_1'), list):
+                raise ValueError('전체 잔고 응답이 필요합니다.')
+            snapshots[key] = broker_snapshot(balance, {'Output_0': []}, datetime.now(KST))
+        except Exception:
+            errors[key] = f"{records.get(key, {}).get('label') or ('모의' if key == 'paper-shared' else key)} 잔고를 확인하지 못했습니다."
+    return snapshots, errors
+
+
+def open_account_trade_history(key):
+    st.session_state['trade_history_open'] = (key, datetime.now(KST).date())
+    st.session_state['main_tab'] = '매매내역'
 
 
 def order_fills(orders, day):
@@ -1209,7 +1233,7 @@ def strategy_panel():
         longterm_algorithm_view()
         return
 
-    @st.fragment(run_every='60s' if auto else None)
+    @st.fragment(run_every=60 if auto else None)
     def body():
         root = get_runtime_root() / 'nhplug' / 'shared-etf-paper'
         current = smap.state(root)
@@ -2195,6 +2219,9 @@ def live_account_view(read, key, record, number, configured, events):
             else:
                 st.caption('관찰 기록이 꺼져 있습니다. "계좌 설정" 탭에서 켤 수 있습니다.')
         with orders_tab:
+            if key in ('live-1', 'live-2'):
+                st.button('이 계좌 매매내역 보기', key=f'trade_history_from_{key}',
+                          on_click=open_account_trade_history, args=(key,))
             if snapshot:
                 orders_view(snapshot, books, now.strftime('%Y-%m-%d'))
         if krx_open():  # auto refresh on or off: nothing is asked while no order is on its way
@@ -2973,6 +3000,8 @@ def position_zone(average, current, stop=2.0, take=2.0):
 
 RETIRED_SETTINGS = {'oversold_vibe_min', 'oversold_v2_vibe_veto'}  # read only when vibe was a main engine (gone 2026-11-17): kept, not shown
 STRATEGY_HELP = {
+    'strength_review_trial_on': ('관심종목 강도 진입의 추가 검토를 주문 없는 ETF7 모의 검증에서 사용할지 정합니다.',
+                                 '0이면 끄고 0보다 크면 켭니다. 주문을 실행하는 모의 운용과 실계좌 주문에는 적용하지 않습니다.'),
     'entry_confidence': ('Jev가 "이 종목을 사도 좋다"고 고를 때 붙이는 확신 정도(0~1)입니다. 이 값 이상일 때만 1차 매수를 합니다.',
                          '높이면(예: 0.7) 확신이 강할 때만 사서 거래가 줄고, 낮추면(예: 0.5) 거래가 늘지만 근거가 약한 신호도 따릅니다. '
                          '11/11에는 Jev 진입 판단 93번 중 0.6 이상이 15번, 0.7 이상이 2번이었습니다. 수익 확률이 아닙니다.'),
@@ -5499,7 +5528,7 @@ def live_every(now=None):
     """run_every of the fragments that poll NH quotes and balances: the refresh interval while KRX trades (09:00~15:30
     on a KRX trading day) with auto refresh on, else None. Polling every 30 s through evenings and holidays made the
     dashboard NH's top caller beside the runners' rate-limit errors."""
-    return f'{refresh_s()}s' if auto_on() and krx_open(now) else None
+    return refresh_s() if auto_on() and krx_open(now) else None
 
 
 def krx_open(now=None):
@@ -5639,7 +5668,7 @@ def main():
                                  datetime.now(KST).strftime('%Y-%m-%d'))
         sidebar.render(PREFS.TABS, states, records, alerts,
                        engine_ops.LABELS[engine_ops.mode(get_runtime_root() / 'nhplug')])
-        @st.fragment(run_every=f'{refresh_s()}s')
+        @st.fragment(run_every=refresh_s())
         def sidebar_positions():
             sidebar.positions_panel(get_runtime_root() / 'nhplug', stock_names())
 
@@ -5693,14 +5722,22 @@ def main():
         st.session_state['main_tab'] = linked[0]
         if linked[1]:
             st.session_state[linked[1]] = linked[2]
-    summary_tab, market_tab, strategy_tab, etf_tab, journal_tab, compare_tab, accounts_tab, longterm_tab, live_tab, ops_tab = st.tabs(
+    summary_tab, market_tab, strategy_tab, etf_tab, trade_history_tab, journal_tab, compare_tab, accounts_tab, longterm_tab, live_tab, ops_tab = st.tabs(
         PREFS.TABS, key='main_tab', default=st.session_state['prefs']['start_tab'], on_change='rerun')  # keyed: a save or any rerun keeps the tab the user is on
+    if not trade_history_tab.open and 'trade_history_query_lease' in st.session_state:
+        import trade_history_view
+        trade_history_view.release_snapshot()
     if summary_tab.open:  # only the tab on screen runs (on_change="rerun"); the others cost nothing
         with summary_tab:
             help_row('summary')
             import overview
             overview.render(get_runtime_root() / 'nhplug', records, states,
                             stock_names(), refresh_balances=lambda: record_live_balances(read, records))
+    if trade_history_tab.open:
+        with trade_history_tab:
+            import trade_history_view
+            trade_history_view.render(get_runtime_root() / 'nhplug', stock_names,
+                                      lambda keys: trade_history_holdings(read, paper, account, records, keys))
     if journal_tab.open:
         with journal_tab:
             import journal_view
@@ -5953,6 +5990,7 @@ def main():
                                     st.dataframe(other, hide_index=True)
                                 st.caption('평가손익과 수익률은 증권사 응답 그대로이며 비용 포함 여부는 확인되지 않았습니다.')
                                 st.write('당일 주문·체결·취소')
+                                st.button('모의 매매내역 보기', on_click=open_account_trade_history, args=('paper-shared',))
                                 orders_view(snapshot, books, datetime.now(KST).strftime('%Y-%m-%d'))
                             else:
                                 st.info('ETF 현황 새로고침을 누르면 증권사 잔고와 주문을 조회합니다.')

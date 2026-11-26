@@ -100,7 +100,7 @@ def paper_pages(adapter, operation, fields, block, clock=time.monotonic, sleep=t
                                   ('krstockInquiryDailyOrderExecution','Output_0')}:
         raise ValueError('only paper balance and order reads may be retried')
     from nh_live_broker import PAGE_GAP  # NH's ~1 request a second per query (11-19 IGW42903 on every second page)
-    rows, seen, cursor, flag, first, started = [], set(), None, None, None, None
+    rows, seen, cursor, flag, first, received = [], set(), None, None, None, None
     accepted = {('00000', '모의투자 마지막 자료입니다'),
                 ('XA102', '모의투자 조회가 완료되었습니다'),
                 ('00000', '조회가 완료되었습니다'),
@@ -111,10 +111,10 @@ def paper_pages(adapter, operation, fields, block, clock=time.monotonic, sleep=t
         params = {'operationId': operation, 'input': fields, 'want_pagination': True}
         if cursor is not None:
             params.update(cts=cursor, cts_flag=flag)
-            sleep(max(0.0, started + PAGE_GAP - clock()))
+            sleep(max(0.0, received + PAGE_GAP - clock()))
         for attempt in range(3):
-            started = clock()
             response = adapter.call_tool('call_api', params)
+            received = clock()
             if response.get('status') == 'ok' and isinstance(response.get('data'), dict):
                 break
             if attempt < 2:
@@ -4248,6 +4248,22 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
     if type(price) is not int or price <= 0 or type(cash) not in (int,float) or not math.isfinite(cash) or cash < 0:
         raise ValueError('paper buying power or ask unavailable')
     timing = entry_timing_context(quote, price, bars.get(candidate, []), decided_at)
+    if etf7 and not execute_orders and source == 'watchlist_strength' and settings.get('strength_review_trial_on'):
+        from strength_entry_review import review as review_strength_entry
+
+        observed = datetime.now(KST)
+        signal = comparison or {}
+        stock = ((extra.get('watchlist_details') or {}).get(symbol) or {}) if modes['jev'] and signal else {}
+        reasons = review_strength_entry(symbol=symbol, model_choice=(signal.get('candidate') or {}).get('choice'),
+                                        model_fresh=fresh_model_time(signal.get('response_time'), observed),
+                                        market=market_view(root), index=stop_symbol_index(root, symbol), market_news=news,
+                                        stock={**stock, 'investor_read_at': (movers.get(symbol) or {}).get('investor_read_at')},
+                                        timing={**timing, **entry_context(quote, price)}, now=observed)
+        journal_event(root, 'strength_entry_review_trial', symbol=symbol, permitted=not reasons, reasons=reasons,
+                      cycle_id=cycle_id, input_digest=signal.get('input_digest'), entry_timing=timing)
+        if reasons:
+            journal_event(root, 'v2_execution_gate', symbol=symbol, permitted=False, reason=reasons[0], cycle_id=cycle_id)
+            return 'wait'
     if source == 'watchlist_strength' and bars.get(candidate) and not session_bar(bars[candidate], decided_at):
         # before the first KRX bar the pick's "up today" came from the pre-market: today's own price must say so too
         if not strong_now(quote, price):

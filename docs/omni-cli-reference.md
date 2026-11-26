@@ -2,7 +2,7 @@
 
 `agent-harness/build_reference.py`가 코드에서 만든 문서입니다. 직접 고치지 않습니다. 사용법은 [omni CLI 가이드](omni-cli.md)에 있습니다.
 
-명령 167개. 모든 명령에 `--json`을 붙일 수 있습니다. `--json`은 명령 앞뒤 어디에 써도 됩니다.
+명령 179개. 모든 명령에 `--json`을 붙일 수 있습니다. `--json`은 명령 앞뒤 어디에 써도 됩니다.
 
 **성격**: 조회는 기록만 읽습니다. 외부 조회는 증권사·시세 서버를 부릅니다. 계획은 `~/.vibe-trading/cli`에 저장만 하고 설정·주문을 바꾸지 않습니다. 승인 코드는 사용자가 알림에서 받아 알려 주는 값입니다.
 
@@ -24,6 +24,7 @@
 - [premarket](#premarket)
 - [report](#report)
 - [research](#research)
+- [schedule](#schedule)
 - [settings](#settings)
 - [status](#status)
 - [template](#template)
@@ -1270,6 +1271,106 @@ NXT 가상 매매 감사
 - 성격: 조회 · 외부 조회: 시세 서버
 - 인자: `<name>` (필수): 이름 `dca` \| `dca-masters` \| `dca-presets` \| `dca-pace` \| `dca-v3` \| `yeo` \| `yeo-dca` \| `engine`
 - 예: `omni research replay yeo`
+
+## schedule
+
+예약 작업 목록·백업·AI 실행 프로필 이전
+
+### omni schedule device
+
+이전용 기기 ID와 서명 지문 확인
+
+- 성격: 씀: 이전용 기기 신원
+- 인자: 없음
+- 예: `omni schedule device`
+
+### omni schedule export
+
+비공개 파일에 예약 정의 내보내기
+
+- 성격: 씀: 비공개 예약 번들
+- 인자: `--out <out>` (필수): 새 번들 파일 경로
+- 예: `omni schedule export --out schedules.json`
+
+### omni schedule handoff
+
+원본 실행권을 해제하고 지정 기기용 인수 영수증 발급
+
+- 성격: 씀: 원본 실행권 해제 및 인수 영수증
+- 인자: `--to-device <to_device>` (필수): 인수할 기기의 ID · `--job <job>` (필수): 원본 실행권을 해제할 작업 ID · `--out <out>` (필수): 서명된 인수 영수증 파일
+- 예: `omni schedule handoff --to-device device-1234567890abcdef1234567890abcdef --job "Claude 예약 작업:trading-intraday-report" --out receipt.json`
+
+### omni schedule list
+
+예약 작업의 일정·모델·프롬프트 보존 상태 조회
+
+- 성격: 조회
+- 인자: 없음
+- 예: `omni schedule list`
+
+### omni schedule plan
+
+전체 또는 선택한 예약 작업의 이전 계획 작성
+
+- 성격: 씀: 예약 이전 계획
+- 인자: `--to <target>` (필수): 대상 프로필 ID · `--from <bundle_path>`: 내보낸 예약 번들 · `--job <job>`: 이전할 작업 ID(반복 가능) · `--all`: 전체 작업을 계획에 포함 · `--receipt <receipt>`: 원본에서 받은 인수 영수증 · `--source-key <source_key>`: 원본 기기에서 확인한 서명 지문
+- 예: `omni schedule plan --to codex:work --all`
+
+### omni schedule probe
+
+검증용 입력으로 지정 모델 호출 확인(사용량 발생)
+
+- 성격: **유료 · 외부 전송** · 씀: 모델 호출 확인
+- 인자: `<profile>` (필수)
+- 예: `omni schedule probe codex:work`
+
+### omni schedule profile-add
+
+현재 로그인 계정을 작업 실행 프로필로 등록
+
+- 성격: 씀: AI 실행 프로필
+- 인자: `<provider>` (필수): `claude` \| `codex` \| `antigravity` · `<alias>` (필수) · `--model <model>` (필수): 실행할 정확한 모델 ID · `--config-dir <config_dir>`: 선택한 CLI 인증 설정 폴더 · `--credential-file <credential_file>`: Antigravity 전용 Gemini API 키 파일
+- 예: `omni schedule profile-add codex work --model <모델-ID>`
+
+### omni schedule profiles
+
+등록된 AI 실행 프로필 조회
+
+- 성격: 조회
+- 인자: 없음
+- 예: `omni schedule profiles`
+
+### omni schedule receipt-export
+
+기발급 영수증을 별도 파일로 다시 저장
+
+- 성격: 씀: 기발급 인수 영수증 파일
+- 인자: `<transfer_id>` (필수) · `--out <out>` (필수): 새 인수 영수증 파일 경로
+- 예: `omni schedule receipt-export transfer-1234567890abcdef1234567890abcdef --out copy.json`
+
+### omni schedule rollback
+
+이전에서 바꾼 Omni 실행 경로 되돌리기
+
+- 성격: 씀: 예약 실행 경로 복원
+- 인자: `<plan_id>` (필수): 계획 번호
+- 예: `omni schedule rollback schedule-123456abcdef`
+
+### omni schedule validate-model
+
+비식별 입력과 기대 결과로 대체 모델 비교(사용량 발생)
+
+- 성격: **유료 · 외부 전송** · 씀: 작업별 검증 결과
+- 인자: `<plan_id>` (필수): 계획 번호 · `<job_id>` (필수) · `--fixture <fixture>` (필수): input과 expected를 담은 비식별 JSON 자료
+- 예: `omni schedule validate-model schedule-123456abcdef "Claude 예약 작업:intraday-audit-hourly" --fixture fixture.json`
+
+### omni schedule verify
+
+이전 상태와 첫 회차 기록 조회
+
+- 성격: 조회
+- 인자: `<plan_id>` (필수): 계획 번호
+- 예: `omni schedule verify schedule-123456abcdef`
 
 ## settings
 

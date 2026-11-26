@@ -322,6 +322,28 @@ def test_summary_carries_the_intraday_sections_the_engines_did_not_see():
     assert 'index_intraday' not in early  # before the open these are yesterday's
 
 
+def test_foreign_desk_sells_include_code_source_and_actual_receive_time():
+    import market_context as mc
+    payload = {'time': '2026-11-26T10:00:00+09:00',
+               'foreign_desks': {'source': 'kiwoom:ka10037', 'received_at': '2026-11-26T10:00:03+09:00',
+                                 'net_sell': [{'code': '005930', 'name': '삼성전자', 'change_pct': -1.0, 'net_100m': -20}]}}
+    now = mc.datetime.fromisoformat('2026-11-26T10:00:05+09:00')
+    assert 'foreign_desks_net_sell_top' not in mc.intraday_view(payload, now=now)
+    assert 'foreign_desks_net_sell_top' not in mc.summary(payload, now)
+    result = mc.intraday_view(payload, now=now, include_foreign_sells=True)
+    assert result['foreign_desks_net_sell_top'] == {'source': 'kiwoom:ka10037', 'received_at': '2026-11-26T10:00:03+09:00',
+                                                    'rows': [{'code': '005930', 'name': '삼성전자', 'change_pct': -1.0, 'net_100m': -20}]}
+    assert mc.foreign_desk_sells(payload, now) == result['foreign_desks_net_sell_top']
+    payload['foreign_desks'].pop('received_at')
+    assert 'foreign_desks_net_sell_top' not in mc.summary(payload, now)
+    assert mc.foreign_desk_sells(payload, now) is None
+    assert 'foreign_desks_net_sell_top' not in mc.intraday_view(payload, now=now, include_foreign_sells=True)
+    payload['foreign_desks']['received_at'] = '2026-11-25T10:00:03+09:00'
+    assert 'foreign_desks_net_sell_top' not in mc.intraday_view(payload, now=now, include_foreign_sells=True)
+    payload['foreign_desks']['received_at'] = '2026-11-26T10:00:06+09:00'
+    assert 'foreign_desks_net_sell_top' not in mc.intraday_view(payload, now=now, include_foreign_sells=True)
+
+
 import pytest  # noqa: E402
 
 

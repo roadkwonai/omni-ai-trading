@@ -980,9 +980,10 @@ class MCPServerAdapter:
                     raise_on_error=False,
                 )
 
+        budget_diagnostic = {}
         if 'nhplug' in (self.server_name or ''):  # one NH app key, many processes: wait for a slot (orders never wait)
             from src.tools.nh_budget import take
-            await asyncio.to_thread(take, remote_name, arguments)
+            await asyncio.to_thread(take, remote_name, arguments, diagnostic=budget_diagnostic)
         # Remote MCP tools are arbitrary and may mutate external state. If a
         # timeout / connection drop happens after the server has already
         # committed the action, retrying here would duplicate the side effect.
@@ -995,6 +996,8 @@ class MCPServerAdapter:
             raise
         finally:
             _note_call(self.server_name, remote_name, arguments, started, result, error)
+            if budget_diagnostic and (api_calls := sys.modules.get('api_calls')) is not None:
+                api_calls.nh_budget_diagnostic(budget_diagnostic, result, error)
 
     async def _run_with_retry(
         self,

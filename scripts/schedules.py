@@ -16,7 +16,7 @@ KINDS = ('launchd 서비스', 'Claude 예약 작업', 'Codex 자동화')
 WEEKDAYS = frozenset(range(5))
 RRULE_DAYS = {'MO': 0, 'TU': 1, 'WE': 2, 'TH': 3, 'FR': 4, 'SA': 5, 'SU': 6}
 KST = ZoneInfo('Asia/Seoul')
-NON_ACTIVE = {'꺼짐', '일시 정지', '없음', '미등록', '확인 불가', '전환 대기', '만료', '기록만 있음', '백업'}
+NON_ACTIVE = {'꺼짐', '일시 정지', '없음', '미등록', '확인 불가', '전환 대기', '이전 대기', '만료', '기록만 있음', '백업'}
 
 
 def timestamp(value):
@@ -346,10 +346,11 @@ def codex_jobs(home=None, repo=REPO):
 def all_jobs(states=None, home=None, runtime=None):
     from schedule_dispatch import route_rows
     from schedule_history import native_history
+    from schedule_imports import catalog
     from schedule_models import last_model_use
 
     root = _nhplug(runtime, home)
-    jobs = launchd_jobs(states, home, runtime) + claude_jobs(home) + codex_jobs(home)
+    jobs = launchd_jobs(states, home, runtime) + catalog(runtime, claude_jobs(home)) + codex_jobs(home)
     native = native_history(jobs, home=home, runtime=root)
     routes, runs = route_rows(runtime, jobs=[j for j in jobs if j['kind'] == KINDS[1]],
                              codex=[j for j in jobs if j['kind'] == KINDS[2]])

@@ -29,6 +29,7 @@ DEFAULTS = {
     'strength_min_prob': 0.15,
     'strength_change_min': 2.0,
     'strength_change_max': 25.0,
+    'strength_review_trial_on': 0,  # strict review only in non-executing ETF7 rehearsal
     # New-listing entry (user 2026-11-12: IPO momentum can pay even in a falling market). Own exit: stop, half, trail.
     'ipo_days': 2,                # sessions since listing that count (1 = listing day only; 0 turns it off)
     'ipo_size_pct': 50,           # share of the first-buy amount
@@ -142,6 +143,7 @@ LIMITS = {
     'overnight_max_manwon': (0, 500_000),  # up to 50억 원 like the paper held-amount limit (user 2026-11-13); the order guard still caps holdings
     'swing_max_days': (1, 10),
     'strength_top_n': (0, 10), 'strength_min_prob': (0.05, 0.6), 'strength_change_min': (0.0, 10.0), 'strength_change_max': (5.0, 29.0),
+    'strength_review_trial_on': (0, 1),
     'ipo_days': (0, 5), 'ipo_size_pct': (10, 100), 'ipo_near_high_pct': (0.5, 15.0), 'ipo_stop_pct': (1.0, 10.0),
     'ipo_half_pct': (1.0, 30.0), 'ipo_trail_pct': (0.5, 15.0),
     'weak_half_pct': (0.3, 5.0), 'weak_all_pct': (0.5, 10.0), 'fade_exit_pct': (0.0, 5.0), 'direction_switch': (0, 1), 'entry_volume_ratio': (0.0, 3.0),
@@ -177,6 +179,7 @@ LABELS = {
     'overnight_max_manwon': '장 마감 보유 한도 (만원)', 'swing_max_days': '스윙 최대 보유일 (거래일)',
     'strength_top_n': '관심종목 강도 진입: Jev 순위 상위 N위 (0=끔)', 'strength_min_prob': '관심종목 강도 진입: Jev 확률 최소',
     'strength_change_min': '관심종목 강도 진입: 전일 대비 최소 상승 %', 'strength_change_max': '관심종목 강도 진입: 전일 대비 최대 상승 %',
+    'strength_review_trial_on': '주문 없는 모의 검증에서만 관심종목 강도 진입 보호 적용 (1=켬)',
     'ipo_days': '신규주: 상장 후 거래일 수 (0=끔)', 'ipo_size_pct': '신규주: 분할 1회 매수 금액 대비 %',
     'ipo_near_high_pct': '신규주: 당일 고가 대비 허용 % 이내', 'ipo_stop_pct': '신규주: 손절 %',
     'ipo_half_pct': '신규주: 절반 익절 %', 'ipo_trail_pct': '신규주: 고점 대비 추적 손절 %',

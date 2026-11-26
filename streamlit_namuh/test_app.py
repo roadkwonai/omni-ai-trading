@@ -373,6 +373,26 @@ def test_scale_settings_widgets_save_through_strategy_store():
         assert values['scale_profit_rebuy_on'] == 0
         assert values['scale_interval_min'] == 7
 
+
+@pytest.mark.parametrize('trial_value', [0.0, 0.5, 1.0])
+def test_strategy_save_preserves_trial_and_other_settings(trial_value):
+    from contextlib import ExitStack
+
+    with tempfile.TemporaryDirectory() as d, ExitStack() as stack:
+        settings = {**app.STRATEGY_DEFAULTS, 'strength_review_trial_on': trial_value}
+        stack.enter_context(patch.object(app, 'get_runtime_root', return_value=Path(d)))
+        stack.enter_context(patch.object(app, 'strategy_settings', return_value=(settings, 'custom')))
+        for name in ('strength_presets', 'oversold_presets', 'oversold_universe_editor', 'ipo_presets', 'volume_presets'):
+            stack.enter_context(patch.object(app, name))
+        save = stack.enter_context(patch.object(app, 'write_settings'))
+        ui = AppTest.from_function(_strategy_settings_page, default_timeout=30).run()
+        assert not ui.exception
+        ui.button(key='test_strategy_save').click().run()
+        assert not ui.exception
+        values = save.call_args.args[1]
+        assert values == settings
+
+
 class Adapter:
     def __init__(self, *, paper=False, pending=0, account_type='03', sellable=2):
         self.paper, self.pending, self.account_type, self.sellable = paper, pending, account_type, sellable
@@ -1621,7 +1641,7 @@ def test_nh_quotes_and_balances_refresh_only_while_krx_trades(monkeypatch):
     monkeypatch.setattr(app, 'refresh_s', lambda: 30)
     monkeypatch.setattr(app, 'auto_on', lambda: True)
     at = lambda *a: datetime(*a, tzinfo=app.KST)  # noqa: E731
-    assert app.live_every(at(2026, 11, 19, 9, 0)) == '30s' and app.live_every(at(2026, 11, 19, 15, 29)) == '30s'
+    assert app.live_every(at(2026, 11, 19, 9, 0)) == 30 and app.live_every(at(2026, 11, 19, 15, 29)) == 30
     assert app.live_every(at(2026, 11, 19, 8, 59)) is None and app.live_every(at(2026, 11, 19, 15, 30)) is None
     assert app.live_every(at(2026, 11, 19, 21, 0)) is None  # evening
     assert app.live_every(at(2026, 11, 21, 10, 0)) is None  # Saturday

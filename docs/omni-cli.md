@@ -232,8 +232,24 @@ omni market context --keys indices --json
 | KRX 휴장일만 | `lt report-status`·`report-check`·`audit-data`, `journal status`, `premarket status`, `ops audit`·`day-start`·`start` |
 | 파일·기록을 저장 | `status refresh`, `market refresh`·`brief`(공유 뉴스 캐시), `journal rebuild`·`merge`, `backup create`·`tasks`, `compare export`, `report preview`, `premarket preflight`, `lt cases-refresh`, `ops audit`, `ops service-files` |
 | 요금 발생 | `ai search`, `ai ask` |
+| 예약 작업 이전 | `schedule export`, `schedule profile-add`, `schedule plan`, `schedule device`, `schedule handoff`, `schedule receipt-export`, `schedule rollback` |
+| AI 모델 시험 및 사용량 기록 | `schedule probe`, `schedule validate-model` |
 
 사용자가 원할 때만 씁니다.
+
+### 예약 작업 목록과 이전
+
+`omni schedule list --json`으로 전체 목록을 확인하고 `omni schedule export --out schedules.json`으로 비공개 번들을 저장합니다. 번들에는 확인할 수 있는 지시문, 참조 스킬, 일정, 모델, 최근 실행 정보가 들어갑니다.
+
+대상 CLI에 로그인한 뒤 `omni schedule profile-add codex work --model <모델-ID>`로 등록하고 `omni schedule probe codex:work`로 확인합니다. `omni schedule plan --to codex:work --all`의 상태를 살펴보고, 대체 모델이 필요한 작업은 `schedule validate-model <계획-ID> <작업-ID> --fixture <비식별-JSON>`으로 검증할 수 있습니다. 자료는 `input`과 `expected` 객체가 있는 배열이며, 정상과 예외 사례를 넣습니다.
+
+같은 기기에서는 원본 예약이 일시 정지된 상태에서 `omni plan apply <계획-ID>`로 적용하고 `omni schedule verify <계획-ID>`로 확인합니다. `omni schedule rollback <계획-ID>`은 이전 전 Omni 실행 경로를 복원합니다.
+
+Antigravity는 장중 진행 보고를 실행할 수 있습니다. 소유자 전용 파일에 Gemini API 키를 저장하고 `omni schedule profile-add antigravity work --model <Gemini-모델-ID> --credential-file <절대경로>`로 등록합니다. 예약 실행기는 승인된 로컬 조회의 요약 자료와 원본 프롬프트를 `agy`에 전달하고 모델의 도구 접근을 제한합니다.
+
+다른 기기로 옮길 때는 양쪽에서 `omni schedule device`를 실행해 대상 기기 ID와 원본 서명 지문을 확인합니다. 원본 앱의 동일 예약을 일시 정지한 뒤 원본에서 `omni schedule handoff --to-device <대상-ID> --job <작업-ID> --out receipt.json`을 실행합니다. 원본은 해당 작업의 실행권을 해제하고 대상에 묶인 영수증을 발급합니다. 영수증과 원본에서 확인한 서명 지문을 별도로 전달합니다.
+
+대상은 `omni schedule plan --receipt receipt.json --source-key <원본-서명-지문> --to <프로필-ID> --all`로 인수 계획을 준비합니다. 동일한 프로젝트·참조 자료와 실행기를 준비하고 모델 검증을 마친 뒤 적용합니다. 대상에서 되돌리기는 대상 실행을 중단합니다. 원본의 서명된 실행권 해제 기록은 유지되며, 원본 외부 앱의 예약도 일시 정지 상태로 관리해야 합니다.
 
 ### DB 직접 조회
 

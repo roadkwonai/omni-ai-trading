@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 # 2026-11-19 (user-approved plan docs/dashboard-menu-plan-2026-11-19.md): three groups, daily → accounts → admin
-GROUPS = (('매일', ('종합 현황', '시장 상황', '전략 구조', '트레이딩 현황', '매매일지', '성과 비교')),
+GROUPS = (('매일', ('종합 현황', '시장 상황', '전략 구조', '트레이딩 현황', '매매내역', '매매일지', '성과 비교')),
           ('계좌', ('계좌·자동매매', '장기투자', '실계좌')),
           ('관리', ('운영',)))
 TABS = [tab for _, tabs in GROUPS for tab in tabs]

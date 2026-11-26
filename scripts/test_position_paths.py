@@ -17,6 +17,17 @@ def bars(code, start, closes, highs=None, lows=None):
 
 
 class PositionPathTests(unittest.TestCase):
+    def test_day_bars_uses_provided_connection_without_reopening_database(self):
+        with sqlite3.connect(':memory:') as db:
+            db.execute('CREATE TABLE events_v2 (time TEXT, data TEXT)')
+            bar = {'bsop_time': '100300', 'stck_oprc': 100, 'stck_hgpr': 102,
+                   'stck_lwpr': 99, 'stck_prpr': 101}
+            db.execute('INSERT INTO events_v2 VALUES (?,?)',
+                       (T(10, 4).isoformat(), json.dumps({'market_bars': {'KQ150': [bar]}})))
+            result = pp.day_bars_from_connection(db, '2026-11-12')
+            self.assertEqual(result['229200'], [(T(10, 3), 100.0, 102.0, 99.0, 101.0, T(10, 4))])
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM events_v2').fetchone()[0], 1)
+
     def test_vibe_score_uses_published_time_and_legacy_is_unverified(self):
         with tempfile.TemporaryDirectory() as d:
             ledger = Path(d) / 'ledger.sqlite3'

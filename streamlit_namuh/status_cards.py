@@ -8,6 +8,7 @@ Every card also carries the state in words and an icon, so colour is never the o
 from __future__ import annotations
 
 from html import escape
+from math import isfinite
 
 import streamlit as st
 
@@ -90,6 +91,22 @@ def service(state):
 
 def signed(value):
     return 'up' if value > 0 else 'down' if value < 0 else 'off'
+
+
+def signed_percent(value):
+    """Format small balance changes without rounding a nonzero move to signed zero."""
+    if value is None or not isfinite(value):
+        return '—'
+    if value == 0:
+        return '0.00%'
+    magnitude = abs(value)
+    if magnitude >= .01:
+        return f'{value:+.2f}%'
+    if magnitude >= .0001:
+        return f'{value:+.4f}%'
+    if magnitude >= .00000001:
+        return f'{value:+.8f}%'
+    return f'{value:+.2g}%'
 
 
 UP_COLOR, DOWN_COLOR = '#ef4444', '#3b82f6'  # 국내 관례: 상승·매수 빨강, 하락·매도 파랑

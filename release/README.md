@@ -4,6 +4,7 @@ Omni AI Trading의 버전과 릴리스 노트를 두는 곳입니다. 공개 저
 
 | 릴리스 | 날짜 | 노트 |
 | --- | --- | --- |
+| v0.1.9 · 매매내역과 운영 개선 | 2026-11-27 | [2026-11-27-v0.1.9-trade-history.md](2026-11-27-v0.1.9-trade-history.md) |
 | v0.1.8 · 자동 작업과 거래 운영 개선 | 2026-11-25 | [2026-11-25-v0.1.8-trading-operations.md](2026-11-25-v0.1.8-trading-operations.md) |
 | v0.1.7 · omni CLI와 AI 에이전트 연동 | 2026-11-25 | [2026-11-25-v0.1.7-omni-cli.md](2026-11-25-v0.1.7-omni-cli.md) |
 | v0.1.6 · AI에게 묻기와 노후·장기투자 안내 | 2026-11-24 | [2026-11-24-v0.1.6-ask-ai-and-retirement.md](2026-11-24-v0.1.6-ask-ai-and-retirement.md) |

@@ -97,3 +97,38 @@ def test_detail_opens_retained_history(monkeypatch):
     page.button(key='sched_save_Claude 예약 작업:audit').click().run()
     assert not page.exception, page.exception
     assert saved == [(None, 'audit', 'Codex', 'GPT')]
+
+
+def test_migration_dialog_displays_plan_and_applies_selected_profile(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    import automation_status
+    import schedules as S
+    from streamlit.testing.v1 import AppTest
+
+    job = {'kind': 'Claude 예약 작업', 'key': 'audit', 'name': '감사', 'state': '등록됨',
+           'when': '평일 09:20', 'what': '', 'always': False, 'days': frozenset(range(5)),
+           'monthday': None, 'date': None, 'times': [(9, 20)]}
+    monkeypatch.setattr(S, 'all_jobs', lambda *args, **kwargs: [job])
+    monkeypatch.setattr(automation_status, 'processes', lambda: {})
+    monkeypatch.setitem(sys.modules, 'schedule_bundle', SimpleNamespace(
+        encode_bundle=lambda runtime: b'{}', validate_bundle=lambda value: None))
+    actions = []
+    plan = {'id': 'plan1', 'target': 'work', 'state': '대기', 'rows': [
+        {'id': 'audit', 'name': '감사', 'when': '평일 09:20', 'source_model': 'Sonnet',
+         'target_model': 'GPT', 'status': '준비', 'reason': ''}]}
+    monkeypatch.setitem(sys.modules, 'schedule_migration', SimpleNamespace(
+        profiles=lambda runtime: [{'id': 'work', 'provider': 'Codex', 'model': 'GPT'}],
+        create_plan=lambda runtime, target, **kwargs: plan,
+        apply=lambda runtime, key: actions.append(('apply', key)) or {'status': '적용'},
+        verify=lambda runtime, key: {'status': '확인'},
+        rollback=lambda runtime, key: {'status': '복구'}))
+    page = AppTest.from_function(_page, default_timeout=60).run()
+    page.button(key='sched_migrate').click().run()
+    assert not page.exception, page.exception
+    page.button(key='sched_migrate_plan').click().run()
+    assert not page.exception, page.exception
+    assert any('Sonnet' in str(frame.value) and 'GPT' in str(frame.value) for frame in page.dataframe)
+    page.button(key='sched_migrate_apply').click().run()
+    assert not page.exception, page.exception
+    assert actions == [('apply', 'plan1')]

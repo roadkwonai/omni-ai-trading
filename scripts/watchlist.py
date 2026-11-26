@@ -229,6 +229,8 @@ def enrich(read, candidates, now, preopen=False):
             info.update(price=int(price), change_pct=round((price / previous - 1) * 100, 2), volume=int(volume), value_mil=int(value))
         info['facts'] = {label: quote_data.get(key) for key, label in FACTS.items() if quote_data.get(key) not in (None, '')}
         info['investor_daily_net_qty'] = investor_days(read, code, today)
+        if info['investor_daily_net_qty']:
+            info['investor_read_at'] = datetime.now(KST).isoformat(timespec='seconds')
         info['news'] = fresh_stock_news(code, info['name'], now) or []  # the shared 5-minute cache the runner reads too
         stocks[code], bars[code] = info, rows
     return stocks, bars
@@ -272,7 +274,8 @@ def select(read, candidates, now, preopen=False):
                                           'judging momentum and liquidity on the chart, its own news, investor flows, valuation '
                                           'and the market backdrop? Choose NONE if none is suitable.'),
                             # each stock's news within etf_news.RECENT, as the runner's Jev calls get it (r3 E8)
-                            extra_state={'stocks': {code: {**s, 'news': recent_stock_headlines(s.get('news'), now, limit=3)}
+                            extra_state={'stocks': {code: {**{k: v for k, v in s.items() if k != 'investor_read_at'},
+                                                           'news': recent_stock_headlines(s.get('news'), now, limit=3)}
                                                     for code, s in stocks.items()},
                                          'market_etf_change_pct': market,
                                          **({'overnight_material': overnight} if overnight else {}),

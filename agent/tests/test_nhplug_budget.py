@@ -123,3 +123,17 @@ def test_the_same_query_gap_is_kept_after_a_wait_for_a_slot(tmp_path):
         if caller == 'dashboard':
             assert clock.slept  # it waited for a slot first
     assert started[1] - started[0] >= B.SAME_GAP
+
+
+def test_inquiry_diagnostics_show_a_capped_reservation_without_account_data(tmp_path):
+    path, clock = tmp_path / 'budget.json', Clock()
+    clock.sleep = lambda seconds: None
+    args = {'operationId': 'krstockInquiryBalance', 'input': {'act_no': '12345678'}}
+    for _ in range(4):
+        info = {}
+        B.take('call_api', args, caller='dashboard', clock=clock, sleep=clock.sleep, path=path, diagnostic=info)
+    assert info['same_cap_exceeded'] is True
+    assert info['requested_wait'] > B._same_deadline['low']
+    assert info['same_wait'] == 0
+    assert info['admitted_at'] == clock.now
+    assert '12345678' not in str(info)

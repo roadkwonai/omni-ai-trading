@@ -17,6 +17,7 @@ import json
 import sqlite3
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta
+from operator import itemgetter
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -31,36 +32,41 @@ HORIZONS = (5, 15, 30)
 
 def day_bars(ledger, day):
     """{code: [(minute, open, high, low, close, observed_at)]} from recorded market_bars."""
-    series = {}
     with ro_connect(Path(ledger)) as db:
-        rows = db.execute("SELECT time, data FROM events_v2 WHERE time >= ? AND time < ? AND data LIKE '%market_bars%'",
-                          (day, (datetime.fromisoformat(day) + timedelta(days=1)).strftime('%Y-%m-%d')))
-        for event_time, data in rows:
-            try:
-                received = datetime.fromisoformat(event_time)
-                if received.tzinfo is None or received.utcoffset() is None:
-                    received = None
-            except (TypeError, ValueError):
+        return day_bars_from_connection(db, day)
+
+
+def day_bars_from_connection(db, day):
+    """Read recorded bars through an existing SQLite connection."""
+    series = {}
+    rows = db.execute("SELECT time, data FROM events_v2 WHERE time >= ? AND time < ? AND data LIKE '%market_bars%' ORDER BY time,rowid",
+                      (day, (datetime.fromisoformat(day) + timedelta(days=1)).strftime('%Y-%m-%d')))
+    for event_time, data in rows:
+        try:
+            received = datetime.fromisoformat(event_time)
+            if received.tzinfo is None or received.utcoffset() is None:
                 received = None
-            for key, bars in (json.loads(data).get('market_bars') or {}).items():
-                code = SYMBOLS.get(key, key)
-                for bar in bars or []:
-                    try:
-                        minute = datetime.fromisoformat(f"{day}T{bar['bsop_time'][:2]}:{bar['bsop_time'][2:4]}:00+09:00")
-                        values = tuple(float(bar[k]) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr'))
-                        observed = received if received is not None and received >= minute + timedelta(minutes=1) else None
-                        previous = series.setdefault(code, {}).get(minute)
-                        if previous and previous[:4] == values and previous[4] is not None:
-                            observed = min(previous[4], observed) if observed is not None else previous[4]
-                        series[code][minute] = (*values, observed)
-                    except (KeyError, TypeError, ValueError):
-                        continue
+        except (TypeError, ValueError):
+            received = None
+        for key, bars in (json.loads(data).get('market_bars') or {}).items():
+            code = SYMBOLS.get(key, key)
+            for bar in bars or []:
+                try:
+                    minute = datetime.fromisoformat(f"{day}T{bar['bsop_time'][:2]}:{bar['bsop_time'][2:4]}:00+09:00")
+                    values = tuple(float(bar[k]) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr'))
+                    observed = received if received is not None and received >= minute + timedelta(minutes=1) else None
+                    previous = series.setdefault(code, {}).get(minute)
+                    if previous and previous[:4] == values and previous[4] is not None:
+                        observed = min(previous[4], observed) if observed is not None else previous[4]
+                    series[code][minute] = (*values, observed)
+                except (KeyError, TypeError, ValueError):
+                    continue
     return {code: [(m, *v) for m, v in sorted(bars.items())] for code, bars in series.items()}
 
 
 def close_at(bars, when, *, observed_only=False, max_age=None):
     """Last completed close; observed_only also requires receipt by `when`."""
-    index = bisect_right([m for m, *_ in bars], when - timedelta(minutes=1)) - 1
+    index = bisect_right(bars, when - timedelta(minutes=1), key=itemgetter(0)) - 1
     while index >= 0:
         bar = bars[index]
         if not observed_only or (len(bar) > 5 and bar[5] is not None and bar[5] <= when):
@@ -71,7 +77,7 @@ def close_at(bars, when, *, observed_only=False, max_age=None):
 
 def close_after(bars, when, tolerance=timedelta(minutes=2), *, observed_only=False):
     """First completed close near `when`; observed_only requires receipt within the tolerance."""
-    index = bisect_left([m for m, *_ in bars], when - timedelta(minutes=1))
+    index = bisect_left(bars, when - timedelta(minutes=1), key=itemgetter(0))
     while index < len(bars) and bars[index][0] + timedelta(minutes=1) - when <= tolerance:
         bar = bars[index]
         if not observed_only or (len(bar) > 5 and bar[5] is not None and bar[5] <= when + tolerance):

@@ -25,6 +25,38 @@ import pytest as _pytest
 
 
 @_pytest.fixture(autouse=True)
+def _offline_market_data(monkeypatch):
+    import kr_swing_v5_daily_data
+    import new_listings
+
+    recent = new_listings.recent
+
+    def unavailable(_years):
+        raise OSError('KRX holiday data unavailable in order-path tests')
+
+    monkeypatch.setattr(new_listings, 'recent',
+                        lambda root, now: recent(root, now, fetcher=lambda _: [], fallback=lambda _: []))
+    monkeypatch.setattr(kr_swing_v5_daily_data, 'krx_holidays', unavailable)
+
+
+def test_order_path_market_fixtures_do_not_resolve_external_hosts(tmp_path, monkeypatch):
+    import new_listings
+    import socket
+
+    lookups = []
+
+    def unexpected_lookup(*args, **kwargs):
+        lookups.append(True)
+        raise OSError('unexpected DNS lookup')
+
+    monkeypatch.setattr(socket, 'getaddrinfo', unexpected_lookup)
+    monkeypatch.setattr(p, '_HOLIDAYS', {})
+    assert new_listings.recent(tmp_path, NOW) == []
+    assert p.krx_holiday_table(NOW.year) is None
+    assert lookups == []
+
+
+@_pytest.fixture(autouse=True)
 def _full_size_buys(monkeypatch):
     """These tests check entries, limits and exits at full tranche size; position sizing (holdings and market
     direction, user 2026-11-17) and its regime trim are tested in test_position_sizing.py."""
@@ -1980,6 +2012,25 @@ class MultiSymbolTests(unittest.TestCase):
         submit.assert_not_called()
         self.assertEqual(events.call_args.kwargs['strength_reason'], 'no_strength_candidate')
 
+    def test_strength_trial_blocks_wait_in_rehearsal_only(self):
+        import strategy_settings
+
+        for execute in (True, False):
+            movers, view = self.strength_setup(0.69)
+            with self.subTest(execute=execute), patch.object(p, 'mover_candidates', return_value=movers), view, \
+                 patch.object(p, 'cooling', return_value=False), \
+                 patch('strategy_settings.read_settings', return_value=(
+                     {**strategy_settings.DEFAULTS, 'strength_review_trial_on': 1}, 'ok')):
+                status, submit, _, events = self.run_cycle(self.root, self.db, {}, jev_choice='WAIT', execute=execute)
+            trials = [c.kwargs for c in events.call_args_list if c.args[1] == 'strength_entry_review_trial']
+            if execute:
+                self.assertEqual(status, 'buy')
+                self.assertFalse(trials)
+            else:
+                self.assertEqual(status, 'wait')
+                submit.assert_not_called()
+                self.assertIn('strength_jev_wait', trials[0]['reasons'])
+
     def test_new_listing_slot_buys_while_jev_picks_and_an_inverse_is_held(self):
         # user 2026-11-17: the new listing is its own slot; Jev's inverse pick and the inverse held do not block it
         rows = [{'bsop_time': f'11{58-i:02d}00', 'stck_prpr': str(1400-i), 'vol': str(200 if i < 5 else 100)} for i in range(10)]
@@ -3416,6 +3467,22 @@ class PaperPagesContinuationTests(unittest.TestCase):
         self.assertEqual(data['Output_1'], [{'n': 1}, {'n': 2}])
         self.assertEqual(len(nh.starts), 2)                       # no refused call, no retry
         self.assertGreaterEqual(nh.starts[1] - nh.starts[0], 1.0)
+
+    def test_continuation_waits_after_a_slow_response(self):
+        clock = {'t': 0.0}
+        starts = []
+        class NH:
+            def call_tool(self, name, params):
+                starts.append(clock['t'])
+                clock['t'] += 1.2 if len(starts) == 1 else 0.01
+                more = len(starts) == 1
+                return {'status': 'ok', 'data': {
+                    'rsp_cd': 'XA109' if more else '00000',
+                    'rsp_msg': '모의투자 조회가 계속 됩니다. 다음 버튼을 누르세요' if more else '모의투자 마지막 자료입니다',
+                    'Output_0': [], '_nh_pagination': {'complete': False, 'cts': 'c1', 'cts_flag': 'Y'} if more else {'complete': True}}}
+        p.paper_pages(NH(), 'krstockInquiryDailyOrderExecution', {}, 'Output_0',
+                      clock=lambda: clock['t'], sleep=lambda seconds: clock.__setitem__('t', clock['t'] + seconds))
+        self.assertAlmostEqual(starts[1] - 1.2, 1.1)
 
     def test_continuation_code_on_a_complete_page_is_contradictory(self):
         class Adapter:

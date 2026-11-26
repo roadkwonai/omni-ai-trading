@@ -18,8 +18,10 @@ from pathlib import Path
 
 from schedules import KINDS, KST, REPO, claude_jobs, codex_jobs, starts_on
 from state_sync import runtime_root
+from schedule_antigravity_report import TARGETS as ANTIGRAVITY_TARGETS
 
 SERVICE = 'ai-schedule-runner'
+PROFILE_PROTOCOL = 2
 OPTIONS = {
     'Claude': ('claude-sonnet-5-5', 'claude-opus-5-5', 'claude-haiku-5-5'),
     'Codex': ('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol'),
@@ -84,6 +86,8 @@ def _skill(key, home=None):
 
 
 def eligibility(job):
+    if job.get('imported'):
+        return '인수한 예약은 예약 이전 계획에서 실행 프로필을 관리합니다.'
     if job.get('route'):
         return ''
     if job['kind'] != KINDS[1]:
@@ -97,7 +101,7 @@ def eligibility(job):
 
 
 def executable(provider):
-    command = {'Claude': 'claude', 'Codex': 'codex'}[provider]
+    command = {'Claude': 'claude', 'Codex': 'codex', 'Antigravity': 'agy'}[provider]
     home = Path.home()
     paths = (home / '.claude/local/claude', home / '.local/bin' / command, Path('/opt/homebrew/bin') / command)
     return shutil.which(command) or next((str(p) for p in paths
@@ -130,9 +134,20 @@ def set_route(runtime, key, provider, model):
     """Persist only dispatch settings; a native app is never modified."""
     if key not in TARGETS:
         raise ValueError('이 작업은 앱에서 관리합니다.')
+    from schedule_handoff import released
+    from schedule_imports import definitions
+
+    def check_owner(db):
+        if released(db, key) or key in definitions(db):
+            raise ValueError('기기 간 이전 대상은 예약 이전 계획에서 관리합니다.')
+
     if not provider:
         if _path(runtime).is_file():
             with closing(_open(runtime, write=True)) as db, db:
+                db.execute('BEGIN IMMEDIATE')
+                check_owner(db)
+                if db.execute("SELECT 1 FROM sqlite_master WHERE name='schedule_bindings'").fetchone():
+                    db.execute('DELETE FROM schedule_bindings WHERE task=?', (key,))
                 db.execute('DELETE FROM routes WHERE task=?', (key,))
         return
     model = str(model or '').strip()
@@ -148,6 +163,10 @@ def set_route(runtime, key, provider, model):
     if not executable(provider):
         raise ValueError(f'{provider} CLI를 찾을 수 없습니다.')
     with closing(_open(runtime, write=True)) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        check_owner(db)
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='schedule_bindings'").fetchone():
+            db.execute('DELETE FROM schedule_bindings WHERE task=?', (key,))
         db.execute('INSERT OR REPLACE INTO routes VALUES(?,?,?,?,?)',
                    (key, provider, model, cron, datetime.now(KST).isoformat()))
 
@@ -172,8 +191,9 @@ def route_rows(runtime, jobs=None, codex=None):
     except (FileNotFoundError, sqlite3.Error):
         return {}, {}
     if routes:
+        from schedule_imports import catalog
         registered = runner_ready()
-        jobs = {j['key']: j for j in (jobs if jobs is not None else claude_jobs())}
+        jobs = {j['key']: j for j in (jobs if jobs is not None else catalog(runtime, claude_jobs()))}
         others = codex if codex is not None else codex_jobs()
         for key, route in routes.items():
             reason = (_block(jobs.get(key), route, others) or
@@ -192,24 +212,31 @@ def route_history(runtime, key):
 
 
 def _due(runtime, now):
+    from schedule_imports import catalog, definitions
     try:
         with closing(_open(runtime)) as db:
             routes = {row['task']: dict(row) for row in db.execute('SELECT * FROM routes')}
+            imported = definitions(db)
     except FileNotFoundError:
         return []
     if not routes:
         return []
     others = codex_jobs()
     slot = now.replace(second=0, microsecond=0)
-    return [(route, slot) for job in claude_jobs() if (route := routes.get(job['key'])) and
+    return [(route, slot) for job in catalog(runtime, claude_jobs()) if (route := routes.get(job['key'])) and
             job['key'] in TARGETS and not _block(job, route, others) and
             slot > datetime.fromisoformat(route['saved']) and
+            (job['key'] not in imported or slot > datetime.fromisoformat(imported[job['key']]['not_before'])) and
             (slot.hour, slot.minute) in starts_on({**job, 'state': '등록됨'}, slot.date())]
 
 
 def _claim(runtime, route, slot):
+    from schedule_handoff import released
     now = datetime.now(KST)
     with closing(_open(runtime, write=True)) as db, db:
+        db.execute('BEGIN IMMEDIATE')
+        if released(db, route['task']):
+            return False
         db.execute("UPDATE runs SET status='중단', finished=? WHERE status='실행 중' AND started < ?",
                    (now.isoformat(), (now - timedelta(seconds=TIMEOUT + 90)).isoformat()))
         claimed = db.execute("""
@@ -282,15 +309,26 @@ def _run(runtime, route, slot):
     key, provider, model = (route[k] for k in ('task', 'provider', 'model'))
     # Re-read app state before claiming, including edits made after this tick selected the job.
     from state_sync import app_stores, last_runs
+    from schedule_imports import catalog, load, translated_prompt
 
-    job = next((j for j in claude_jobs() if j['key'] == key), None)
+    job = next((j for j in catalog(runtime, claude_jobs()) if j['key'] == key), None)
+    imported = load(runtime).get(key)
     previous_native = last_runs(app_stores()).get(key)
     if (_block(job, route, codex_jobs()) or (previous_native and previous_native >= slot)
-            or not _claim(runtime, route, slot)):
+            or (imported and slot <= datetime.fromisoformat(imported['not_before']))):
+        return
+    from schedule_migration import bound_profile, _env
+
+    try:
+        profile = bound_profile(runtime, route)
+    except (OSError, ValueError):
+        print(f'{key}: 예약 프로필의 로그인 또는 작업 정의를 확인할 수 없습니다.', flush=True)
+        return
+    if not _claim(runtime, route, slot):
         return
     status, result, actual = '실패', None, None
     try:
-        skill = _skill(key).read_text(encoding='utf-8')
+        skill = translated_prompt(imported, runtime) if imported else _skill(key).read_text(encoding='utf-8')
         binary = executable(provider)
         if not binary:
             raise FileNotFoundError
@@ -301,28 +339,38 @@ def _run(runtime, route, slot):
         for folder in roots:
             folder.mkdir(parents=True, exist_ok=True, mode=0o700)
         with tempfile.TemporaryDirectory(prefix='scheduled-ai-') as work, tempfile.TemporaryFile() as stdout:
-            args = _commands(provider, binary, model, work, roots, scratch)
-            safe_env = {name: os.environ[name] for name in ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'LC_ALL', 'TMPDIR')
-                        if name in os.environ}
-            safe_env['VIBE_TRADING_HOME'] = str(root)
-            with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout, stderr=subprocess.DEVNULL, text=True,
-                                  cwd=REPO if provider == 'Claude' else work, env=safe_env, start_new_session=True) as proc:
-                try:
-                    proc.communicate(_prompt(key, slot, skill), timeout=TIMEOUT)
-                except subprocess.TimeoutExpired:
+            if provider == 'Antigravity':
+                from schedule_antigravity_report import run
+                if key not in ANTIGRAVITY_TARGETS or not profile:
+                    raise ValueError('지원하지 않는 Antigravity 예약입니다.')
+                result, actual = run(profile, binary, work, root, slot, _prompt(key, slot, skill))
+                if result:
+                    status = '응답 기록 있음'
+            else:
+                args = _commands(provider, binary, model, work, roots, scratch)
+                safe_env = {name: os.environ[name] for name in ('HOME', 'USER', 'LOGNAME', 'PATH', 'LANG', 'LC_ALL', 'TMPDIR')
+                            if name in os.environ}
+                if profile:
+                    safe_env = _env(profile)
+                safe_env['VIBE_TRADING_HOME'] = str(root)
+                with subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout, stderr=subprocess.DEVNULL, text=True,
+                                      cwd=REPO if provider == 'Claude' else work, env=safe_env, start_new_session=True) as proc:
                     try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    proc.wait()
-                    raise
-                if proc.returncode == 0:
-                    stdout.seek(0)
-                    result, actual = _response(provider, stdout.read().decode('utf-8', 'replace'))
-                    if result:
-                        status = '응답 기록 있음'
-                else:
-                    result = f'CLI 종료 코드 {proc.returncode}'
+                        proc.communicate(_prompt(key, slot, skill), timeout=TIMEOUT)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        proc.wait()
+                        raise
+                    if proc.returncode == 0:
+                        stdout.seek(0)
+                        result, actual = _response(provider, stdout.read().decode('utf-8', 'replace'))
+                        if result:
+                            status = '응답 기록 있음'
+                    else:
+                        result = f'CLI 종료 코드 {proc.returncode}'
         if not result:
             result = '완료 응답을 읽을 수 없습니다.'
     except subprocess.TimeoutExpired:
@@ -337,6 +385,12 @@ def _run(runtime, route, slot):
 
 
 def watch(runtime):
+    from config_store import write_json
+
+    if runtime is None:
+        runtime = runtime_root()
+    root = runtime_root(runtime) / 'nhplug'
+    write_json(root / 'schedule-runner-status.json', {'pid': os.getpid(), 'profile_protocol': PROFILE_PROTOCOL})
     queued = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         while True:

@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS calls (day TEXT, slot TEXT, provider TEXT, endpoint T
   PRIMARY KEY (day, slot, provider, endpoint, caller));
 CREATE TABLE IF NOT EXISTS failures (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, kind TEXT, status INTEGER, detail TEXT);
 CREATE INDEX IF NOT EXISTS failures_time ON failures (time);
+CREATE TABLE IF NOT EXISTS nh_budget_diagnostics (time TEXT, caller TEXT, operation TEXT, tier TEXT,
+  requested_at REAL, previous_reservation REAL, requested_wait REAL, same_wait REAL, budget_wait REAL,
+  admitted_at REAL, same_cap_exceeded INTEGER, budget_cap_exceeded INTEGER, outcome TEXT);
+CREATE INDEX IF NOT EXISTS nh_budget_diagnostics_time ON nh_budget_diagnostics (time);
 CREATE TABLE IF NOT EXISTS seconds (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, n INTEGER,
   PRIMARY KEY (time, provider, endpoint, caller));
 """
@@ -99,6 +103,7 @@ def _db():
             cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime('%Y-%m-%d')
             conn.execute('DELETE FROM calls WHERE day < ?', (cut,))
             conn.execute('DELETE FROM failures WHERE time < ?', (cut,))
+            conn.execute('DELETE FROM nh_budget_diagnostics WHERE time < ?', (cut,))
             conn.execute('DELETE FROM seconds WHERE time < ?', ((datetime.now(KST) - timedelta(days=SECONDS_DAYS)).strftime('%Y-%m-%d'),))
         except sqlite3.Error:  # the next process start prunes
             pass
@@ -137,6 +142,22 @@ def record(provider, endpoint, ok, ms, status=None, size=None, error=None, bad=F
 def problem(provider, endpoint, detail):
     """An answered call whose content was an error (Kiwoom return_code, NH rsp_cd...). Not counted as a new call."""
     record(provider, endpoint, None, 0, bad=True, detail=detail)
+
+
+def nh_budget_diagnostic(data, result, error):
+    """Record inquiry timing and outcome without account identifiers or request contents."""
+    if not ENABLED:
+        return
+    try:
+        outcome = type(error).__name__ if error else tool_error(result) if getattr(result, 'is_error', False) else 'ok'
+        with _lock:
+            _db().execute('INSERT INTO nh_budget_diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+                datetime.now(KST).isoformat(timespec='milliseconds'), caller(), data.get('operation'), data.get('tier'),
+                data.get('requested_at'), data.get('previous_reservation'), data.get('requested_wait'),
+                data.get('same_wait'), data.get('budget_wait'), data.get('admitted_at'),
+                int(bool(data.get('same_cap_exceeded'))), int(bool(data.get('budget_cap_exceeded'))), mask(outcome)))
+    except Exception:  # diagnostics never interrupt a trading call
+        pass
 
 
 @contextmanager

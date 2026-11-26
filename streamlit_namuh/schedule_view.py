@@ -1,6 +1,9 @@
 """운영 → 자동 작업. 일정과 실행 기록, 작업별 AI 실행 설정을 살펴본다."""
 from __future__ import annotations
 
+import json
+import hashlib
+import sqlite3
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -145,6 +148,94 @@ def job_detail(job, runtime):
         st.text(reports[picked]['result'])
 
 
+def migration_dialog(runtime):
+    """Prepare and inspect a portable schedule migration."""
+    import schedule_bundle as bundle
+    import schedule_migration as migration
+
+    st.caption('예약 목록과 일정, 지시문, 모델 설정을 파일로 보관하고 대상 계정의 이전 계획을 확인합니다.')
+    try:
+        exported = bundle.encode_bundle(runtime)
+    except (ValueError, OSError) as exc:
+        st.error(f'예약 목록을 준비하지 못했습니다. {exc}')
+    else:
+        st.download_button('예약 목록 내려받기', exported, file_name='omni-schedules.json', mime='application/json',
+                           key='sched_export', icon=':material/download:')
+
+    upload = st.file_uploader('예약 목록 또는 서명된 인수 영수증', type=['json'], key='sched_import',
+                              help='다른 기기에서 실행권을 인수하려면 원본의 서명된 영수증을 올리세요.')
+    uploaded = None
+    if upload:
+        try:
+            uploaded = json.loads(upload.getvalue())
+        except (ValueError, UnicodeError):
+            st.error('예약 JSON을 읽을 수 없습니다.')
+            return
+    receipt = isinstance(uploaded, dict) and 'transfer_id' in uploaded
+    source_key = st.text_input('원본 기기에서 확인한 서명 지문', key='sched_receipt_signer').strip() if receipt else ''
+    try:
+        profiles = migration.profiles(runtime)
+    except (ValueError, OSError) as exc:
+        st.error(f'AI 실행 프로필을 읽지 못했습니다. {exc}')
+        return
+    if not profiles:
+        st.info('대상 AI 실행 프로필을 먼저 등록해 주세요. `omni schedule profile-add <제공자> <별칭> --model <모델-ID>`')
+        return
+    options = {item['id']: item for item in profiles}
+    target = st.selectbox('이전할 AI 계정', options, key='sched_migrate_target',
+                          format_func=lambda key: f"{key} · {options[key].get('provider', '')} · {options[key].get('model', '')}",
+                          required=True)
+    if st.button('이전 계획 확인', key='sched_migrate_plan', type='primary'):
+        try:
+            if uploaded is not None and not receipt:
+                bundle.validate_bundle(uploaded)
+            plan = (migration.create_plan(runtime, target, receipt=uploaded, source_key=source_key)
+                    if receipt else migration.create_plan(runtime, target, bundle=uploaded))
+        except (ValueError, OSError, UnicodeError, sqlite3.Error) as exc:
+            st.error(f'이전 계획을 만들지 못했습니다. {exc}')
+        else:
+            st.session_state['sched_migration_plan'] = plan
+            st.session_state['sched_migration_inputs'] = (target, hashlib.sha256(upload.getvalue()).hexdigest() if upload else None, source_key)
+            st.session_state.pop('sched_migration_result', None)
+
+    plan = st.session_state.get('sched_migration_plan')
+    if not plan:
+        return
+    current_inputs = (target, hashlib.sha256(upload.getvalue()).hexdigest() if upload else None, source_key)
+    if current_inputs != st.session_state.get('sched_migration_inputs'):
+        st.info('대상 계정 또는 파일이 바뀌었습니다. 이전 계획을 다시 확인해 주세요.')
+        return
+    st.markdown('##### 이전 계획')
+    st.caption(f"계획 {plan['id']} · 대상 {plan.get('target', target)} · {plan.get('state', '')}")
+    rows = plan.get('rows') or []
+    if rows:
+        visible = [{'작업': row.get('name'), '일정': row.get('when'), '현재 모델': row.get('source_model'),
+                    '최근 사용 모델': row.get('source_last_model'), '대상 모델': row.get('target_model'),
+                    '다음 예정': date_text(row.get('next_run')), '상태': row.get('status'), '사유': row.get('reason')}
+                   for row in rows]
+        st.dataframe(pd.DataFrame(visible), hide_index=True, width='stretch', alt='예약 작업 이전 계획')
+    else:
+        st.info('이전 계획에 포함된 작업이 없습니다.')
+    st.caption('작업별 일정, 모델과 대기 사유를 확인한 뒤 적용할 수 있습니다.')
+    if any(row.get('status') == '대체 모델 검증 필요' for row in rows):
+        st.info('비식별 검증 자료로 대체 모델을 확인할 수 있습니다. `omni schedule validate-model` 실행 뒤 상태 확인을 누르세요.')
+    a, b, c = st.columns(3)
+    for clicked, operation, label in (
+        (a.button('이전 적용', key='sched_migrate_apply'), migration.apply, '적용'),
+        (b.button('상태 확인', key='sched_migrate_verify'), migration.verify, '확인'),
+        (c.button('이전 되돌리기', key='sched_migrate_rollback'), migration.rollback, '되돌리기'),
+    ):
+        if clicked:
+            try:
+                st.session_state['sched_migration_result'] = operation(runtime, plan['id'])
+            except (ValueError, OSError, sqlite3.Error) as exc:
+                st.error(f'{label} 실패. {exc}')
+    result = st.session_state.get('sched_migration_result')
+    if result:
+        st.markdown('##### 처리 결과')
+        st.json(result)
+
+
 def _timeline(jobs, day):
     import schedules as S
     plan = S.day_plan(jobs, day)
@@ -154,11 +245,14 @@ def _timeline(jobs, day):
         return
     dots = pd.DataFrame([{'시각': datetime.combine(day, datetime.min.time()).replace(hour=h, minute=m), '구분': j['kind'],
                           '작업': j['name'], '상태': j['state']} for h, m, j in plan])
-    st.altair_chart(alt.Chart(dots).mark_tick(thickness=3, size=22).encode(
+    chart = alt.Chart(dots, mark=alt.MarkDef(type='tick', thickness=3, size=22))
+    chart = chart.encode(
         x=alt.X('시각:T', title=None, axis=alt.Axis(format='%H:%M', tickCount=12)),
         y=alt.Y('구분:N', title=None, sort=list(S.KINDS)),
         color=alt.Color('구분:N', scale=alt.Scale(domain=list(COLORS), range=list(COLORS.values())), legend=None),
-        tooltip=[alt.Tooltip('시각:T', format='%H:%M'), '구분', '작업', '상태']).properties(height=150), width='stretch')
+        tooltip=[alt.Tooltip('시각:T', format='%H:%M'), '구분', '작업', '상태'])
+    chart = chart.properties(height=150)
+    st.altair_chart(chart, width='stretch')
     st.dataframe(pd.DataFrame(day_rows(jobs, day)), hide_index=True, width='stretch', alt='그날 자동 작업 일정')
 
 
@@ -207,6 +301,9 @@ def render(runtime=None):
     else:
         st.info('조건에 맞는 작업이 없습니다.')
     st.caption('최근 실행 모델은 AI 사용 기록을 기준으로 표시합니다. 서비스 실행과 모델 사용 시각은 작업 상세에서 확인할 수 있습니다.')
+
+    if st.button('예약 작업 이전', key='sched_migrate', icon=':material/swap_horiz:'):
+        dialogs.open_dialog('예약 작업 이전', migration_dialog, runtime, icon=':material/swap_horiz:')
 
     st.markdown('##### 날짜별 일정')
     day = st.date_input('날짜', now.date(), key='sched_day', help='그날 시작하는 작업을 시각 순으로 봅니다.')

@@ -30,12 +30,17 @@ EXTERNAL = {'market quote': NH, 'market bars': NH, 'market brief': NH + '·뉴�
             'lt report-status': KRX, 'lt audit-data': KRX, 'lt cases-refresh': PRICES, 'jev chart': '기록이 없으면 키움·Yahoo, 전일 종가는 Yahoo', 'journal rebuild': '여러 곳',
             'journal merge': '저장된 날이 아니면 여러 곳', 'journal status': KRX, 'ops audit': KRX, 'ops day-start': KRX, 'ops start': KRX, 'ai local': '실계좌 보유를 물으면 NH',
             'research replay': PRICES, 'trade live-sell': NH, 'trade live-buy': NH, 'plan apply': '계획에 따라', 'settings apply': '계획에 따라'}
-PAID = {'ai search', 'ai ask'}
+PAID = {'ai search', 'ai ask', 'schedule probe', 'schedule validate-model'}
 WRITES = {'status refresh': '실계좌 잔고 기록 한 줄', 'market refresh': '시장 자료 파일', 'market brief': '공유 뉴스 캐시', 'journal rebuild': '일지 DB', 'journal merge': '일지 DB',
           'backup create': '백업 파일', 'backup tasks': 'ops/scheduled-tasks', 'compare export': '지정한 새 CSV', 'report preview': '지정한 새 폴더', 'premarket preflight': '점검 기록 한 줄',
           'lt cases-refresh': '장기 사례 DB', 'ops audit': '문제 이력 DB', 'ops service-files': '지정한 새 폴더', 'plan approve': '승인 코드 발송', 'settings approve': '승인 코드 발송',
           'plan apply': '계획한 변경·요청·발송', 'settings apply': '계획한 변경·요청·발송', 'plan drop': '계획 상태', 'live pause': '모든 실계좌 신규 매수 중단(바로 적용)·알림 발송',
-          'ai ask': '대화 이력', 'ai search': '대화 이력'}
+          'ai ask': '대화 이력', 'ai search': '대화 이력',
+          'schedule export': '비공개 예약 번들', 'schedule profile-add': 'AI 실행 프로필',
+          'schedule plan': '예약 이전 계획', 'schedule probe': '모델 호출 확인',
+          'schedule validate-model': '작업별 검증 결과', 'schedule rollback': '예약 실행 경로 복원',
+          'schedule device': '이전용 기기 신원', 'schedule handoff': '원본 실행권 해제 및 인수 영수증',
+          'schedule receipt-export': '기발급 인수 영수증 파일'}
 PHRASE = {'live on': '<계좌 이름> 실주문', 'live unhalt': 'HALT 해제', 'backup import': '백업 가져오기'}
 SETTING_PLANS = {'settings plan', 'settings preset', 'settings revert', 'settings list-edit', 'engine', 'account match'}
 ARGS = {'code': '6자리 종목코드', 'key': '계좌 키나 기간 키', 'account': '실계좌 키(`live-1` 등)', 'live': '실계좌 키', 'plan': '계획 번호', 'plan_id': '계획 번호',
@@ -53,6 +58,12 @@ EXAMPLES = {
     'lt orders': '--why --day 2026-11-23', 'lt preview': 'lt.weights.NDX=0.25 lt.weights.SPX=0.35', 'market bars': '005930', 'market context': '--keys indices,themes', 'market investors': '005930',
     'market quote': '005930', 'ops logs': 'preflight --lines 40', 'ops service-files': '--system linux --out ./services', 'ops start': 'market-movers --reason "멈춰 있어서"',
     'plan apply': '1a2b3c4d --code ABCD2345', 'plan approve': '1a2b3c4d', 'plan drop': '1a2b3c4d', 'plan show': '1a2b3c4d',
+    'schedule export': '--out schedules.json', 'schedule profile-add': 'codex work --model <모델-ID>',
+    'schedule probe': 'codex:work', 'schedule plan': '--to codex:work --all',
+    'schedule handoff': '--to-device device-1234567890abcdef1234567890abcdef --job "Claude 예약 작업:trading-intraday-report" --out receipt.json',
+    'schedule receipt-export': 'transfer-1234567890abcdef1234567890abcdef --out copy.json',
+    'schedule validate-model': 'schedule-123456abcdef "Claude 예약 작업:intraday-audit-hourly" --fixture fixture.json',
+    'schedule verify': 'schedule-123456abcdef', 'schedule rollback': 'schedule-123456abcdef',
     'query': 'shared-etf-paper/orders.sqlite3 "SELECT count(*) FROM fills"', 'report check-page': './page.html', 'report preview': 'journal ./journal.md --out ./preview',
     'report publish': 'journal 2026-11-24 --reason "오타 고침"', 'report read': 'journal 2026-11-24 --lines 20', 'report send': 'journal 2026-11-24 --reason "다시 보냄"',
     'research cases': '005930 -6', 'research replay': 'yeo', 'settings apply': '1a2b3c4d --code ABCD2345', 'settings approve': '1a2b3c4d',

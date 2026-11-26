@@ -230,6 +230,8 @@ def test_process_exit_does_not_leave_stale_busy_state(tmp_path):
 
 
 def test_regular_model_marks_busy_during_network_call(tmp_path):
+    from PIL import Image
+
     import jev_activity
     import nh_etf_auto_v2 as runner
     import nh_jev_compare
@@ -238,6 +240,7 @@ def test_regular_model_marks_busy_during_network_call(tmp_path):
     path = tmp_path / 'activity.lock'
     bars = {name: [{'stck_prpr': 100, 'bsop_time': '101000'}] for name in SYMBOLS}
     figure = MagicMock()
+    figure.savefig.side_effect = lambda stream, **kwargs: Image.new('RGB', (280, 280)).save(stream, format='PNG')
     axes = SimpleNamespace(flat=[MagicMock() for _ in range(8)])
 
     def fake_urlopen(_request, *, timeout):

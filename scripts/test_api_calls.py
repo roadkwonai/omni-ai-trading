@@ -58,6 +58,16 @@ def test_http_and_mcp_entry_points(log):
     assert log.failures('2000')[0]['detail'] == 'TimeoutError'
 
 
+def test_nh_budget_diagnostic_records_refusal_without_request_data(log):
+    from types import SimpleNamespace
+    result = SimpleNamespace(is_error=True, content=[SimpleNamespace(text='{"category":"rate_limit","code":"IGW42903"}')])
+    log.nh_budget_diagnostic({'operation': 'krstockInquiryBalance', 'tier': 'low', 'requested_at': 1000.0,
+                              'previous_reservation': 1001.0, 'requested_wait': 2.5, 'same_wait': 0,
+                              'budget_wait': 0.2, 'admitted_at': 1000.2, 'same_cap_exceeded': True}, result, None)
+    row = log._db().execute('SELECT operation, requested_wait, same_cap_exceeded, outcome FROM nh_budget_diagnostics').fetchone()
+    assert row == ('krstockInquiryBalance', 2.5, 1, 'tool error: rate_limit IGW42903')
+
+
 def test_track_counts_and_reraises(log):
     with log.track('yahoo', 'yfinance/download'):
         pass

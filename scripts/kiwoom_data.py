@@ -8,6 +8,7 @@ Kiwoom terms (오픈 API 서비스 이용약관 §5③): quote data is for the c
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -19,6 +20,7 @@ KST = ZoneInfo('Asia/Seoul')
 BASE = 'https://api.kiwoom.com'
 TOKEN_FILE = Path.home() / '.vibe-trading/kiwoom/token.json'
 ALLOWED = {'ka90005': '/api/dostk/mrkcond',  # 프로그램매매추이 시간대별
+           'ka90008': '/api/dostk/mrkcond',  # 종목시간별 프로그램매매추이
            'ka10080': '/api/dostk/chart',  # 주식분봉차트 (about a year back)
            'ka10046': '/api/dostk/mrkcond',  # 체결강도추이 시간별 (fade_shadow, after the close)
            'ka10059': '/api/dostk/stkinfo',  # 종목별투자자기관별 (the closed day's foreign net quantity)
@@ -106,6 +108,19 @@ def call(api_id, body, list_key, max_pages=5, timeout=10):
             break
         cont = {'cont-yn': 'Y', 'next-key': headers['next-key']}
     return rows
+
+
+def stock_program_rows(code, day, *, now=None):
+    """Read one page of today's KRX stock program trading quantities (ka90008)."""
+    now = now or datetime.now(KST)
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError('now must be timezone-aware')
+    if not isinstance(code, str) or not re.fullmatch(r'[0-9]{6}', code):
+        raise ValueError('invalid KRX stock code')
+    if isinstance(day, datetime) or day != now.astimezone(KST).date():
+        raise ValueError('program trading is available for today only')
+    return call('ka90008', {'amt_qty_tp': '2', 'stk_cd': code, 'date': day.strftime('%Y%m%d')},
+                'stk_tm_prm_trde_trnsn', max_pages=1, timeout=2)
 
 
 def day_bars(code, day, scope=1, adjusted=False, now=None):

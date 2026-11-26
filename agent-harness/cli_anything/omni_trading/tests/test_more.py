@@ -43,7 +43,13 @@ GIVEN = {'account show': ['live-1'], 'account match': ['live-1', '--reason', 'x'
          'template startup': ['--blank'], 'settings get': ['strategy.add_step_pct'], 'settings explain': ['strategy.add_step_pct'],
          'settings plan': ['strategy.add_step_pct=0.9', '--reason', 'x'], 'settings preset': ['volume', '엄격', '--reason', 'x'], 'settings show-plan': ['x'],
          'settings approve': ['x'], 'settings apply': ['x'], 'settings revert': ['1', '--reason', 'x'],
-         'settings list-edit': ['watch', 'add', '005930', '--reason', 'x']}
+         'settings list-edit': ['watch', 'add', '005930', '--reason', 'x'],
+         'schedule export': ['--out', '/nonexistent/schedules.json'], 'schedule plan': ['--to', 'codex:work', '--all'],
+         'schedule profile-add': ['invalid', 'work', '--model', 'example'], 'schedule probe': ['codex:work'],
+         'schedule validate-model': ['schedule-123456abcdef', 'sample', '--fixture', 'fixture.json'],
+         'schedule verify': ['schedule-123456abcdef'], 'schedule rollback': ['schedule-123456abcdef'],
+         'schedule handoff': ['--to-device', 'invalid', '--job', 'sample', '--out', '/nonexistent/receipt.json'],
+         'schedule receipt-export': ['invalid', '--out', '/nonexistent/receipt.json']}
 
 
 def test_every_command_answers_in_the_envelope_on_an_empty_machine(home):

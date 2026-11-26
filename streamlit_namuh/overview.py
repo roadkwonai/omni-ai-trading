@@ -595,7 +595,7 @@ def render(runtime, records, states, names, refresh_balances=None):
                 x=x, x2='end:T', y=y,
                 color=alt.Color('결과:N', scale=alt.Scale(domain=['이익', '손실', '본전', '보유 중'], range=['#ef4444', '#3b82f6', '#94a3b8', '#f59e0b']),
                                 legend=alt.Legend(orient='top', title=None)),
-                tooltip=['종목', '결과', alt.Tooltip('pnl:Q', title='실현손익', format='+,.0f'),
+                tooltip=['종목:N', '결과:N', alt.Tooltip('pnl:Q', title='실현손익', format='+,.0f'),
                          alt.Tooltip('start:T', title='첫 매수', format='%H:%M'), alt.Tooltip('end:T', title='끝', format='%H:%M')])
             marks = alt.Chart(fills).mark_point(filled=True, size=110, opacity=1, stroke='#0f172a', strokeWidth=0.6).encode(
                 x=alt.X('time:T'), y=y,

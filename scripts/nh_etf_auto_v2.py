@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+from http.client import HTTPException
 import json
 import math
 import os
+import re
 import sqlite3
+import struct
 import time
 import uuid
 import urllib.request
+from urllib.error import HTTPError, URLError
 import base64
 import io
 from datetime import datetime
@@ -19,6 +23,8 @@ from src.config.loader import load_agent_config
 from src.tools.mcp import MCPServerAdapter
 from src.tools.nhplug_calendar import check_session
 from kr_swing_v5_forward import read_paginated
+from jev_request import JevRequestRejected, JevResponseRejected, prepare_request, usage_tokens, validate_choice
+from jev_request import jev_json_safe as jev_json_safe
 from paper_ai_modes import DECISIONS_MODEL, JEV_MODEL
 import nh_etf_paper_runner as old
 import api_calls  # noqa: F401,E402 - counts this process's external API calls (dashboard 'API 연동')
@@ -259,11 +265,11 @@ def jev(bars, news):
     return {'model': result.get('model'), 'candidate': answer, 'chart_sha256': hashlib.sha256(image).hexdigest()}
 
 
-def _etf7_inputs(bars, news, news_required=True):
+def _etf7_inputs(bars, news, news_required=True, *, require_etfs=True):
     from etf_universe import SYMBOLS as universe
     import re
     # The 7 ETFs are always present; scanner candidates are added under their 6-digit stock codes.
-    if (not isinstance(bars, dict) or not set(universe) <= set(bars)
+    if (not isinstance(bars, dict) or not bars or (require_etfs and not set(universe) <= set(bars))
             or any(name not in universe and not (isinstance(name, str) and re.fullmatch(r'[0-9][0-9A-Z]{5}', name)) for name in bars)
             or not isinstance(news, list) or (news_required and not news)):
         raise ValueError('ETF market inputs unavailable')
@@ -351,19 +357,59 @@ def holding_decision7(bars, news, symbol, avg, bid, *, stock_context=None):
     return _etf7_decision(bars, news, symbol=symbol, avg=avg, bid=bid, stock_context=stock_context)
 
 
-def _jev7_question(bars, news, question, criteria, position=None, investor=None, instructions=None, extra_state=None):
+def record_jev_http_error(exc, payload, body, image, question, path=None, *, timings=None):
+    from research_store import record
+
+    categories = {
+        'context_limit': ('max_tokens_exceeded', 'context length', 'too many tokens'),
+        'image_dimensions': ('invalid image dimensions', 'image resolution'),
+        'image_reference': ('unreferenced asset', 'unused asset', 'asset not referenced'),
+        'invalid_json': ('invalid json', 'failed to parse', 'expected value', 'invalid number', 'deserialize', 'malformed json'),
+        'invalid_request': ('validation_error', 'invalid request', 'invalid criteria'),
+    }
+    try:
+        response_prefix = exc.read(8192)
+    except Exception:  # a diagnostic read must preserve the original HTTP failure
+        response_prefix = b''
+    message = response_prefix.decode('utf-8', errors='replace').lower()
+    reason = next((name for name, phrases in categories.items() if any(word in message for word in phrases)), 'unclassified')
+    headers = exc.headers or {}
+    request_id = headers.get('x-typesafe-request-id') or headers.get('x-request-id') or ''
+    state = payload['state']
+    details = {'time': datetime.now(old.KST).isoformat(), 'http_status': exc.code, 'reason': reason,
+               'model': payload['model'], 'question': question, 'request_bytes': len(body),
+               'request_sha256': hashlib.sha256(body).hexdigest(), 'response_prefix_bytes': len(response_prefix),
+               'response_prefix_sha256': hashlib.sha256(response_prefix).hexdigest() if response_prefix else None,
+               'image_bytes': len(image),
+               'image_pixels': struct.unpack('>II', image[16:24]) if image.startswith(b'\x89PNG\r\n\x1a\n') and len(image) >= 24 else None,
+               'question_count': len(payload['questions']), 'criteria_count': len(payload['questions'][question]['criteria']),
+               'state_field_bytes': {key: len(json.dumps(value, ensure_ascii=False).encode('utf-8')) for key, value in state.items()}}
+    if timings:
+        details['request_metrics'] = timings
+    if re.fullmatch(r'(?:[0-9a-f]{8}-[0-9a-f-]{27}|[0-9a-f]{16,64}|req_[0-9a-zA-Z]{8,64})', request_id):
+        details['request_id'] = request_id
+    record('jev_http_error', details, path=path)
+
+
+def _jev7_question(bars, news, question, criteria, position=None, investor=None, instructions=None, extra_state=None, *,
+                    program_research_db=None):
     from etf_news import JEV_NEWS_MAX_MINUTES, JEV_NEWS_PRIORITY_MINUTES, jev_market_headlines, no_fresh_news, supplement_jev_topics
     from etf_universe import SYMBOLS as universe
     from nh_jev_compare import plt
-    _etf7_inputs(bars, news, news_required=False)
+    from research_store import record, record_input
+
+    started = time.monotonic()
+    program_review = program_research_db is not None
+    _etf7_inputs(bars, news, news_required=False, require_etfs=not program_review)
     import jev_context
-    chart_bars, intraday = jev_context.context(bars)  # the last hour and the session so far (user 2026-11-18)
+    chart_bars, intraday = (bars, {}) if program_review else jev_context.context(bars)
     key = old.dotenv_values(old.ENV, interpolate=False).get('JEV_API_KEY')
     if not key:
         raise ValueError('JEV_API_KEY missing')
-    names = [*universe, *sorted(name for name in bars if name not in universe)]
+    names = [name for name in universe if name in bars] + sorted(name for name in bars if name not in universe)
     columns = 2 if len(names) <= 8 else 3
     rows = -(-len(names) // columns)
+    chart_started = time.monotonic()
     # Jev rejects larger images ("Invalid image dimensions" at 1200x1800); keep the original 1200x1200 canvas.
     fig, axes = plt.subplots(rows, columns, figsize=(12, min(12, 3 * rows)), layout='constrained', squeeze=False)
     try:
@@ -373,10 +419,11 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
         for ax in list(axes.flat)[len(names):]:
             ax.axis('off')
         out = io.BytesIO()
-        fig.savefig(out, format='png')
+        fig.savefig(out, format='png', dpi=100)
         image = out.getvalue()
     finally:
         plt.close(fig)
+    chart_ms = round((time.monotonic() - chart_started) * 1000, 2)
     digest = hashlib.sha256(image).hexdigest()
     ref = 'chart-' + digest[:20]
     state = {'chart': ref}
@@ -401,56 +448,88 @@ def _jev7_question(bars, news, question, criteria, position=None, investor=None,
         'Which paper-trading candidate is supported by the chart, news, investor flows and market_regime_themes_global? '
         'Prefer candidates in the direction of the index regime and today\'s tone (inverse ETFs gain when the market falls); '
         'treat own_track_record as a calibration hint. Choose WAIT if the signals conflict, the data is stale, or you are uncertain.')
+    questions = {question: {'type': 'choice', 'instructions': instructions, 'criteria': criteria}}
+    if not program_review:
+        questions.update(jev_context.questions())
     payload = {'model': JEV_MODEL, 'state': state,
-        'assets': {ref: {'type': 'image', 'format': 'png', 'data_base64': base64.b64encode(image).decode('ascii')}},
-        'questions': {question: {'type': 'choice', 'instructions': instructions, 'criteria': criteria},
-                      **jev_context.questions()}}  # why it answered so: choice questions only (text is refused)
+        'assets': {ref: {}},
+        'questions': questions}
     from jev_activity import regular_request
-    news, backfill = supplement_jev_topics(news, datetime.now(old.KST))
+    news, backfill = ([], None) if program_review else supplement_jev_topics(news, datetime.now(old.KST))
     with regular_request():
-        checked_at = datetime.now(old.KST)
-        fresh_news = jev_market_headlines(news, checked_at)
-        if not fresh_news:  # user 2026-11-24: judged without it and told so (news_status also marks the recorded input)
-            state.update(no_fresh_news(checked_at))
-        if backfill:
-            covered = {item.get('topic') for item in fresh_news}
-            backfill['missing_after'] = [topic for topic in backfill['missing_before'] if topic not in covered]
-        state['news_checked_at'] = checked_at.isoformat()
-        state['news_priority_minutes'] = JEV_NEWS_PRIORITY_MINUTES
-        state['news_max_age_minutes'] = JEV_NEWS_MAX_MINUTES
-        state['recent_news_headlines'] = [
-            {k: item[k] for k in ('title', 'published', 'source', 'topic', 'news_role') if k in item} for item in fresh_news]
-        req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', data=json.dumps(payload, ensure_ascii=False).encode(),
+        if not program_review:
+            checked_at = datetime.now(old.KST)
+            fresh_news = jev_market_headlines(news, checked_at)
+            if not fresh_news:
+                state.update(no_fresh_news(checked_at))
+            if backfill:
+                covered = {item.get('topic') for item in fresh_news}
+                backfill['missing_after'] = [topic for topic in backfill['missing_before'] if topic not in covered]
+            state['news_checked_at'] = checked_at.isoformat()
+            state['news_priority_minutes'] = JEV_NEWS_PRIORITY_MINUTES
+            state['news_max_age_minutes'] = JEV_NEWS_MAX_MINUTES
+            state['recent_news_headlines'] = [
+                {k: item[k] for k in ('title', 'published', 'source', 'topic', 'news_role') if k in item} for item in fresh_news]
+        try:
+            prepared = prepare_request(payload, image, ref)
+        except JevRequestRejected as exc:
+            record('jev_request_rejected', {'time': datetime.now(old.KST).isoformat(), 'model': JEV_MODEL, 'question': question,
+                   'reason': str(exc), 'image_bytes': len(image), 'criteria_count': len(criteria), 'chart_ms': chart_ms},
+                   path=program_research_db)
+            raise
+        payload, body = prepared.payload, prepared.body
+        state = payload['state']
+        req = urllib.request.Request('https://api.typesafe.ai/v1/systemone', data=body,
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json', 'TypeSafe-Danger-Zone-Images': 'true'})
-        with urllib.request.urlopen(req, timeout=25) as response:
-            result = json.load(response)
+        api_started = time.monotonic()
+
+        def reject_response(reason, kind='jev_response_rejected'):
+            ended = time.monotonic()
+            record(kind, {'time': datetime.now(old.KST).isoformat(), 'model': JEV_MODEL,
+                   'question': question, 'reason': reason, 'request_bytes': len(body), 'request_metrics': {
+                       'chart_ms': chart_ms, 'api_ms': round((ended - api_started) * 1000, 2),
+                       'total_ms': round((ended - started) * 1000, 2)}}, path=program_research_db)
+
+        try:
+            with urllib.request.urlopen(req, timeout=25) as response:
+                result = json.load(response)
+        except HTTPError as exc:
+            failed_at = time.monotonic()
+            record_jev_http_error(exc, payload, body, image, question, path=program_research_db,
+                                  timings={'chart_ms': chart_ms, 'api_ms': round((failed_at - api_started) * 1000, 2),
+                                           'total_ms': round((failed_at - started) * 1000, 2)})
+            raise
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            reject_response('response_json')
+            raise ValueError('ETF Jev response JSON invalid') from None
+        except (OSError, HTTPException) as exc:
+            cause = exc.reason if isinstance(exc, URLError) else exc
+            reject_response('timeout' if isinstance(cause, TimeoutError) else 'connection', 'jev_transport_error')
+            raise
+        api_ms = round((time.monotonic() - api_started) * 1000, 2)
     response_time = datetime.now(old.KST).isoformat()
-    if not isinstance(result, dict):
-        raise ValueError('ETF Jev response unavailable')
-    answers = result.get('answers')
-    answer = answers.get(question) if isinstance(answers, dict) else None
-    if result.get('model') != JEV_MODEL or not isinstance(answer, dict):
-        raise ValueError('ETF Jev response unavailable')
-    confidence = answer.get('confidence')
-    if (answer.get('type') != 'choice' or not isinstance(answer.get('choice'), str) or answer.get('choice') not in criteria
-            or type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 <= confidence <= 1):
-        raise ValueError('invalid ETF Jev response')
-    candidate = {key: answer[key] for key in ('type', 'choice', 'confidence')}
-    probabilities = answer.get('probabilities')
-    if probabilities is not None:
-        if (not isinstance(probabilities, dict) or set(probabilities) != set(criteria)
-                or any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
-                       for value in probabilities.values())):
-            raise ValueError('invalid ETF Jev probabilities')
-        candidate['probabilities'] = probabilities
-    from research_store import record_input
+    try:
+        candidate = validate_choice(result, question, criteria, JEV_MODEL)
+    except JevResponseRejected as exc:
+        reject_response(str(exc))
+        raise
+    answers = result['answers']
+    metrics = {'model': result['model'], 'input_tokens': usage_tokens(result), 'request_bytes': len(body),
+               'image_pixels': prepared.image_pixels, 'image_bytes': len(image), 'criteria_count': len(criteria),
+               'question_count': len(questions), 'chart_ms': chart_ms, 'api_ms': api_ms,
+               'total_ms': round((time.monotonic() - started) * 1000, 2)}
     # The full input (state, choices, instructions; not the image) is kept once, so a decision can be replayed later.
-    input_digest = record_input('jev', question, {'state': state, 'criteria': criteria, 'instructions': instructions,
-                                                   'chart_sha256': digest, **({'news_backfill': backfill} if backfill else {})}, candidate)
-    evidence = jev_context.parse(answers)
+    engine = 'jev_program_paper' if program_review else 'jev'
+    store = {'path': program_research_db} if program_review else {}
+    sent_question = payload['questions'][question]
+    input_digest = record_input(engine, question, {'state': state, 'question': question, 'model': payload['model'],
+                                                   'criteria': sent_question['criteria'], 'instructions': sent_question['instructions'],
+                                                   'chart_sha256': digest, **({'news_backfill': backfill} if backfill else {})},
+                                {**candidate, 'request_metrics': metrics}, **store)
+    evidence = {} if program_review else jev_context.parse(answers)
     if evidence and input_digest:
         from research_store import record_evidence
-        record_evidence(input_digest, 'jev', question, evidence)
+        record_evidence(input_digest, engine, question, evidence, **store)
     return {'model': result['model'], question: candidate, 'chart_sha256': digest, 'response_time': response_time,
             'input_digest': input_digest, 'evidence': evidence}
 

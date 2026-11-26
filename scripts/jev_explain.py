@@ -11,15 +11,81 @@ account of its answer, not a measured cause: check a doubtful one with a replay 
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import json
+from math import ceil
+from statistics import median
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from sqlite_ro import ro_connect
 
 ROOT = Path.home() / '.vibe-trading/nhplug/shared-etf-paper'
 LABEL = {'why_driver': '결정 요인', 'why_chart': '차트·당일 흐름', 'why_news': '뉴스', 'why_market': '시황',
          'why_flows': '수급', 'why_history': '자기 성적·일지', 'why_data': '자료 충분성'}
+
+
+def json_object(raw):
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def request_metrics(root, since, *, question=None):
+    kst = ZoneInfo('Asia/Seoul')
+    start = datetime.fromisoformat(since)
+    since = (start.astimezone(kst) if start.tzinfo is not None else start.replace(tzinfo=kst)).isoformat()
+    groups = defaultdict(lambda: {'success': [], 'success_unmeasured': 0, 'http_errors_measured': 0,
+                                  'http_errors_unmeasured': 0, 'preflight_rejected': 0, 'response_rejected': 0,
+                                  'transport_errors': 0, 'invalid_rows': 0})
+    with ro_connect(Path(root) / 'market-research.sqlite3') as db:
+        for name, raw in db.execute("SELECT question,response FROM model_inputs WHERE engine='jev' AND time>=?", (since,)):
+            if question is not None and name != question:
+                continue
+            group = groups[name]
+            response = json_object(raw)
+            if response is None:
+                group['invalid_rows'] += 1
+                continue
+            metrics = response.get('request_metrics')
+            if isinstance(metrics, dict) and metrics:
+                group['success'].append(metrics)
+            elif metrics is not None and not isinstance(metrics, dict):
+                group['invalid_rows'] += 1
+            else:
+                group['success_unmeasured'] += 1
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='snapshots'").fetchone():
+            for kind, raw in db.execute("SELECT kind,payload FROM snapshots WHERE kind IN ('jev_http_error','jev_request_rejected','jev_response_rejected','jev_transport_error') AND time>=?", (since,)):
+                details = json_object(raw)
+                name = details.get('question') if details is not None else None
+                if not isinstance(name, str) or not name:
+                    if question is None:
+                        groups['_unattributed']['invalid_rows'] += 1
+                    continue
+                if question is not None and name != question:
+                    continue
+                group = groups[name]
+                key = ('preflight_rejected' if kind == 'jev_request_rejected' else
+                       'response_rejected' if kind == 'jev_response_rejected' else
+                       'transport_errors' if kind == 'jev_transport_error' else
+                       'http_errors_measured' if isinstance(details.get('request_metrics'), dict)
+                       and details['request_metrics'] else 'http_errors_unmeasured')
+                group[key] += 1
+    for group in groups.values():
+        samples = group.pop('success')
+        measured = group['success_measured'] = len(samples)
+        errors = group['http_errors_measured']
+        total = measured + errors + group['response_rejected'] + group['transport_errors']
+        group['http_error_share_recorded'] = round(errors / total, 4) if total else None
+        for key in ('input_tokens', 'chart_ms', 'api_ms', 'total_ms', 'request_bytes'):
+            values = sorted(value for m in samples if type(value := m.get(key)) in (int, float)
+                            and 0 <= value <= 2**63 - 1)
+            group[key] = {'samples': len(values), 'p50': median(values) if values else None,
+                          'p95': values[ceil(len(values) * .95) - 1] if values else None}
+    return dict(groups)
 
 
 def one(root, at, question=None):
@@ -74,10 +140,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--at', help='first Jev call at or after this ISO time (Asia/Seoul)')
     parser.add_argument('--since', help='aggregate every Jev call since this ISO time')
+    parser.add_argument('--metrics', action='store_true', help='show recorded request metrics since --since')
     parser.add_argument('--question', help='candidate / holding / oversold / watchlist')
     parser.add_argument('--root', default=str(ROOT))
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args()
+    if args.metrics:
+        if not args.since:
+            parser.error('--metrics requires --since')
+        since = datetime.fromisoformat(args.since).isoformat()
+        print(json.dumps(request_metrics(args.root, since, question=args.question), ensure_ascii=False, indent=1))
+        return
     if args.since:
         from intraday_audit import jev_inputs
         since = datetime.fromisoformat(args.since)

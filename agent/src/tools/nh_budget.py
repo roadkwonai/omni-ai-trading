@@ -67,7 +67,7 @@ def _locked(path: Path, update):
         return kept
 
 
-def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
+def _wait_same(operation, arguments, tier, path, clock, sleep, diagnostic=None) -> float:
     """Seconds waited so that this account query starts SAME_GAP after the last one of any program. The slot is reserved
     under the lock, so two waiting programs get different ones. The key is a hash: no account number is written.
     `tier` None: only note that the query starts now (take, after its wait for a slot)."""
@@ -81,6 +81,9 @@ def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
             text = stream.read()
             starts = {k: float(v) for k, v in (json.loads(text) if text.strip() else {}).items() if abs(now - float(v)) < 10}
             wait = max(0.0, starts.get(key, 0.0) + SAME_GAP - now) if tier else 0.0
+            if diagnostic is not None and tier:
+                diagnostic.update(previous_reservation=starts.get(key), requested_wait=wait,
+                                  same_cap_exceeded=wait > _same_deadline[tier])
             if tier is None:
                 starts[key] = max(starts.get(key, 0.0), now)
             elif wait > _same_deadline[tier]:
@@ -97,7 +100,7 @@ def _wait_same(operation, arguments, tier, path, clock, sleep) -> float:
         return 0.0
 
 
-def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sleep=time.sleep, path=None) -> float:
+def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sleep=time.sleep, path=None, diagnostic=None) -> float:
     """Wait for a slot in the shared budget, then count this call; returns the seconds waited. Never raises."""
     if path is None and 'pytest' in sys.modules:
         return 0.0  # tests never touch the live budget (as api_calls)
@@ -108,7 +111,9 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
         limit = RATE if tier == 'high' else RATE - RESERVE
         path = Path(path) if path is not None else _default_path()
         spaced = tool == 'call_api' and str(name).startswith(SAME_QUERIES)
-        same = _wait_same(name, arguments, tier, path, clock, sleep) if spaced else 0.0
+        if diagnostic is not None and spaced:
+            diagnostic.update(operation=name, tier=tier, requested_at=clock())
+        same = _wait_same(name, arguments, tier, path, clock, sleep, diagnostic) if spaced else 0.0
         started = clock()
 
         def went(now):
@@ -129,6 +134,9 @@ def take(tool: str, arguments, *, caller: str | None = None, clock=time.time, sl
             _locked(path, update)
             if pause[0] is None:
                 went(now)
+                if diagnostic is not None and spaced:
+                    diagnostic.update(admitted_at=now, same_wait=same, budget_wait=max(0.0, now - started),
+                                      budget_cap_exceeded=now >= deadline or last)
                 return round(same + max(0.0, now - started), 3)
             sleep(min(max(pause[0], 0.01), max(0.0, deadline - now)))
         return round(same + max(0.0, clock() - started), 3)  # unreachable: the last try always counts the call

@@ -881,6 +881,9 @@ def settings_plans():
 @command
 def settings_show_plan(plan):
     """계획 보기"""
+    if plan.startswith('schedule-'):
+        from schedule_migration import verify
+        return _schedule_call(verify, plan)
     return approval.show(nh(), plan)
 
 
@@ -900,6 +903,9 @@ def settings_approve(plan):
 @command
 def settings_apply(plan, code, phrase, during_market):
     """계획 적용(실계좌에 영향을 주면 승인 코드 필요)"""
+    if plan.startswith('schedule-'):
+        from schedule_migration import apply
+        return _schedule_call(apply, plan)
     return approval.apply(nh(), plan, code, agent(), during_market, phrase)
 
 
@@ -1027,6 +1033,150 @@ from . import more_commands  # noqa: E402,F401 - registers the rest on the group
 
 def main():
     cli.main(prog_name='omni')
+
+
+schedule = group('schedule', '예약 작업 목록·백업·AI 실행 프로필 이전')
+
+
+def _schedule_call(fn, *args):
+    from state_sync import runtime_root
+    try:
+        return fn(runtime_root(), *args)
+    except (OSError, ValueError) as exc:
+        raise Refused(str(exc)) from exc
+
+
+@schedule.command('list')
+@command
+def schedule_list():
+    """예약 작업의 일정·모델·프롬프트 보존 상태 조회"""
+    from schedule_bundle import inventory
+    return {'jobs': [{k: v for k, v in job.items() if k != 'prompt'} for job in _schedule_call(inventory)]}
+
+
+@schedule.command('export')
+@click.option('--out', required=True, type=click.Path(dir_okay=False, path_type=Path), help='새 번들 파일 경로')
+@command
+def schedule_export(out):
+    """비공개 파일에 예약 정의 내보내기"""
+    from schedule_bundle import export_bundle
+    return _schedule_call(export_bundle, out)
+
+
+@schedule.command('profiles')
+@command
+def schedule_profiles():
+    """등록된 AI 실행 프로필 조회"""
+    from schedule_migration import profiles
+    return {'profiles': _schedule_call(profiles)}
+
+
+@schedule.command('profile-add')
+@click.argument('provider', type=click.Choice(['claude', 'codex', 'antigravity']))
+@click.argument('alias')
+@click.option('--model', required=True, help='실행할 정확한 모델 ID')
+@click.option('--config-dir', type=click.Path(file_okay=False, path_type=Path), help='선택한 CLI 인증 설정 폴더')
+@click.option('--credential-file', type=click.Path(dir_okay=False, path_type=Path), help='Antigravity 전용 Gemini API 키 파일')
+@command
+def schedule_profile_add(provider, alias, model, config_dir, credential_file):
+    """현재 로그인 계정을 작업 실행 프로필로 등록"""
+    from schedule_migration import register_profile
+    return _schedule_call(register_profile, provider, alias, model, config_dir, credential_file)
+
+
+@schedule.command('probe')
+@click.argument('profile')
+@command
+def schedule_probe(profile):
+    """검증용 입력으로 지정 모델 호출 확인(사용량 발생)"""
+    from schedule_migration import probe
+    return _schedule_call(probe, profile)
+
+
+@schedule.command('plan')
+@click.option('--to', 'target', required=True, help='대상 프로필 ID')
+@click.option('--from', 'bundle_path', type=click.Path(exists=True, dir_okay=False, path_type=Path), help='내보낸 예약 번들')
+@click.option('--job', multiple=True, help='이전할 작업 ID(반복 가능)')
+@click.option('--all', 'all_jobs', is_flag=True, help='전체 작업을 계획에 포함')
+@click.option('--receipt', type=click.Path(dir_okay=False, path_type=Path), help='원본에서 받은 인수 영수증')
+@click.option('--source-key', help='원본 기기에서 확인한 서명 지문')
+@command
+def schedule_plan(target, bundle_path, job, all_jobs, receipt, source_key):
+    """전체 또는 선택한 예약 작업의 이전 계획 작성"""
+    from schedule_bundle import read_bundle
+    from schedule_migration import create_plan
+    if all_jobs == bool(job):
+        raise Refused('--all 또는 --job <작업 ID>를 선택하세요.', code=2)
+    try:
+        bundle = read_bundle(bundle_path) if bundle_path else None
+        handoff = json.loads(receipt.read_text(encoding='utf-8')) if receipt else None
+    except (ValueError, OSError) as exc:
+        raise Refused(str(exc)) from exc
+    return _schedule_call(create_plan, target, bundle, job, handoff, source_key)
+
+
+@schedule.command('device')
+@command
+def schedule_device():
+    """이전용 기기 ID와 서명 지문 확인"""
+    from schedule_handoff import device_info
+    return _schedule_call(device_info)
+
+
+@schedule.command('handoff')
+@click.option('--to-device', required=True, help='인수할 기기의 ID')
+@click.option('--job', required=True, multiple=True, help='원본 실행권을 해제할 작업 ID')
+@click.option('--out', required=True, type=click.Path(dir_okay=False, path_type=Path), help='서명된 인수 영수증 파일')
+@command
+def schedule_handoff(to_device, job, out):
+    """원본 실행권을 해제하고 지정 기기용 인수 영수증 발급"""
+    from schedule_handoff import export_receipt, prepare
+    if out.exists() or not out.parent.is_dir():
+        raise Refused('새 영수증을 저장할 경로를 지정하세요.')
+    receipt = _schedule_call(prepare, to_device, job)
+    try:
+        return _schedule_call(export_receipt, receipt['transfer_id'], out)
+    except Refused as exc:
+        raise Refused(f"원본 실행권은 해제됐습니다. `omni schedule receipt-export {receipt['transfer_id']} --out <파일>`로 다시 저장하세요.") from exc
+
+
+@schedule.command('receipt-export')
+@click.argument('transfer_id')
+@click.option('--out', required=True, type=click.Path(dir_okay=False, path_type=Path), help='새 인수 영수증 파일 경로')
+@command
+def schedule_receipt_export(transfer_id, out):
+    """기발급 영수증을 별도 파일로 다시 저장"""
+    from schedule_handoff import export_receipt
+    return _schedule_call(export_receipt, transfer_id, out)
+
+
+@schedule.command('validate-model')
+@click.argument('plan_id')
+@click.argument('job_id')
+@click.option('--fixture', required=True, type=click.Path(dir_okay=False, path_type=Path), help='input과 expected를 담은 비식별 JSON 자료')
+@command
+def schedule_validate_model(plan_id, job_id, fixture):
+    """비식별 입력과 기대 결과로 대체 모델 비교(사용량 발생)"""
+    from schedule_migration import validate_model
+    return _schedule_call(validate_model, plan_id, job_id, fixture)
+
+
+@schedule.command('verify')
+@click.argument('plan_id')
+@command
+def schedule_verify(plan_id):
+    """이전 상태와 첫 회차 기록 조회"""
+    from schedule_migration import verify
+    return _schedule_call(verify, plan_id)
+
+
+@schedule.command('rollback')
+@click.argument('plan_id')
+@command
+def schedule_rollback(plan_id):
+    """이전에서 바꾼 Omni 실행 경로 되돌리기"""
+    from schedule_migration import rollback
+    return _schedule_call(rollback, plan_id)
 
 
 if __name__ == '__main__':

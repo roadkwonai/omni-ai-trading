@@ -422,8 +422,9 @@ def collect(now=None):
             if kept := reused(previous.get('program_intraday'), previous, now, PROGRAM_REUSE):
                 payload['program_intraday'] = kept  # its rows carry their time: intraday_view drops one that is too old
         try:
+            desks = foreign_desks()
             payload['foreign_desks'] = {'source': 'kiwoom:ka10037', 'unit': '억원', 'note': '외국계 증권사 창구 기준(등록외국인 집계 아님)',
-                                        **foreign_desks()}
+                                        'received_at': datetime.now(KST).isoformat(timespec='seconds'), **desks}
         except Exception as exc:
             errors.append(f'외국계창구(키움): {type(exc).__name__}')
     if toss_data.configured():  # no Toss key: the section is simply absent, not an error
@@ -526,7 +527,27 @@ def _minutes(hhmm):
     return int(hhmm[:2]) * 60 + int(hhmm[3:5])
 
 
-def intraday_view(payload):
+def foreign_desk_sells(payload, now=None):
+    """Return timestamped foreign-broker sell rankings for a research as-of time."""
+    desk_section = payload.get('foreign_desks') or {}
+    sells = [d for d in desk_section.get('net_sell') or [] if isinstance(d, dict)][:5]
+    try:
+        received = datetime.fromisoformat(desk_section['received_at'])
+        payload_time = datetime.fromisoformat(payload['time'])
+        age = payload_time - received
+        as_of = now or payload_time
+        if (sells and received.tzinfo is not None and payload_time.tzinfo is not None and as_of.tzinfo is not None
+                and received.astimezone(KST).date() == payload_time.astimezone(KST).date()
+                and timedelta(minutes=-5) <= age <= timedelta(minutes=INTRADAY_MAX_LAG)
+                and timedelta(0) <= as_of - received <= timedelta(minutes=INTRADAY_MAX_LAG)):
+            return {'source': desk_section.get('source'), 'received_at': desk_section['received_at'],
+                    'rows': [{k: d.get(k) for k in ('code', 'name', 'change_pct', 'net_100m')} for d in sells]}
+    except (KeyError, TypeError, ValueError):
+        pass
+    return None
+
+
+def intraday_view(payload, now=None, *, include_foreign_sells=False):
     """The intraday sections collected every few minutes that the engines did not see before (user 2026-11-18): each
     index's path today (Toss 1-minute bars: from the open, the high/low, 30-minute change, place in today's range), the
     program trading of the last 30 minutes (Kiwoom, change of the cumulative net), foreign-broker desks, the top
@@ -535,10 +556,10 @@ def intraday_view(payload):
     behind the payload (Toss's institution ranking stayed at 11:05 on 11/18 13:08), is left out."""
     out, names = {}, {code: item.get('name', code) for code, item in (payload.get('indices') or {}).items()}
     try:
-        now = _minutes(datetime.fromisoformat(payload['time']).astimezone(KST).strftime('%H:%M'))
+        payload_minute = _minutes(datetime.fromisoformat(payload['time']).astimezone(KST).strftime('%H:%M'))
     except (KeyError, TypeError, ValueError):
         return {}
-    fresh = lambda hhmm: isinstance(hhmm, str) and len(hhmm) >= 5 and -5 <= now - _minutes(hhmm) <= INTRADAY_MAX_LAG  # noqa: E731 (a section read after the payload stamp)
+    fresh = lambda hhmm: isinstance(hhmm, str) and len(hhmm) >= 5 and -5 <= payload_minute - _minutes(hhmm) <= INTRADAY_MAX_LAG  # noqa: E731 (a section read after the payload stamp)
     index = {}
     for code, item in ((payload.get('index_intraday') or {}).get('markets') or {}).items():
         if isinstance(item, dict) and fresh(item.get('as_of')):
@@ -561,6 +582,10 @@ def intraday_view(payload):
     desks = [d for d in (payload.get('foreign_desks') or {}).get('net_buy') or [] if isinstance(d, dict)][:5]
     if desks:
         out['foreign_desks_net_buy_top'] = [{k: d.get(k) for k in ('name', 'change_pct', 'net_100m')} for d in desks]
+    if include_foreign_sells:
+        sells = foreign_desk_sells(payload, now)
+        if sells:
+            out['foreign_desks_net_sell_top'] = sells
     ranks = {}
     for who in ('외국인', '기관'):
         item = ((payload.get('investor_rankings') or {}).get('investors') or {}).get(who) or {}

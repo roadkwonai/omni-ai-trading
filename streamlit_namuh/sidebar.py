@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from html import escape
 
-ICONS = {'장기투자': 'savings', '종합 현황': 'dashboard', '시장 상황': 'monitoring', '전략 구조': 'account_tree', '트레이딩 현황': 'candlestick_chart', '매매일지': 'menu_book',
+ICONS = {'장기투자': 'savings', '종합 현황': 'dashboard', '시장 상황': 'monitoring', '전략 구조': 'account_tree', '트레이딩 현황': 'candlestick_chart', '매매내역': 'receipt_long', '매매일지': 'menu_book',
          '계좌·자동매매': 'tune', '성과 비교': 'compare_arrows', '실계좌': 'account_balance', '운영': 'settings_heart'}
 
 CSS = """<style>
