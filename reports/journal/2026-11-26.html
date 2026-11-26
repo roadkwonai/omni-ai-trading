@@ -690,23 +690,84 @@
 <li>개선안 보고서(<code>improvement-2026-11-26.md</code>)가 있어 이 일지에 함께 반영했다.</li>
 </ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>한 종목이 하루를 만들었다.</strong> 나노신소재 +14,800원은 <mark>절반 익절 뒤 추적 손절</mark>이 상승을 담고 급락을 피한 결과다. 매도 뒤 마감은 −9.03%였고, 추적 기준보다 299원 늦은 것은 약 65초 감시 간격 때문으로 보인다.</li>
+<li><strong>손절 2건은 선정 확률이 낮았다(0.18·0.23).</strong> 미래에셋벤처투자는 비싼 자리 추격이었고 손절이 맞았다. 삼성전자는 약세장 매도 기준에 100원 모자란 뒤 손절됐다.</li>
+<li><strong>Jev 오류 21분.</strong> 진입·보유 판단이 비었지만 가격 보호는 작동했다. 그 사이 놓친 매수가 있었는지는 확인할 수 없다.</li>
+<li><strong>실계좌 1이 모의보다 •••원 많았다.</strong> 빠른 감지·취소 뒤 첫날이라 계속 유리할지는 알 수 없다.</li>
+<li><strong>오후에는 사지 않았다.</strong> 강도 관문에서 막은 38행은 장 마감까지 대부분 내렸다(분봉 상승 아님 20건 평균 −1.77%, 2건만 상승). 하루 결과라 필터가 늘 옳다는 근거는 아니다.</li>
+</ul>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>아래는 제안이며 적용은 사용자 승인 뒤에만 한다.</p>
+<ul>
+<li><strong>강도 경로 최소 Jev 확률 0.15 → 0.20</strong>
+<ul>
+<li>근거: 11/18~11/26 강도 왕복 18건 중 0.20 미만 4건 −0.45%(−5,617원), 나머지 14건 +0.21%(+19,088원)다.</li>
+<li>바뀌는 것: 오늘 미래에셋벤처투자 같은 매수가 빠지지만 매수 횟수가 줄고 이익 거래도 잃는다.</li>
+<li>확인: 12-01에 표본 20건 이상으로 확률 구간별 합계를 다시 본다.</li>
+</ul>
+</li>
+<li><strong>강도 진입의 추격 거리 확인</strong>
+<ul>
+<li>근거: 손실이 큰 건은 VWAP +5.80%·범위 84%, 이익 건은 VWAP −0.66%에서 샀다(3건).</li>
+<li>바뀌는 것: 거리 상한을 두면 비싼 자리 매수가 줄 수 있다.</li>
+<li>확인: 12-01 bar-shadow 5거래일에 VWAP 거리와 결과를 함께 나눈다.</li>
+</ul>
+</li>
+<li><strong>개장 8분 안에 새로 산 포지션도 보유 판단 받기</strong>
+<ul>
+<li>근거: 09:04 매수 뒤 09:05·09:06 판단이 분봉 부족으로 실패했다(오늘 영향 0원).</li>
+<li>바뀌는 것: 개장 직후 급락에 Jev 매도가 가능해지지만 흔들림에 이익을 끊을 수 있다.</li>
+<li>확인: 해당 시간 매수가 쌓인 뒤 판단과 이후 가격을 재현한다(코드 승인 필요).</li>
+</ul>
+</li>
+</ul>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>Jev API HTTP 오류</strong> → 09:16~09:36 판단 19회 실패 → 내일 같은 시간대 재발과 상태 코드를 확인한다.</li>
+<li><strong>원장에 Jev 오류 종류 누락</strong> → <code>events_v2</code>만으로는 HTTPError를 찾지 못한다 → 허용 목록에 넣고 <code>jev_error</code>에도 종류를 옮긴다(승인 필요).</li>
+<li><strong>장기투자 적립 지정가 1호가 아래</strong> → 나스닥100이 11/25(23,220원·호가 23,225원), 11/26(23,365원·호가 23,370원) 연속 미체결 → 호가를 읽는 시점부터 확인하고 가격 방식을 정한다(주문 경로라 승인 필요).</li>
+<li><strong>낙폭과대 사후 재현 불일치(11/25 개선안, 미적용)</strong> → 14:50 마감·시장 조건 없이 계산한 평균이 주간 감사에 쓰인다 → 11/27 감사 전에 반영 여부를 정한다.</li>
+<li><strong>핵심 이슈 자동 순위에 전날 마감 기사</strong> → 11/25 −6% 기사가 오늘 시황으로 읽힌다(전날에도 같은 현상) → D 전날 마감 기사는 감점한다(승인 필요).</li>
+</ul>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li>11/26은 전날 코스피 −6.10% 뒤 소폭 반등(+0.78%)한 날이고 코스피는 내린 종목이 더 많았다. 기관이 사고 개인·외국인이 팔았다.</li>
+<li>오늘 강도 매수 3건 중 이익 건은 VWAP 아래 매수였고, 이미 +24.9% 오른 종목은 산 뒤 거의 오르지 못했다(하루 표본).</li>
+<li>11:02 뒤 강도 관문에서 막힌 종목은 장 마감까지 대부분 내렸다. 날마다 결과가 갈리는 항목이다.</li>
+<li>09:16~09:36은 요청 오류로 판단 기록이 비어 있어 그 구간 적중률 해석에 주의가 필요하다.</li>
+<li>11/25 밤 미국장은 장중 큰 하락 뒤 낙폭을 줄였고 VIX는 28.29로 올랐다.</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li>11/27(금) 09:15~09:40 Jev API 오류 재발 여부와 상태 코드.</li>
+<li>11/27(금) 오전 미국 종목 주간 스크린, 장 마감 뒤 낙폭과대 주간 감사(11/23 통과일의 3거래일 결과 포함).</li>
+<li>미국 11/26 휴장·11/27 조기 종료(매매일지·리포트 기록, 두 번째 출처 미확인).</li>
+<li>장기투자: 나스닥100 전고점 대비 −16.6%로 여운봉 1단계(−20%)까지 3.4%p. 미체결 적립 116,843원의 다음 확인 때 체결 여부.</li>
+<li>12-01 강도 진입 기록 검토, 12/04 미국 고용, 12/09 FOMC, 12/10 CPI.</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://news.google.com/rss/articles/CBMidkFVX3lxTE1iRVJmeTBRTmVoSkZ5VDJ2cEd6UHc0Z21PaEtmallRSzFROWFucy1ERGRpVXFycWpMVXNPeWpReVVlSi1Qbk1lZlJNWmpOSFFvb2ZXY2ZSNUgzVURIZzhEa1g4cWpQZDJlUmk2aEt1enltNG4tcEE?oc=5" target="_blank" rel="noopener noreferrer">시사저널e · 2026-11-26 · 6% 폭락 딛고 반등, 코스피 1% 오른 4745 출발</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiW0FVX3lxTE1wT08zREVoVS0zRFdOb1BXZ3NaakNsemRGd3JkdEg1c1lic2lEd0lQeGlMZVRlODhTMFV3WXcybjN5RU1fazJRRkxVOE0wcnY5bTFPUzhQZjlNbUk?oc=5" target="_blank" rel="noopener noreferrer">KBS 뉴스 · 2026-11-26 · 한은, 기준금리 연 3.25%로 올려</a></li>
+<li><a href="https://n.news.naver.com/mnews/article/215/0001274009" target="_blank" rel="noopener noreferrer">한국경제TV · 2026-11-26 · 장중 4.6% 급락한 나스닥, 저가 매수</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTE50S1JCaEppTUNGa2FhUW5HZk9EZjVuV0Y0dWJGYnRoSVI4c1hzNlVzMVVycWZEcFBnMVgtdHk5aUk2MkVjZ0F3RmlyNUVqdGZENkNKYi1yY25QZw?oc=5" target="_blank" rel="noopener noreferrer">한국경제 · 2026-11-26 · AI 투자 불안에 극심한 변동장</a></li>
+<li><a href="https://n.news.naver.com/mnews/article/018/0006415690" target="_blank" rel="noopener noreferrer">이데일리 · 2026-11-26 · 美 물가 재상승에 짙어진 긴축 경계</a></li>
+<li><a href="https://n.news.naver.com/mnews/article/215/0001274004" target="_blank" rel="noopener noreferrer">한국경제TV · 2026-11-26 · 美 10월 근원 PCE 예상 상회</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiXkFVX3lxTFBXQm1xRmFNdWtHaUlZdU9xYzFmam5YdW12Zm9SRE82ZDI3RlNGYTBqU3dRNG5SU2NOajFUbElpODNxd1ZOcWdSR2JvdTVFQnBiM3hjX2hHZF9qWVBGamc?oc=5" target="_blank" rel="noopener noreferrer">YTN · 2026-11-26 · 중국 화웨이, 삼성·하이닉스 겨냥 새 HBM 개발</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMib0FVX3lxTE5kZXUtS2NvWm81SW5qWk5FcWdHOVUwT1EzYVlPVUhHSFZZd2Vnd3I2SW9aUUJ5Nkxxejh5RTVFWEJSdmdZMlZ6bkNNMVdLV1VKTVl6UlZCYXgzcnY2Q3E2bjhQY2c5VFEzYU9IYzlqSQ?oc=5" target="_blank" rel="noopener noreferrer">한겨레 · 2026-11-26 · 트럼프, 또 추가 관세 추진</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMickFVX3lxTE1lSGlJMTZHcVJEM202eVVVcEFDa0VpVk4tUEx0a0NrWjdaTVZVWjNSemtKQnhJMXViQzYwOHBOR3VwMENyRDFvZEhsR3ZianZaT19hMXZxd2V6T0FKcFNKajZNYjlycW5oWFVqX3RhTDVfQQ?oc=5" target="_blank" rel="noopener noreferrer">에너지신문 · 2026-11-26 · 후티, 사우디 정유시설 공격 등에 국제유가 상승</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiUkFVX3lxTE5kWktOc1VQYkI2RGI5ZE9aLWRYYzdwVUZPTUdDTTQxTV84NVJGc25jNVJEOElJOXJ2SVduc2dBRUY1RzhVT0l6ckpyV2Ffd3VJTWc?oc=5" target="_blank" rel="noopener noreferrer">매일경제 마켓 · 2026-11-26 · 10조원대 증안펀드 확대되나</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWkFVX3lxTFBTd09oWkctbnRqOHJESVQtMmtiZlFXMTZMWUZrLThrZllFSGdMem5OekoxUGtHUmZkenlyZU9tTHVEcm5SYVFFSmZveHc1Q2hhZ2R3RVEzcHp4Zw?oc=5" target="_blank" rel="noopener noreferrer">한국경제 · 2026-11-26 · 코스맥스 사상 최대 실적</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97641" target="_blank" rel="noopener noreferrer">네이버 리서치(iM증권) · 2026-11-05 · TCO와 실버 페이스트까지(나노신소재)</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=97570" target="_blank" rel="noopener noreferrer">네이버 리서치(iM증권) · 2026-11-04 · STRESS TEST(삼성전자)</a></li>
+</ul>
 </article>
   </main>
 </div>
 
 <footer class="footer">
-  <div class="wrap"><p>자동 생성 2026-11-26 16:50 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
+  <div class="wrap"><p>자동 생성 2026-11-26 16:51 · 모의·가상 결과가 섞여 있으며 투자 권유가 아닙니다 · 과거 결과는 앞날을 보장하지 않습니다.</p><p>금융투자상품은 원금 손실(0~100%)이 생길 수 있으며, 투자의 최종 판단과 손익 책임은 투자자 본인에게 있습니다. 제작자와 기여자는 이 리포트를 활용해 생긴 직·간접 손해에 법적 책임을 지지 않습니다. <a href="https://github.com/roadkwonai/omni-ai-trading#투자-유의사항-및-면책-고지">투자 유의사항 및 면책 고지</a></p></div>
 </footer>
 
 </body>
