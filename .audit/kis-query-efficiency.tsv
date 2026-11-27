@@ -1,0 +1,11 @@
+ts	phase	decision	why	evidence	result
+2026-11-27T00:05:18Z	범위	최근 KIS 연동, 매매일지, API 집계로 범위를 제한	읽기 경로에서 반복 조회를 재현하고 출력 동등성을 확인할 수 있음	scripts/kis_data.py; scripts/trading_journal.py; scripts/api_calls.py	진행
+2026-11-27T00:07:00Z	원장	일지 하나에서 NH 원장을 한 번 읽고 종목별로 분리	같은 원장 조회와 JSON 파싱을 종목마다 반복했음	scripts/test_trading_journal.py	검증완료
+2026-11-27T00:07:23Z	캐시	KIS 종목별로 마지막 완료 차트를 하루 동안 재사용	같은 날짜 재조회에서 분봉 네 페이지와 일봉 한 페이지가 반복됨	scripts/test_kis_data.py	검증완료
+2026-11-27T00:08:26Z	DB	호출 집계 한 건을 트랜잭션 하나로 저장하고 부하 보고서는 연결을 공유	중간 오류에서 일부 집계만 남았고 보고서마다 DB를 다섯 번 열었음	scripts/test_api_calls.py; scripts/test_api_load.py	검증완료
+2026-11-27T00:10:05Z	검수	캐시에서 복원한 시각의 표준 시간대를 조회 결과와 통일	서로 다른 프로세스에서 원본과 캐시를 비교하니 표준 시간대 객체가 달랐음	scripts/kis_data.py	삼성전자 381봉의 전체 해시 일치, 재요청 0
+2026-11-27T00:10:05Z	인덱스	운영 DB에 인덱스를 추가하지 않음	날짜·시간 조회가 기존 인덱스를 사용하고 추가 인덱스의 지연 개선 근거는 없음	scripts/api_calls.py	운영 DB 읽기 전용 점검
+2026-11-27T00:10:05Z	검증	증권사 조회와 집계, 매매일지 관련 테스트 재실행	KIS와 기존 대체 출처 및 화면 도우미를 함께 검증	scripts/test_kis_data.py; scripts/test_api_calls.py; streamlit_namuh/test_journal_view.py	120개 통과
+2026-11-27T00:10:23Z	동등성	실제 NH 원장의 과거 날짜에서 이전 코드와 묶음 조회를 비교	테스트 원장뿐 아니라 실제 일지 데이터의 값과 순서도 확인	scripts/trading_journal.py	5종목 1472개 분봉 일치
+2026-11-27T00:11:24Z	리뷰	타 날짜 차트의 캐시 덮어쓰기와 포괄 예외를 수정	거래일이 교차하는 재생성에도 캐시를 보존하고 코드 결함을 드러냄	scripts/test_kis_data.py; scripts/test_trading_journal.py	독립 리뷰 지적 2건 반영
+2026-11-27T00:11:56Z	재검증	거래일별 캐시 수정 후 독립 프로세스와 관련 테스트에서 다시 검증	캐시 키 변경 뒤에도 실제 결과 해시와 예외 처리 계약을 확인	scripts/test_kis_data.py; scripts/test_trading_journal.py	121개 통과, 실제 요청 5회에서 0회, 381봉 일치

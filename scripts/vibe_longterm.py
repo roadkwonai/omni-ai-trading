@@ -103,7 +103,7 @@ MODULES = {
     'williams_rebound': ('래리 윌리엄스', '급락 단기 반등', '나스닥100 하루 −3% 이하이고 VIX 25 이상이면 저수지 5%를 나스닥100으로 옮기고 10거래일 뒤 되돌린다.',
                          '재현 안 함(가상 운용으로 검증)', False, False),
     'lynch_story': ('피터 린치', '테마 스토리 점검', 'LLM이 위성 테마마다 유지·주의·훼손과 기울기를 판정한다. 주의는 절반, 훼손은 0, 기울기는 ±25%.',
-                    'LLM 판단이라 재현 불가(그림자와 비교)', True, False),
+                    'LLM 판단이라 재현 불가(비교 전략과 비교)', True, False),
     'buffett_lowturn': ('워런 버핏·필립 피셔', '저회전·손절 없음', '손절하지 않고, 저수지를 뺀 매도는 한 달 순자산의 10%까지만 한다.',
                         '회전이 낮을수록 세후 손실이 작았음', True, False),
 }
@@ -124,8 +124,8 @@ DECISION_KINDS = {'regime': '국면', 'macro': '거시 배경', 'story': '스토
                   'dca': '적립식', 'skip': '건너뜀', 'map': '모듈 영향·타점', 'error': '단계 오류', 'missed': '시간 놓침',
                   'news': '장기 뉴스'}
 STORY_LABELS = {'intact': '유지', 'watch': '주의', 'broken': '훼손'}
-BOOK_LABELS = {'actual': '실제(가상 계좌)', 'base': '기본 그림자(기준 비중+달리오)', 'auto': '자동 그림자(추천 조합)',
-               'dca_auto': '적립 시황 자동 그림자'}  # dca_auto: the actual book's strategy (its modules, or the 여운봉 저수지 매매법)
+BOOK_LABELS = {'actual': '실제(가상 계좌)', 'base': '기본 비교 전략(기준 비중+달리오)', 'auto': '자동 비교 전략(추천 조합)',
+               'dca_auto': '적립식 시황 자동 비교 전략'}  # dca_auto: the actual book's strategy (its modules, or the 여운봉 저수지 매매법)
 # with the regime's 적립 profile (2026-11-18), so it differs from the actual book in its 적립식 alone
 CONTRIBUTED = 'contributed'  # nav row (and nav_latest key) of the 적립식 money paid in so far: not a book
 

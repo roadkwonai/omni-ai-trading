@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'streamlit_namuh'))  # engine_compare.journal
 
 FILE = 'strategy-compare.sqlite3'
-BOOKS = {'jev': 'Jev 트레이딩', 'longterm': '장기투자', 'longterm_base': '기본 그림자', 'longterm_auto': '자동 그림자'}
+BOOKS = {'jev': 'Jev 트레이딩', 'longterm': '장기투자', 'longterm_base': '기본 비교 전략', 'longterm_auto': '자동 비교 전략'}
 LT_BOOKS = {'actual': 'longterm', 'base': 'longterm_base', 'auto': 'longterm_auto'}
 COLUMNS = ('day', 'book', 'nav_index', 'contributed', 'pnl_day', 'pnl_cum', 'realized_day', 'unrealized', 'deployed',
            'ret_day', 'drawdown', 'trades', 'buys', 'sells', 'wins', 'turnover', 'avg_hold_min', 'fees_est',

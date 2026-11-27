@@ -71,6 +71,9 @@ def _no_kiwoom_key(monkeypatch, tmp_path):
     monkeypatch.setattr(kiwoom_data, '_keys', lambda: ('', ''))
     monkeypatch.setattr(kiwoom_data, 'TOKEN_FILE', tmp_path / 'kiwoom-token.json')
     monkeypatch.setattr(kiwoom_data, 'BARS_DIR', tmp_path / 'kiwoom-minute')
+    import kis_data
+    monkeypatch.setattr(kis_data, '_keys', lambda mode: ('', ''))
+    monkeypatch.setattr(kis_data, 'ROOT', tmp_path / 'kis')
     import toss_data
     monkeypatch.setattr(toss_data, '_keys', lambda: ('', ''))
     monkeypatch.setattr(toss_data, 'TOKEN_FILE', tmp_path / 'toss-token.json')

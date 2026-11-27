@@ -29,7 +29,7 @@ def test_tab_renders_empty_and_with_picks(tmp_path):
     assert not at.exception and not at.info and len(at.dataframe) >= 2  # ten-baggers and the scorecard
 
 
-def test_a_picked_name_opens_its_chart(tmp_path):
+def test_a_picked_name_opens_its_chart(tmp_path, monkeypatch):
     # user request 2026-11-18: each idea can be opened as a chart right away (reference only)
     from streamlit.testing.v1 import AppTest
     db = U.connect(tmp_path)
@@ -38,13 +38,15 @@ def test_a_picked_name_opens_its_chart(tmp_path):
         db.execute('INSERT INTO picks VALUES (?,?,?,?,?,?,?,?,?,?,?)', (day, 'fisher', 1, 'NVDA', 'NVIDIA', 150.0, day, 1.2,
                    '{}', json.dumps(['매출 3년 연평균 110%']), json.dumps({'QQQM': 8.0})))
 
+    monkeypatch.setattr(V, 'stock_news', lambda ticker, name='': [])
+    import vibe_longterm_view
+    monkeypatch.setattr(vibe_longterm_view, 'yahoo_bars', lambda symbol: [
+        {'time': 1_700_000_000 + i * 86_400, 'open': 100 + i, 'high': 101 + i, 'low': 99 + i,
+         'close': 100 + i, 'volume': 1} for i in range(300)])
+
     def view(root):
         import streamlit as st
         import us_ideas_view
-        import vibe_longterm_view as V
-        V.yahoo_bars = lambda symbol: [{'time': 1_700_000_000 + i * 86_400, 'open': 100 + i, 'high': 101 + i, 'low': 99 + i,
-                                        'close': 100 + i, 'volume': 1} for i in range(300)]
-
         def chart(bars, markers, basis, **kw):
             st.session_state['idea_chart'] = {'bars': len(bars), 'averages': sorted(kw['averages']), 'levels': kw['levels'],
                                               'volume_pane': kw.get('volume_pane')}

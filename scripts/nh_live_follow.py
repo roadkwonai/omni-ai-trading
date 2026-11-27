@@ -947,7 +947,8 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
     manual, degraded = {'offsets': {}, 'left': {}, 'refused': {}}, bool(paper_error)
     if key and not paper_error:  # hand requests wait for a readable paper ledger (their anchors)
         try:
-            manual = apply_manual(root, key, record, target, now, position_anchors(book or {}), requests)
+            manual = apply_manual(root, key, record, target, now, position_anchors(book or {}), requests,
+                                  quote=lambda code: bid_ask(reader, code), owned=owned)
         except Exception as exc:  # e.g. an unwritable hand-trade file: hold what this runner owns; the stop and latch still sell
             target, degraded = dict(owned), True
             info.update(target=target, warning=f'hand trades unavailable: {type(exc).__name__}')
@@ -1012,7 +1013,8 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
         plan['execution'] = 'NO_ORDER'
         return plan
     code = plan['symbol']
-    quote = quotes.get(code) or bid_ask(reader, code)
+    quote = (bid_ask(reader, code) if plan['action'] == 'BUY' and code in manual.get('amounts', {})
+             else quotes.get(code) or bid_ask(reader, code))
     if quote is None:
         plan.update(execution='NO_ORDER', execution_reason='quote unavailable')
         return plan
@@ -1033,6 +1035,10 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
         room = min(capital - int(invested), int(cash))
         qty = min(qty, live_limits(record=record)['order_max_krw'] // price, max(room, 0) // price) if price else 0
         plan['capital_room'] = max(room, 0)
+        if code in manual.get('amounts', {}):
+            manual_part = max(0, qty - mirrored.get(code, 0))
+            allowed = manual['amounts'][code] // price if price else 0
+            qty -= max(0, manual_part - allowed)
     plan.update(price=price, qty=qty)
     if plan['action'] == 'BUY' and price > live_price_cap(account):
         plan.update(execution='NO_ORDER', execution_reason='above the account price cap')
@@ -1044,7 +1050,9 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
             plan.update(execution='NO_ORDER', execution_reason='daily new symbol limit')
             return plan
     if plan['action'] == 'BUY' and qty < 1:
-        reason = 'capital limit reached' if plan.get('capital_room', 0) < price else 'above the account order limit'
+        reason = ('manual amount below one share at current ask' if code in manual.get('amounts', {})
+                  and manual['amounts'][code] < price else
+                  'capital limit reached' if plan.get('capital_room', 0) < price else 'above the account order limit')
         plan.update(execution='NO_ORDER', execution_reason=reason)
         return plan
     if halt_flag_set('nhplug'):
@@ -1066,14 +1074,14 @@ def _step(reader, account, credentials, record, *, execute_orders, root, now, ke
             options['replacement_of'] = prior
     hand_qty = qty - mirrored.get(code, 0) if plan['action'] == 'BUY' else 0
     if hand_qty > 0:  # spent before sending: an unknown outcome never buys it twice
-        spend_hand_buy(root, record, code, hand_qty)
+        spend_hand_buy(root, record, code, hand_qty, price)
         with guard._db() as db:
             last = db.execute('SELECT COALESCE(MAX(rowid), 0) FROM live_intents').fetchone()[0]
     try:
         plan['intent'] = execute(reader, guard, credentials, CASH[plan['action']], fields, **options)
     except BaseException:
         if hand_qty > 0 and not sent_since(guard, last):  # refused or aborted before sending: next cycle buys it (review 3 M1)
-            spend_hand_buy(root, record, code, -hand_qty)
+            spend_hand_buy(root, record, code, -hand_qty, price)
         raise
     plan['execution'] = 'ACKNOWLEDGED_NOT_FILLED'
     return plan
@@ -1128,6 +1136,13 @@ def exit_requests(root, key):
     return _exit_requests(exit_request_path(root, key)) if key else {}
 
 
+def _valid_manual_amount(q):
+    from accounts import LIVE_CAPITAL_MAX
+    return (isinstance(q, dict) and set(q) == {'amount_krw', 'day'}
+            and type(q['amount_krw']) is int and 0 < q['amount_krw'] <= LIVE_CAPITAL_MAX
+            and isinstance(q['day'], str) and len(q['day']) == 10)
+
+
 def _exit_requests(path):
     try:
         codes = json.loads(Path(path).read_text(encoding='utf-8'))
@@ -1137,8 +1152,9 @@ def _exit_requests(path):
         codes = {c: None for c in codes} if all(isinstance(c, str) for c in codes) else None
     if not isinstance(codes, dict):
         return {}
-    return {c: q for c, q in codes.items() if is_code(c)
-            and (q is None or (type(q) is int and q > 0))}
+    return {c: q for c, q in codes.items() if is_code(c) and (
+            q is None or (type(q) is int and q > 0) or
+            _valid_manual_amount(q))}
 
 
 def write_request_file(path, requests):
@@ -1164,7 +1180,9 @@ def _buy_requests(path):
         data = json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
-    return {c: q for c, q in data.items() if is_code(c) and type(q) is int and q > 0} \
+    return {c: q for c, q in data.items() if is_code(c) and (
+            (type(q) is int and q > 0) or
+            _valid_manual_amount(q))} \
         if isinstance(data, dict) else {}
 
 
@@ -1175,8 +1193,8 @@ def claim_requests(root, key):
     """This cycle's dashboard requests (review 3 M5). Each request file is first renamed to <name>.claim, so a request
     the dashboard writes meanwhile lands in a new file for the next cycle, and a claim a stopped cycle left behind is
     taken again; apply_manual records the claims it applied, so a claim is never applied twice. Never raises (a request
-    that cannot be taken waits; the cycle's stop and loss latch must run). {'exit': {code: shares or None}, 'buy':
-    {code: shares}, 'ids': {kind: the claimed file's identity}}."""
+    that cannot be taken waits; the cycle's stop and loss latch must run). Exit and buy values can be shares or a dated
+    amount request; None for exit means sell all. IDs identify each claimed file."""
     out = {'exit': {}, 'buy': {}, 'ids': {}}
     for kind, path, parse in (('exit', exit_request_path(root, key), _exit_requests),
                               ('buy', manual_buy_path(root, key), _buy_requests)):
@@ -1208,11 +1226,14 @@ def manual_state(root, record):
         data = json.loads(manual_path(root, record).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         data = {}
-    part = lambda name: data[name] if isinstance(data, dict) and isinstance(data.get(name), dict) else {}
+    def part(name):
+        return data[name] if isinstance(data, dict) and isinstance(data.get(name), dict) else {}
     offsets = {c: v for c, v in part('offsets').items() if type(v) is int and v}
     return {'offsets': offsets, 'anchors': {c: v for c, v in part('anchors').items() if c in offsets},
             'since': {c: v for c, v in part('since').items() if c in offsets and isinstance(v, str)},
             'left': {c: min(v, offsets[c]) for c, v in part('left').items() if c in offsets and type(v) is int and v > 0 and offsets[c] > 0},
+            'amounts': {c: v for c, v in part('amounts').items() if c in offsets and type(v) is int and v >= 0},
+            'amount_days': {c: v for c, v in part('amount_days').items() if c in offsets and isinstance(v, str)},
             'claims': {k: v for k, v in part('claims').items() if isinstance(v, str)}}
 
 
@@ -1227,7 +1248,7 @@ def position_anchors(book):
     return {code: f"paper:{pos['lots'][0][0]}" for code, pos in book.items()}
 
 
-def apply_manual(root, key, record, target, now, anchors, requests):
+def apply_manual(root, key, record, target, now, anchors, requests, *, quote=None, owned=None):
     """Hand trades on top of the mirror (user 2026-11-17). A quantity sell request lowers this account's target for the
     symbol by that many shares, kept until the position it was made on ends (`anchors`: a new paper position starts
     clean), so the mirror never buys them back; a buy request raises it until the shared flatten time and only those
@@ -1236,17 +1257,26 @@ def apply_manual(root, key, record, target, now, anchors, requests):
     requests stay on the dashboard latch. `requests` are this cycle's claims (claim_requests): applied, recorded in the
     saved state and only then released. Mutates `target`; returns {'offsets', 'left', 'refused'}."""
     state = manual_state(root, record)
-    offsets, marks, since, left = state['offsets'], state['anchors'], state['since'], state['left']
+    offsets, marks, since, left, amounts, amount_days = (state['offsets'], state['anchors'], state['since'],
+                                                           state['left'], state['amounts'], state['amount_days'])
     clock = now.strftime('%H:%M')
     late = clock >= session_clock(root)['flatten']
     end = buy_window_end(root)
-    fresh = lambda kind: kind in requests['ids'] and state['claims'].get(kind) != requests['ids'][kind]
+    def fresh(kind):
+        return kind in requests['ids'] and state['claims'].get(kind) != requests['ids'][kind]
 
     def drop(code):
-        for part in (offsets, marks, since, left):
+        for part in (offsets, marks, since, left, amounts, amount_days):
             part.pop(code, None)
 
     for code in list(offsets):
+        if code in amounts and amount_days.get(code) != now.date().isoformat():
+            offsets[code] -= left.pop(code, 0)
+            amounts.pop(code, None)
+            amount_days.pop(code, None)
+            if not offsets[code]:
+                drop(code)
+                continue
         here = anchors.get(code)
         moved = marks.get(code, here) != here  # a file written before anchors belongs to the current position
         if (offsets[code] < 0 and moved) or (offsets[code] > 0 and late):
@@ -1257,6 +1287,63 @@ def apply_manual(root, key, record, target, now, anchors, requests):
     sells = {c: q for c, q in requests['exit'].items() if q} if fresh('exit') else {}
     buys = dict(requests['buy']) if fresh('buy') else {}
     refused = {}
+    for code, request in list(sells.items()):
+        if not isinstance(request, dict):
+            continue
+        amount = request['amount_krw']
+        if request['day'] != now.date().isoformat():
+            refused[code] = {'amount_krw': amount, 'why': 'request is from another day'}
+        elif not (owned or {}).get(code):
+            refused[code] = {'amount_krw': amount, 'why': 'mirror no longer owns this symbol'}
+        elif code in buys or left.get(code):
+            refused[code] = {'amount_krw': amount, 'why': 'another manual buy is pending'}
+        elif max(0, paper_target.get(code, 0) + offsets.get(code, 0)) != owned[code]:
+            refused[code] = {'amount_krw': amount, 'why': 'mirror target and holdings differ'}
+        else:
+            current = quote(code) if quote is not None else None
+            if current is None:
+                raise ValueError('manual amount quote unavailable')
+            count = min(amount // sell_limit(current[0]), owned[code])
+            if count:
+                sells[code] = count
+                continue
+            refused[code] = {'amount_krw': amount, 'why': 'amount below one share'}
+        del sells[code]
+    for code, request in list(buys.items()):
+        if isinstance(request, dict):
+            if request['day'] != now.date().isoformat():
+                refused[code] = {'amount_krw': request['amount_krw'], 'why': 'request is from another day'}
+                del buys[code]
+                continue
+            if not (owned or {}).get(code):
+                refused[code] = {'amount_krw': request['amount_krw'], 'why': 'mirror no longer owns this symbol'}
+                del buys[code]
+                continue
+            if left.get(code):
+                refused[code] = {'amount_krw': request['amount_krw'], 'why': 'another manual buy is pending'}
+                del buys[code]
+                continue
+            if clock >= end:
+                refused[code] = {'amount_krw': request['amount_krw'], 'why': f'after the live buy window ({end})'}
+                del buys[code]
+                continue
+            current = quote(code) if quote is not None else None
+            if current is None:
+                raise ValueError('manual amount quote unavailable')
+            count = request['amount_krw'] // current[1]
+            if count < 1:
+                refused[code] = {'amount_krw': request['amount_krw'], 'why': 'amount below one share'}
+                del buys[code]
+                continue
+            buys[code] = count
+            amounts[code] = request['amount_krw']
+            amount_days[code] = request['day']
+        elif code in amounts and left.get(code):
+            refused[code] = {'shares': request, 'why': 'another manual buy is pending'}
+            del buys[code]
+        else:
+            amounts.pop(code, None)
+            amount_days.pop(code, None)
     if clock >= end:
         for code, qty in list(buys.items()) + list(left.items()):
             refused[code] = {'shares': refused.get(code, {}).get('shares', 0) + qty, 'why': f'after the live buy window ({end})'}
@@ -1274,18 +1361,25 @@ def apply_manual(root, key, record, target, now, anchors, requests):
         if not offsets[code]:
             drop(code)
     left = {c: min(n, offsets[c]) for c, n in left.items() if offsets.get(c, 0) > 0}
-    save_manual(root, record, {'offsets': offsets, 'anchors': marks, 'since': since, 'left': left,
+    save_manual(root, record, {'offsets': offsets, 'anchors': marks, 'since': since, 'left': left, 'amounts': amounts,
+                               'amount_days': amount_days,
                                'claims': requests['ids']}, now)
     release_requests(root, key)
     for code, offset in offsets.items():
         target[code] = max(0, target.get(code, 0) + offset)
-    return {'offsets': offsets, 'left': left, 'refused': refused}
+    return {'offsets': offsets, 'left': left, 'amounts': amounts, 'refused': refused}
 
 
-def spend_hand_buy(root, record, code, qty):
+def spend_hand_buy(root, record, code, qty, price=None):
     """Count `qty` hand-bought shares of `code` as ordered (a negative `qty` puts shares proven unsent back)."""
     state = manual_state(root, record)
     state['left'] = {c: n for c, n in {**state['left'], code: state['left'].get(code, 0) - qty}.items() if n > 0}
+    if code in state['amounts']:
+        if type(price) is not int or price <= 0:
+            raise ValueError('manual amount price unavailable')
+        state['amounts'][code] -= qty * price
+        if state['amounts'][code] < 0:
+            raise ValueError('manual amount exceeded')
     save_manual(root, record, state, datetime.now(KST))
 
 
@@ -1462,7 +1556,8 @@ def main():
                           **({'reason': str(exc)} if isinstance(exc, LiveOrderBlocked) else {})}
             live_now = bool(args.execute and record and record.get('auto') is True and record.get('live_orders') is True)
             event = {'time': datetime.now(KST).isoformat(), 'account': args.account,
-                     'mode': 'execute' if live_now else 'dry_run', 'armed': bool(args.execute), **result}
+                     'mode': 'execute' if live_now else 'dry_run', 'armed': bool(args.execute),
+                     'manual_buy_amount_supported': True, 'manual_sell_amount_supported': True, **result}
             try:
                 lag = mirror_lag(root, args.account, event, datetime.now(KST))
             except Exception as exc:  # the alarm is advisory; it must never stop the mirror

@@ -107,11 +107,11 @@ REGISTRY = {
         'fix': 'scripts/isolated_paper_learning_watch.py DB_ERROR_RESTART(3회 연속이면 스스로 새 프로세스), intraday_audit.learning_rounds',
         'guard': 'test_a_learning_watcher_failing_every_round_fires'},  # also test_repeated_sqlite_errors_replace_the_process
     'shadow.silent': {
-        'title': '이슈·테마 그림자 후보 기록이 멈춤', 'since': '2026-11-18',
+        'title': '이슈·테마 관찰 후보 기록이 멈춤', 'since': '2026-11-18',
         'cause': '1단계 기록 전용 후보(issue_candidates)가 돌지 않으면 매수 허용 여부를 판단할 표본이 쌓이지 않음',
         'fix': 'scripts/market_movers.py shadow_round (shadow-status.json)', 'guard': 'test_shadow_candidate_rounds_that_stop_or_fail_fire'},
     'shadow.source_error': {
-        'title': '그림자 후보 출처(랭킹·DART·시세) 조회 실패', 'since': '2026-11-18',
+        'title': '관찰 후보 출처(랭킹·DART·시세) 조회 실패', 'since': '2026-11-18',
         'cause': '키움 랭킹·OpenDART·NH 시세 중 하나가 실패하면 그 출처의 후보가 빠짐',
         'fix': 'scripts/issue_candidates.py observe', 'guard': 'test_shadow_candidate_rounds_that_stop_or_fail_fire'},
     'source.lagging': {

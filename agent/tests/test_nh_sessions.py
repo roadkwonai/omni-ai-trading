@@ -68,6 +68,68 @@ def test_reads_share_one_process_also_across_adapters_and_threads(nh):
     assert read(nh(env={'OTHER': '1'}))['pid'] not in pids  # another account, mode or host is another process
 
 
+def test_inquiry_diagnostics_record_each_actual_mcp_send_without_arguments(nh, monkeypatch):
+    from types import SimpleNamespace
+    from src.tools import nh_budget
+
+    diagnostics = []
+    monkeypatch.setattr(nh_budget, 'take', lambda *a, diagnostic, **kw: diagnostic.update(operation='krstockInquiryBalance'))
+    monkeypatch.setitem(sys.modules, 'api_calls', SimpleNamespace(
+        mcp_call=lambda *a: None,
+        nh_budget_diagnostic=lambda data, result, error: diagnostics.append((dict(data), error))))
+    args = {'operationId': 'krstockInquiryBalance', 'input': {'act_no': 'secret-account'}}
+    before = time.time()
+    read(nh(), tool='call_api', **args)
+    write_token(nh.tokens, left=60)  # token too close to expiry: use a fresh process
+    read(nh(), tool='call_api', **args)
+    after = time.time()
+
+    assert [d['send_attempts'][0]['path'] for d, _ in diagnostics] == ['shared', 'fresh']
+    assert all(before <= d['send_attempts'][0]['at'] <= after and error is None for d, error in diagnostics)
+    assert 'secret-account' not in str(diagnostics)
+
+
+def test_inquiry_diagnostics_keep_shared_and_fallback_attempts(nh, monkeypatch):
+    from types import SimpleNamespace
+    from src.tools import nh_budget
+
+    diagnostics = []
+    monkeypatch.setattr(nh_budget, 'take', lambda *a, diagnostic, **kw: diagnostic.update(operation='krstockInquiryBalance'))
+    monkeypatch.setitem(sys.modules, 'api_calls', SimpleNamespace(
+        mcp_call=lambda *a: None,
+        nh_budget_diagnostic=lambda data, result, error: diagnostics.append(dict(data))))
+
+    async def lost_shared(*args, before_send=None):
+        before_send()
+        return None  # shared process lost its read; the normal fallback sends it again
+
+    monkeypatch.setattr(S, 'call', lost_shared)
+    read(nh(), tool='call_api', operationId='krstockInquiryBalance', input={'act_no': 'secret-account'})
+    assert [s['path'] for s in diagnostics[0]['send_attempts']] == ['shared', 'fresh']
+    assert diagnostics[0]['send_attempts'][0]['at'] <= diagnostics[0]['send_attempts'][1]['at']
+    assert 'secret-account' not in str(diagnostics)
+
+
+def test_inquiry_diagnostics_do_not_claim_send_when_start_fails(nh, monkeypatch):
+    from types import SimpleNamespace
+    from src.tools import nh_budget
+
+    diagnostics = []
+    monkeypatch.setattr(nh_budget, 'take', lambda *a, diagnostic, **kw: diagnostic.update(operation='krstockInquiryBalance'))
+    monkeypatch.setitem(sys.modules, 'api_calls', SimpleNamespace(
+        mcp_call=lambda *a: None,
+        nh_budget_diagnostic=lambda data, result, error: diagnostics.append((dict(data), error))))
+
+    async def fail_start(*args, **kwargs):
+        raise RuntimeError('initialize server session failed')
+
+    monkeypatch.setattr(S, 'call', fail_start)
+    with pytest.raises(RuntimeError, match='initialize server session'):
+        read(nh(), tool='call_api', operationId='krstockInquiryBalance')
+    assert diagnostics[0][0].get('send_attempts', []) == []
+    assert isinstance(diagnostics[0][1], RuntimeError)
+
+
 def test_orders_unknown_operations_and_other_servers_always_get_their_own_process(nh):
     shared = read(nh())['pid']
     for operation in ('krstockOrderCashSell', 'krstockOrderCancel', 'somethingNew'):

@@ -1,5 +1,14 @@
 
 import longterm_audit as A
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def offline_calendar(monkeypatch):
+    import vibe_longterm
+    monkeypatch.setattr('kr_swing_v5_daily_data.krx_holidays', lambda years: set())
+    monkeypatch.setattr(vibe_longterm, '_HOLIDAYS', {})
+    monkeypatch.setattr(vibe_longterm, '_HOLIDAY_FAILED', {})
 
 
 def view(root):

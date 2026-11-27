@@ -93,7 +93,7 @@ def watchlist_editor(root):
     listed = W.load(root)
     with st.expander(f'장기투자 관심목록 · {len(listed)}종목', icon=':material/bookmark:', expanded=False):
         st.caption('엔진 ETF 6종 밖의 국내 상장 종목을 적립식 전용으로 모읍니다. 아래 장부의 "적립 종목 선택"에서 고르면 그 종목은 고른 주식 '
-                   'ETF의 평균 목표 비중만큼 받습니다(관심목록만 고르면 같은 금액씩). 엔진은 이 종목을 리밸런싱·매도하지 않고, 순자산·그림자·'
+                   'ETF의 평균 목표 비중만큼 받습니다(관심목록만 고르면 같은 금액씩). 엔진은 이 종목을 리밸런싱·매도하지 않고, 순자산·비교 전략·'
                    '실계좌 운용금에는 포함합니다. 목록에서 빼면 새로 사지 않을 뿐 보유는 그대로입니다.')
         a, b = st.columns([3, 1], vertical_alignment='bottom')
         code = a.text_input('추가할 종목코드', max_chars=6, placeholder='예: 005930', key='lt_watch_code', help=G.tip('watchlist')).strip().upper()
@@ -477,7 +477,7 @@ def bundle(root, settings):
         note = ('저장 위치: 가상 계좌 엔진 모듈(vibe-longterm settings modules). 따라가는 실계좌: ' + (', '.join(follow) or '없음')
                 + (' · 자기 전략이라 안 바뀌는 실계좌: ' + ', '.join(own) if own else ''))
         if L.yeo_settings(settings, 'actual') is not None:
-            note += ' · 가상 계좌는 지금 여운봉 저수지 매매법이라 이 모듈은 그림자 장부와 "엔진과 같음" 실계좌만 씁니다'
+            note += ' · 가상 계좌는 지금 여운봉 저수지 매매법이라 이 모듈은 비교 장부와 "엔진과 같음" 실계좌만 씁니다'
         st.caption(note)
     else:
         mods = L.book_modules(settings, where, {'active': engine_active})

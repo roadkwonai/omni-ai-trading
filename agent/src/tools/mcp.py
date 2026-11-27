@@ -965,14 +965,22 @@ class MCPServerAdapter:
         def build() -> AsyncMCPClient:  # an NH read gives up a stalled start early; an order keeps its time
             return self._build_client(nh_sessions.READ_INIT_S) if shared else self._client_factory()
 
+        budget_diagnostic = {}
+
+        def note_send(path: str) -> None:
+            if budget_diagnostic:
+                budget_diagnostic.setdefault('send_attempts', []).append({'path': path, 'at': time.time()})
+
         async def _invoke() -> CallToolResult:
             if shared:
-                result = await nh_sessions.call(self.server_config, build, remote_name, arguments, self.server_config.tool_timeout)
+                result = await nh_sessions.call(self.server_config, build, remote_name, arguments, self.server_config.tool_timeout,
+                                                before_send=lambda: note_send('shared'))
                 if result is not None:
                     return result
             async with build() as client:
                 if pre_send_check is not None:
                     _check_nh_pre_send(pre_send_check)
+                note_send('fresh')
                 return await client.call_tool(
                     remote_name,
                     arguments=arguments,
@@ -980,7 +988,6 @@ class MCPServerAdapter:
                     raise_on_error=False,
                 )
 
-        budget_diagnostic = {}
         if 'nhplug' in (self.server_name or ''):  # one NH app key, many processes: wait for a slot (orders never wait)
             from src.tools.nh_budget import take
             await asyncio.to_thread(take, remote_name, arguments, diagnostic=budget_diagnostic)

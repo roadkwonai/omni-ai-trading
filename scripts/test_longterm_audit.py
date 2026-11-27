@@ -123,6 +123,8 @@ def test_the_daily_masters_section_reads_each_master_by_their_own_principle(tmp_
 def test_the_check_reads_an_unnumbered_heading_and_rejects_empty_sections():
     # review 2026-11-18: the 거장 관점 check wanted '## 4. 거장 관점' only, and a review of bare '-' bodies passed
     done = A.blank('2026-11-19').replace(A.PLACEHOLDER, '내용')
+    assert '가상 계좌와 비교 전략' in done
+    assert A.check(done.replace('가상 계좌와 비교 전략', '가상 계좌와 그림자'), '2026-11-19') == []
     assert A.check(done.replace('## 4. 거장 관점', '## 거장 관점'), '2026-11-19') == []
     bare = A.title('2026-W47') + '\n\n' + '\n\n'.join(f'## {i}. {s}\n\n-' for i, s in enumerate(A.SECTIONS, 1)) + '\n'
     assert any('비었습니다' in p for p in A.check(bare, '2026-W47'))

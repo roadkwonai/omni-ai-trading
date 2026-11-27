@@ -22,6 +22,29 @@ DAY = [fill('2026-11-16T09:30:00', 'BUY', 10, 1000), fill('2026-11-16T10:00:00',
 
 
 class JournalTests(unittest.TestCase):
+    def test_multiple_charts_read_the_same_ledger_only_once(self):
+        import sqlite3
+        from contextlib import closing
+        import sqlite_ro
+
+        day = '2026-11-26'
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with closing(sqlite3.connect(root / 'trading-ledger.sqlite3')) as conn, conn:
+                conn.execute('CREATE TABLE events_v2(time TEXT, data TEXT)')
+                codes = ('005930', '000660', tj.MARKET_PROXY)
+                bars = [{'bsop_time': f'{9 + n // 60:02}{n % 60:02}00', 'stck_oprc': 10, 'stck_hgpr': 11,
+                         'stck_lwpr': 9, 'stck_prpr': 10, 'vol': 5} for n in range(351)]
+                data = {code: [dict(bar, stck_prpr=10 + i) for bar in bars] for i, code in enumerate(codes)}
+                conn.execute('INSERT INTO events_v2 VALUES (?, ?)', (f'{day}T14:50:00', json.dumps({'market_bars': data})))
+                conn.execute('INSERT INTO events_v2 VALUES (?, ?)', ('2026-11-27T14:50:00', json.dumps({'market_bars': data})))
+            with patch.object(tj, 'ROOT', root), patch.object(sqlite_ro, 'ro_connect', wraps=sqlite_ro.ro_connect) as reads, \
+                 patch('oversold_research.fetch', return_value=[]):
+                got = tj.charts(day, [*codes, codes[0]])
+            self.assertEqual({code: (r['source'], len(r['bars']), r['bars'][-1][4]) for code, r in got.items()},
+                             {code: ('NH (실행기 기록)', 351, 10 + i) for i, code in enumerate(codes)})
+            self.assertEqual(reads.call_count, 1)
+
     def test_performance_of_a_day(self):
         p = tj.performance(DAY)
         self.assertEqual((p['buys'], p['sells'], p['bought_krw'], p['realized_krw']), (2, 3, 11000, 200))
@@ -254,7 +277,7 @@ class ReviewFixTests(unittest.TestCase):
             return [(datetime(2026, 11, 16, 15, 19, tzinfo=KST), 1, 1, 1, 1, 1)] if interval == '1m' else []
         import oversold_cases
         import oversold_research
-        with patch.object(tj, '_ledger_bars', return_value=own), patch.object(oversold_research, 'fetch', side_effect=fetch), \
+        with patch.object(tj, '_ledger_bars', return_value={'100790': own}), patch.object(oversold_research, 'fetch', side_effect=fetch), \
              patch.object(oversold_cases, 'symbol_of', return_value='100790.KQ'):
             got = tj.chart_data('2026-11-16', '100790', today=datetime(2026, 11, 17).date())
         self.assertEqual((len(got['bars']), got['source'], got['prev_close']), (200, 'NH (실행기 기록, 일부 시간)', 100.0))
@@ -264,7 +287,7 @@ class ReviewFixTests(unittest.TestCase):
         import oversold_cases
         import oversold_research
         bars = [(datetime(2026, 8, 3, 9, m, tzinfo=KST), 10, 11, 9, 10, 5) for m in range(3)]
-        with patch.object(tj, '_ledger_bars', return_value=[]), patch.object(kiwoom_data, 'configured', return_value=True), \
+        with patch.object(tj, '_ledger_bars', return_value={}), patch.object(kiwoom_data, 'configured', return_value=True), \
              patch.object(kiwoom_data, 'day_bars', return_value={'bars': bars, 'prev_close': 9.5}), \
              patch.object(oversold_research, 'fetch', return_value=[]) as fetch, \
              patch.object(oversold_cases, 'symbol_of', return_value='005930.KS'):
@@ -279,13 +302,36 @@ class ReviewFixTests(unittest.TestCase):
         import oversold_research
         bars = [(datetime(2026, 8, 3, 9, m, tzinfo=KST), 10, 11, 9, 10, 5) for m in range(3)]
         daily = [(datetime(2026, 7, 31, tzinfo=KST), 8.7, 8.7, 8.7, 8.7)]
-        with patch.object(tj, '_ledger_bars', return_value=[]), patch.object(kiwoom_data, 'configured', return_value=True), \
+        with patch.object(tj, '_ledger_bars', return_value={}), patch.object(kiwoom_data, 'configured', return_value=True), \
              patch.object(kiwoom_data, 'day_bars', return_value={'bars': bars, 'prev_close': 9.5}), \
              patch.object(oversold_research, 'fetch', return_value=daily) as fetch, \
              patch.object(oversold_cases, 'symbol_of', return_value='005930.KS'):
             got = tj.chart_data('2026-08-03', '005930', today=datetime(2026, 11, 17).date())
         self.assertEqual(got['prev_close'], 9.5)  # the same raw-price basis as the bars
         fetch.assert_not_called()
+
+    def test_chart_uses_kis_when_nh_and_kiwoom_are_unavailable(self):
+        import kis_data
+        import kiwoom_data
+        import oversold_research
+
+        bar = (datetime(2026, 11, 26, 9, 1, tzinfo=KST), 10, 11, 9, 10, 5)
+        with patch.object(tj, '_ledger_bars', return_value={}), patch.object(kiwoom_data, 'configured', return_value=True), \
+             patch.object(kiwoom_data, 'day_bars', side_effect=kiwoom_data.KiwoomError), \
+             patch.object(kis_data, 'configured', return_value=True), \
+             patch.object(kis_data, 'day_bars', return_value={'bars': [bar], 'prev_close': 9}), \
+             patch.object(oversold_research, 'fetch') as yahoo:
+            got = tj.chart_data('2026-11-26', '005930', today=datetime(2026, 11, 27).date())
+        self.assertEqual((got['source'], got['prev_close'], got['bars']), ('KIS KRX 1m', 9, [['09:01', 10, 11, 9, 10, 5]]))
+        yahoo.assert_not_called()
+
+    def test_chart_does_not_hide_a_provider_programming_error(self):
+        import kiwoom_data
+
+        with patch.object(kiwoom_data, 'configured', return_value=True), \
+             patch.object(kiwoom_data, 'day_bars', side_effect=AssertionError('unexpected error')):
+            with self.assertRaisesRegex(AssertionError, 'unexpected error'):
+                tj.chart_data('2026-11-26', '005930', own=[])
 
     def test_rebuild_keeps_each_pressure_part_toss_failed_to_return(self):
         good = {'short': {'date': '2026-11-16', 'amount_100m': 7.0}, 'credit': {'date': '2026-11-14', 'margin_balance': 5}, 'lending': None}

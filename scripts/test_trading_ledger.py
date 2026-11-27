@@ -169,7 +169,7 @@ class LedgerTests(unittest.TestCase):
    return (f'<rss><channel><item><title>{title}</title><pubDate>Wed, 11 Nov 2026 10:30:00 +0900</pubDate>'
            f'<source>{publisher}</source></item></channel></rss>').encode()
   docs=[xml('코스피 상승','SBS Biz · 경제/금융'),xml('코스닥150 동향','한국경제TV'),xml('반도체 업황','KBS 뉴스')]
-  with patch.object(etf_news.urllib.request,'urlopen',side_effect=[io.BytesIO(d) for d in docs]):
+  with patch.object(etf_news,'SOURCES',('google_news_rss',)), patch.object(etf_news.urllib.request,'urlopen',side_effect=[io.BytesIO(d) for d in docs]):
    news=etf_news.headlines7(datetime(2026,11,11,11,0,tzinfo=ZoneInfo('Asia/Seoul')))
   event={'event':'decision','time':'2026-11-11T11:00:00+09:00','news':news}
   with tempfile.TemporaryDirectory() as temp:

@@ -93,7 +93,7 @@ def _drop(key, session):
     asyncio.ensure_future(close())
 
 
-async def _call(key, token, build, tool, arguments, timeout):
+async def _call(key, token, build, tool, arguments, timeout, before_send=None):
     session = _sessions.get(key)
     if session is not None and (session.token != token or time.monotonic() - session.started > MAX_AGE_S):
         _drop(key, session)
@@ -102,6 +102,8 @@ async def _call(key, token, build, tool, arguments, timeout):
         session = _sessions[key] = _Session(build(), token)
     try:
         await asyncio.shield(session.ready)  # everyone waiting for this start fails or goes on together
+        if before_send is not None:
+            before_send()
         result = await session.client.call_tool(tool, arguments=arguments, timeout=timeout, raise_on_error=False)
     except BaseException:
         _drop(key, session)
@@ -111,14 +113,14 @@ async def _call(key, token, build, tool, arguments, timeout):
     return result
 
 
-async def call(config, build, tool, arguments, timeout):
+async def call(config, build, tool, arguments, timeout, *, before_send=None):
     """The result, or None when this call should use its own process. Reads only, so a call the shared process lost at
     once (it died) may be asked again; one that failed to start or ran into its time limit is raised."""
     key, token = key_of(config), token_stamp()
     if token is None or time.monotonic() < _resting.get(key, 0):
         return None
     started = time.monotonic()
-    future = asyncio.run_coroutine_threadsafe(_call(key, token, build, tool, arguments, timeout), _background_loop())
+    future = asyncio.run_coroutine_threadsafe(_call(key, token, build, tool, arguments, timeout, before_send), _background_loop())
     try:
         return await asyncio.wrap_future(future)
     except Exception as exc:

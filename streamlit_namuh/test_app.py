@@ -2,6 +2,7 @@ import pytest
 import unittest
 import sqlite3
 import json
+import sys
 import tempfile
 import time
 from concurrent.futures import Future
@@ -9,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import app
 from streamlit.testing.v1 import AppTest
@@ -158,6 +159,13 @@ class HoldingStopDisplayTests(unittest.TestCase):
 
 
 
+def expire_broker_snapshot(kind, account):
+    cache = sys.modules['__main__']._broker_snapshot_cache()
+    key = ('broker-snapshot', kind, account)
+    _, snapshot = cache[key]
+    cache[key] = (time.monotonic() - 31, snapshot)
+
+
 def app_test(tab, **subtabs):
     """The dashboard with `tab` open: only the open main tab runs (lazy tabs, 2026-11-13); keyed sub-tabs the same way."""
     ui = AppTest.from_file(app.__file__, default_timeout=30)
@@ -301,13 +309,17 @@ def test_sell_results_without_books_use_the_days_running_average():
     assert round(out[3][0]) == 200 and round(out[3][1], 2) == 0.95 and 4 not in out
 
 
-def _quick_sell_page():
+def _quick_sell_page(amount_supported=None, show_order_type=False, sell_amount_supported=None):
     import streamlit as st
     import app
     sent = st.session_state.setdefault('sent', [])
     app.quick_sell_panel([('114800', 'KODEX 인버스', 496), ('005930', '삼성전자 (005930)', 3),
                           ('0261H0', '0261H0', 2), ('379810', '379810', 2)], st.session_state.get('pending', {}),
-                         lambda code, qty: sent.append(('SELL', code, qty)), lambda code, qty: sent.append(('BUY', code, qty)), 'qs', '테스트')
+                         lambda code, qty: sent.append(('SELL', code, qty)), lambda code, qty: sent.append(('BUY', code, qty)), 'qs', '테스트',
+                         buy_amount_limit=100_000 if amount_supported is not None else None,
+                         buy_amount_supported=amount_supported is True, show_order_type=show_order_type,
+                         sell_amount_limit=1_000_000 if sell_amount_supported is not None else None,
+                         sell_amount_supported=sell_amount_supported is True)
 
 
 def test_quick_trade_buttons_file_quantity_sells_buys_and_sell_alls():
@@ -334,6 +346,101 @@ def test_quick_trade_buttons_file_quantity_sells_buys_and_sell_alls():
     ui.run()
     assert ui.button(key='qs_sell_114800').disabled  # one request at a time per holding
     assert ui.number_input(key='qs_qty_005930')  # the quantity box is on the row, not hidden in a menu
+
+
+def test_live_quick_buy_accepts_an_amount_and_retains_quantity_selection():
+    ui = AppTest.from_function(_quick_sell_page, args=(True,)).run()
+    assert ui.button(key='qs_buy_114800').disabled
+    ui.number_input(key='qs_buy_amount_114800').set_value(50_000).run()
+    ui.button(key='qs_buy_114800').click().run()
+    assert ui.session_state['sent'] == [('BUY', '114800', {'amount_krw': 50_000})]
+    ui.radio(key='qs_buy_unit_114800').set_value('수량').run()
+    assert not ui.button(key='qs_buy_114800').disabled
+    unavailable = AppTest.from_function(_quick_sell_page, args=(False,)).run()
+    unavailable.number_input(key='qs_buy_amount_114800').set_value(50_000).run()
+    assert unavailable.button(key='qs_buy_114800').disabled
+
+
+def test_live_buy_amount_request_keeps_legacy_quantity_and_submission_day(tmp_path):
+    from nh_live_follow import manual_buy_requests
+
+    app.request_live_buy(tmp_path, 'live-1', '005930', 2)
+    app.request_live_buy(tmp_path, 'live-1', '090710', {'amount_krw': 50_000})
+    assert manual_buy_requests(tmp_path, 'live-1') == {
+        '005930': 2, '090710': {'amount_krw': 50_000, 'day': datetime.now(app.KST).date().isoformat()}}
+
+
+def test_buy_amount_uses_opening_price_and_leaves_the_input_editable(monkeypatch):
+    state = {'popup': False, 'amount': 20000}
+    monkeypatch.setattr(app.st, 'session_state', state)
+    lookup = unittest.mock.Mock(side_effect=[7130, 7200, 110000, None])
+    app.seed_order_amount('popup', 'amount', '090710', lookup, 100_000)
+    lookup.assert_not_called()
+    state['popup'] = True
+    app.seed_order_amount('popup', 'amount', '090710', lookup, 100_000)
+    assert state['amount'] == 7130
+    state.update(popup=False, amount=30_000)
+    app.seed_order_amount('popup', 'amount', '090710', lookup, 100_000)
+    assert state['amount'] == 30_000
+    state['popup'] = True
+    app.seed_order_amount('popup', 'amount', '090710', lookup, 100_000)
+    assert state['amount'] == 7200
+    for _ in range(2):
+        app.seed_order_amount('popup', 'amount', '090710', lookup, 100_000)
+        assert state['amount'] is None
+
+
+def test_sell_all_amount_defaults_to_one_share_price(monkeypatch):
+    state = {'qs_sellall_popup_090710': True}
+    monkeypatch.setattr(app.st, 'session_state', state)
+    options = app.manual_amount_open_options('qs_sellall', '090710', lambda _: 7110, 1_000_000)
+    options['on_change'](*options['args'])
+    assert state['qs_sellall_amount_090710'] == 7110
+
+
+def test_live_sell_amount_and_full_exit_submit_distinct_requests():
+    ui = AppTest.from_function(_quick_sell_page, args=(True, True, True)).run()
+    assert ui.button(key='qs_sellall_114800').label == '전량 매도 확인'
+    ui.radio(key='qs_sell_unit_114800').set_value('금액').run()
+    assert ui.button(key='qs_sell_114800').disabled
+    ui.number_input(key='qs_sell_amount_114800').set_value(12_340).run()
+    ui.button(key='qs_sell_114800').click().run()
+    assert ui.session_state['sent'] == [('SELL', '114800', {'amount_krw': 12_340})]
+    ui.radio(key='qs_sellall_unit_114800').set_value('금액').run()
+    ui.number_input(key='qs_sellall_amount_114800').set_value(50_000).run()
+    assert ui.button(key='qs_sellall_114800').label == '금액 매도 확인'
+    ui.button(key='qs_sellall_114800').click().run()
+    ui.radio(key='qs_sellall_unit_114800').set_value('전량').run()
+    ui.button(key='qs_sellall_114800').click().run()
+    assert ui.session_state['sent'][-2:] == [('SELL', '114800', {'amount_krw': 50_000}), ('SELL', '114800', None)]
+
+    old = AppTest.from_function(_quick_sell_page, args=(True, True, False)).run()
+    old.radio(key='qs_sellall_unit_114800').set_value('금액').run()
+    old.number_input(key='qs_sellall_amount_114800').set_value(50_000).run()
+    assert old.button(key='qs_sellall_114800').disabled
+
+
+def test_live_sell_amount_request_coexists_with_quantity_and_full_exit(tmp_path):
+    from nh_live_follow import exit_requests
+
+    app.request_live_exit(tmp_path, 'live-1', ['005930'], 2)
+    app.request_live_exit(tmp_path, 'live-1', ['108490'])
+    app.request_live_exit(tmp_path, 'live-1', ['090710'], {'amount_krw': 50_000})
+    assert exit_requests(tmp_path, 'live-1') == {
+        '005930': 2, '108490': None, '090710': {'amount_krw': 50_000, 'day': datetime.now(app.KST).date().isoformat()}}
+
+
+def test_live_order_popovers_display_the_only_supported_order_type():
+    ui = AppTest.from_function(_quick_sell_page, args=(True, True)).run()
+    assert not ui.exception
+    popovers = ui.get('popover')
+    assert popovers
+    for popover in popovers:
+        assert any(item.type == 'caption' and item.value == '주문 유형 · 보통가(지정가)' for item in popover)
+        assert not any(item.type == 'selectbox' for item in popover)
+    ui.radio(key='qs_buy_unit_114800').set_value('수량').run()
+    ui.button(key='qs_buy_114800').click().run()
+    assert ui.session_state['sent'] == [('BUY', '114800', 248)]
 
 
 def _auto_page():
@@ -477,6 +584,11 @@ class SubmitTest(unittest.TestCase):
             self.assertTrue(any('잔고·주문을 불러오는 중' in str(c.value) for c in ui.caption))
             next(button for button in ui.button if button.label == 'ETF 현황 새로고침').click().run()
             self.assertEqual(ui.session_state['etf_broker_snapshot']['holdings'][0]['보유수량'], 1)
+            observed = ui.session_state['etf_broker_snapshot']['confirmed_at']
+            pages.reset_mock()
+            next(button for button in ui.button if button.label == 'ETF 현황 새로고침').click().run()
+            pages.assert_not_called()
+            self.assertTrue(any(f'마지막 성공 조회 {observed:%m/%d %H:%M:%S} KST' in c.value for c in ui.caption))
             from datetime import timedelta
             ui.session_state['etf_broker_snapshot']['time'] -= timedelta(minutes=3)
             ui.session_state['etf_broker_attempt'] = 0
@@ -486,7 +598,9 @@ class SubmitTest(unittest.TestCase):
             self.assertEqual(pages.call_count, 0)
             self.assertTrue(any('최근 2분 안의 증권사 잔고가 없어' in str(c.value) for c in ui.caption))
             pages.side_effect = ValueError('조회 실패')
+            expire_broker_snapshot('paper', 'paper')
             next(button for button in ui.button if button.label == 'ETF 현황 새로고침').click().run()
+            pages.assert_called_once()
             self.assertTrue(ui.session_state['etf_broker_error'])
             with self.assertRaises(KeyError):
                 ui.session_state['etf_broker_snapshot']
@@ -757,6 +871,8 @@ class SubmitTest(unittest.TestCase):
         self.assertEqual((rows['KODEX 코스닥150레버리지']['실현손익(오늘)'], rows['KODEX 코스닥150레버리지']['합계']), (500, 1250))
         self.assertEqual(app.symbol_pnl_rows([], {}), [])
         lev = rows['KODEX 코스닥150레버리지']
+        self.assertEqual(lev['총 매수 금액'], 65250)
+        self.assertIsNone(rows['KODEX 인버스']['총 매수 금액'])
         self.assertEqual((lev['평가수익률'], lev['누적수익률']), (1.15, 2.3))  # 750/65,250 · 500/(4,350x5)
         month = {r['종목']: r for r in app.symbol_pnl_rows(holdings, books, period=('2026-11', '2026-11'))}
         self.assertEqual((month['KODEX 인버스']['실현손익(2026-11)'], month['KODEX 인버스']['실현수익률(2026-11)']), (-25, -1.96))
@@ -929,15 +1045,16 @@ class SubmitTest(unittest.TestCase):
         now = datetime(2026, 11, 11, 11, 0, tzinfo=app.KST)
         row = {'act_no':'secret-account', 'iem_cd':'114800', 'orr_qty':2, 'tot_cns_qty':1,
                'ny_cns_qty':0, 'can_qty':1, 'cns_avg_uit_pr':1277, 'orr_rjt_rsn_cd_nm':''}
-        with patch.object(app, 'verify_account'), patch.object(app, 'read_live_pages', return_value={'Output_0':[row], '_pagination_complete':True}):
-            rows = app.live_order_rows(Adapter(), 'paper', now)
+        balance = {'Output_0': {}, 'Output_1': [], '_pagination_complete': True}
+        with patch.object(app, 'verify_account'), patch.object(app, 'read_live_pages', side_effect=[balance, {'Output_0':[row], '_pagination_complete':True}]):
+            rows = app.live_broker_snapshot(Adapter(), 'paper', now)['orders']
         self.assertEqual(rows[0]['체결수량'], 1)
         self.assertEqual(rows[0]['취소수량'], 1)
         self.assertNotIn('secret-account', str(rows))
         for result in ({'Output_0': [], '_pagination_complete':False}, {'Output_0':[None], '_pagination_complete':True}):
-            with patch.object(app, 'verify_account'), patch.object(app, 'read_live_pages', return_value=result):
+            with patch.object(app, 'verify_account'), patch.object(app, 'read_live_pages', side_effect=[balance, result]):
                 with self.assertRaises(ValueError):
-                    app.live_order_rows(Adapter(), 'paper', now)
+                    app.live_broker_snapshot(Adapter(), 'paper', now)
 
     def test_live_start_disabled_but_stop_remains_available(self):
         config = SimpleNamespace(args=['--mode', 'paper', '--account', 'paper'])
@@ -982,10 +1099,30 @@ class SubmitTest(unittest.TestCase):
             next(b for b in ui.button if b.label == '실계좌 1 잔고·주문 조회').click().run()
             data = ui.session_state['live_balance_all_data']
             self.assertEqual((data['orders'], data['errors']), ([], []))  # an empty day, not a failure
+            paging.reset_mock()
             paging.side_effect = ValueError('incomplete')
+            next(b for b in ui.button if b.label == '실계좌 1 잔고·주문 조회').click().run()
+            paging.assert_not_called()
+            self.assertFalse(ui.error)
+            expire_broker_snapshot('live', 'paper')
             next(b for b in ui.button if b.label == '실계좌 1 잔고·주문 조회').click().run()
             self.assertEqual(len(ui.session_state['live_balance_all_data']['errors']), 1)
             self.assertTrue(any('비었다고 간주하지 마세요' in str(e.value) for e in ui.error))
+            self.assertTrue(any('마지막 성공 조회' in c.value and '기록 없음' not in c.value for c in ui.caption))
+
+            from nh_live_broker import LiveOrderBlocked
+            paging.side_effect = [
+                {'Output_0': {'dca': 12500}, 'Output_1': [], '_pagination_complete': True},
+                LiveOrderBlocked('broker response body empty'),
+            ]
+            next(b for b in ui.button if b.label == '실계좌 1 잔고·주문 조회').click().run()
+            self.assertTrue(any('12,500원' in metric.value for metric in ui.metric))
+            self.assertTrue(any('당일 주문 확인 불가' in error.value for error in ui.error))
+            self.assertTrue(any('마지막 잔고 성공 조회' in caption.value for caption in ui.caption))
+            paging.reset_mock()
+            next(b for b in ui.button if b.label == '실계좌 1 잔고·주문 조회').click().run()
+            paging.assert_not_called()
+            self.assertTrue(any('당일 주문 확인 불가' in error.value for error in ui.error))
 
     def test_shared_runner_caption_says_listing_is_not_an_order_target(self):
         config = SimpleNamespace(args=['--mode', 'paper', '--account', 'paper'])
@@ -1170,6 +1307,73 @@ def _live_shadow_chart_flow():
     app.paper_trade_chart(None, None, False, False, fills=[], key='live_test', shadow=shadow)
 
 
+def _live_actual_chart_flow():
+    import app
+    import streamlit as st
+    from datetime import datetime
+
+    now = datetime.now(app.KST)
+    actual = [{'symbol': '347850', 'holding': None, 'sale': {'time': now, 'qty': 12, 'outcome': '익절', 'time_unknown': False}}]
+    st.button('실계좌 익절 열기', on_click=app.select_live_chart, args=('live-1', '347850'))
+    app.paper_trade_chart(None, None, False, False, fills=[], key='live_live-1', engine='jev', actual_positions=actual)
+
+
+def test_live_positions_use_only_given_account_fills_and_keep_unknown_cost():
+    now = datetime(2026, 11, 27, 10, tzinfo=app.KST)
+    rows = [
+        {'time': '2026-11-27T09:01:00+09:00', 'symbol': '466100', 'side': 'BUY', 'qty': 24, 'price': 20200},
+        {'time': '2026-11-27T09:03:00+09:00', 'symbol': '466100', 'side': 'SELL', 'qty': 24, 'price': 21100},
+        {'time': '2026-11-27T00:00:00+09:00', 'symbol': '108490', 'side': 'SELL', 'qty': 1, 'price': 296000},
+    ]
+    snapshot = {'holdings': [{'종목코드': '005930', '보유수량': 2}]}
+    groups = {r['symbol']: r for r in app.live_position_groups(rows, snapshot, now)}
+    assert groups['005930']['holding'] == 2
+    assert groups['466100']['sale']['outcome'] == '익절'
+    assert groups['108490']['sale']['outcome'] == '손익 미확인'
+    assert groups['108490']['sale']['time_unknown']
+    assert app.live_position_groups([], {'holdings': []}, now) == []
+
+
+def test_sidebar_shows_today_jev_picks_and_manual_watchlist_only():
+    now = datetime(2026, 11, 27, 10, tzinfo=app.KST)
+    rows = [('005930', '삼성전자', 'Jev'), ('090710', '휴림로봇', '추가')]
+    assert app.sidebar_watchlist(rows, {'time': '2026-11-27T09:00:00+09:00'}, now) == {
+        '삼성전자 ·Jev': '005930', '휴림로봇 ·추가': '090710'}
+    for snapshot in ({'time': '2026-11-26T09:00:00+09:00'}, {}, {'time': 'invalid'},
+                     {'time': '2026-11-27T11:00:00+09:00'}):
+        assert app.sidebar_watchlist(rows, snapshot, now) == {'휴림로봇 ·추가': '090710'}
+
+
+def test_watchlist_status_is_compact_and_colors_only_the_result():
+    assert app.watchlist_status('삼성전자 ·Jev', {'held': True}) == ('삼성전자 ·Jev', '보유')
+    assert app.watchlist_status('클로봇 ·실계좌', {'outcome': '익절'}) == ('클로봇 ·실계좌', '익절')
+    assert app.watchlist_status('로보티즈 ·실계좌', {'outcome': '손실 매도'}) == ('로보티즈 ·실계좌', '손실')
+    assert app.watchlist_status('종목', {'held': True, 'outcome': '손절'}) == ('종목 ·보유', '손실')
+    assert app.watchlist_status('종목 ·보유', {'held': True}) == ('종목', '보유')
+    assert app.watchlist_status_tone('익절') == app.watchlist_status_tone('수익') == 'color:#ef4444'
+    assert app.watchlist_status_tone('손실') == 'color:#3b82f6'
+    assert app.watchlist_status_tone('보유') == ''
+
+
+def test_live_actual_sale_click_selects_own_chart(tmp_path):
+    import engine_roles
+    with patch.object(app, 'get_runtime_root', return_value=tmp_path), \
+         patch.object(engine_roles, 'ledger_root', return_value=tmp_path), \
+         patch.object(engine_roles, 'main_engine', return_value='jev'), \
+         patch.object(app, 'read_events', return_value=[]), \
+         patch.object(app, 'movers_snapshot', return_value={}), \
+         patch.object(app, 'watchlist_snapshot', return_value={}), \
+         patch.object(app, 'stock_names', return_value={'347850': '디앤디파마텍'}), \
+         patch.object(app, 'period_bars', return_value=[]), \
+         patch.object(app, 'investor_panel'):
+        ui = AppTest.from_function(_live_actual_chart_flow).run()
+        assert not ui.exception
+        ui.button[0].click().run()
+        assert not ui.exception
+        assert ui.selectbox(key='live_live-1_chart_symbol').value == '347850'
+        assert any('실계좌 익절' in option for option in ui.selectbox(key='live_live-1_chart_symbol').options)
+
+
 def _visibility_chart_flow():
     import app
     from datetime import datetime
@@ -1316,6 +1520,59 @@ def test_chart_options_identify_engine_holdings_and_recent_stops(tmp_path):
         inverse = next(option for option in options if 'KODEX 인버스' in option)
         ui.selectbox(key='paper_desk_chart_symbol').select(inverse).run()
         assert ui.selectbox(key='paper_desk_chart_symbol').value == inverse
+
+
+def test_profit_sale_is_available_in_chart_and_click_selects_it(tmp_path):
+    import engine_roles
+    import trading_positions
+
+    nhplug = tmp_path / 'nhplug'
+    root = nhplug / 'shared-etf-paper'
+    root.mkdir(parents=True)
+    (root / 'events.jsonl').write_text('')
+    with sqlite3.connect(root / 'orders.sqlite3') as db:
+        db.execute('CREATE TABLE fills (time TEXT, symbol TEXT, side TEXT, quantity INTEGER, price REAL)')
+    data = {'jev': {'status': 'ok', 'holdings': [], 'recent_sells': [
+        {'symbol': '347850', 'time': '2026-11-27T09:16:00+09:00', 'outcome': '익절'}]}}
+    with patch.object(app, 'get_runtime_root', return_value=tmp_path), \
+         patch.object(trading_positions, 'snapshot', return_value=data), \
+         patch.object(engine_roles, 'ledger_root', return_value=root), \
+         patch.object(engine_roles, 'main_engine', return_value='jev'), \
+         patch.object(app, 'read_events', return_value=[]), \
+         patch.object(app, 'movers_snapshot', return_value={}), \
+         patch.object(app, 'watchlist_snapshot', return_value={}), \
+         patch.object(app, 'stock_names', return_value={'347850': '디앤디파마텍'}), \
+         patch.object(app, 'period_bars', return_value=[]), \
+         patch.object(app, 'investor_panel'):
+        ui = AppTest.from_function(_sidebar_chart_flow).run()
+        options = ui.selectbox(key='paper_desk_chart_symbol').options
+        assert any('디앤디파마텍 (347850)' in item and '최근 익절' in item for item in options)
+        ui.session_state['pending_chart'] = {'engine': 'jev', 'code': '347850'}
+        ui.run()
+        assert not ui.exception
+        assert '347850' in ui.selectbox(key='paper_desk_chart_symbol').value
+
+
+def test_desk_sale_button_selects_profit_chart():
+    import trading_positions
+    config = SimpleNamespace(args=['--mode', 'paper', '--account', 'paper'])
+    configs = SimpleNamespace(mcp_servers={'nhplug_paper': config, 'nhplug_readonly': config})
+    row = {'symbol': '347850', 'qty': 12, 'time': datetime.now(app.KST).isoformat(), 'outcome': '익절'}
+    states = {'jev': {'status': 'ok', 'holdings': [], 'sells': [row], 'recent_sells': [row], 'unknown_sells': 0}}
+    with patch('src.config.loader.load_agent_config', return_value=configs), \
+         patch('src.tools.mcp.MCPServerAdapter', side_effect=[Adapter(), Adapter()] * 10), \
+         patch.object(trading_positions, 'snapshot', return_value=states), \
+         patch.object(app, 'stock_names', return_value={'347850': '디앤디파마텍'}), \
+         patch.object(app, 'period_bars', return_value=[]), \
+         patch.object(app, 'investor_panel'):
+        ui = app_test('트레이딩 현황').run()
+        assert not ui.exception
+        ui.button(key='desk_jev_347850').click().run()
+        assert not ui.exception
+        assert '347850' in ui.selectbox(key='paper_desk_chart_symbol').value
+        assert ui.session_state['etf_desk_tab'] == 'Jev 판단 근거'
+        assert any('디앤디파마텍 · Jev 판단 상세' in row.value for row in ui.markdown)
+        assert not any(metric.label == '정규 판단에서 선택한 후보' for metric in ui.metric)
 
 
 def test_with_broker_fills_counts_a_sale_the_mirror_has_not_recorded_yet():
@@ -1719,15 +1976,25 @@ def test_a_moved_order_is_read_again_at_most_every_few_seconds():
         assert app.shared_snapshot('live', 'acct-moved', fetch, max_age=4) == {'n': 2}
 
 
-def test_shared_snapshot_serves_other_sessions_until_a_refresh():
-    app._read_cache().pop(('broker-snapshot', 'live', 'acct-x'), None)
+def test_shared_snapshot_reuses_a_success_for_thirty_seconds():
+    app._broker_snapshot_cache().pop(('broker-snapshot', 'live', 'acct-x'), None)
     calls = []
     fetch = lambda: calls.append(1) or {'n': len(calls)}
     assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 1}
     assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 1}  # a second tab within the window reuses it
-    assert app.shared_snapshot('live', 'acct-x', fetch, fresh=True) == {'n': 2}  # the refresh button reads again
-    with patch.object(app.time, 'monotonic', return_value=app.time.monotonic() + app.SHARED_SNAPSHOT_S + 1):
-        assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 3}
+    now = app.time.monotonic()
+    with patch.object(app.time, 'monotonic', return_value=now + 29):
+        assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 1}
+    with patch.object(app.time, 'monotonic', return_value=now + 31):
+        assert app.shared_snapshot('live', 'acct-x', fetch) == {'n': 2}
+
+
+def test_clearing_display_quote_cache_does_not_refetch_account_snapshot():
+    fetch = Mock(return_value={'orders': []})
+    app.shared_snapshot('live', 'quote-cache-test', fetch)
+    app._read_cache().clear()
+    assert app.shared_snapshot('live', 'quote-cache-test', fetch) == {'orders': []}
+    fetch.assert_called_once()
 
 
 def test_listing_quotes_take_prices_from_kiwoom_and_only_listing_fields_from_nh(monkeypatch):
@@ -1815,13 +2082,28 @@ def test_two_screens_reading_one_account_at_once_make_one_read():
 
 def test_a_stuck_read_does_not_hold_the_other_screens():
     import threading
+    import pytest
     stuck = threading.Event()
     t = threading.Thread(target=lambda: app.shared_snapshot('live', 'acct-stuck', lambda: stuck.wait(5) or {'n': 1}))
     t.start()
     with patch.object(app, 'SNAPSHOT_WAIT_S', 0.05):
-        assert app.shared_snapshot('live', 'acct-stuck', lambda: {'n': 2}) == {'n': 2}
+        with pytest.raises(TimeoutError):
+            app.shared_snapshot('live', 'acct-stuck', lambda: pytest.fail('중복 조회'))
+        assert app.shared_snapshot('live', 'another-account', lambda: {'n': 2}) == {'n': 2}
     stuck.set()
     t.join()
+
+
+def test_failed_live_snapshot_records_stage_without_exception_contents(monkeypatch):
+    import api_calls
+    import pytest
+    notes = []
+    monkeypatch.setattr(app, 'verify_account', lambda *args: None)
+    monkeypatch.setattr(app, 'read_live_pages', lambda *args: (_ for _ in ()).throw(ValueError('secret-account')))
+    monkeypatch.setattr(api_calls, 'problem', lambda *args: notes.append(args))
+    with pytest.raises(ValueError):
+        app.live_broker_snapshot(None, 'secret-account', datetime.now(app.KST))
+    assert notes == [('nh', 'dashboard:broker_snapshot', 'balance ValueError')]
 
 
 def test_a_failed_kiwoom_read_is_asked_once_more_before_nh(monkeypatch):

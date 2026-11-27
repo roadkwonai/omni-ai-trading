@@ -42,6 +42,26 @@ def test_an_empty_or_missing_log_finds_nothing(tmp_path, root):
     assert keys(root) == {}
 
 
+def test_load_report_reads_one_connection_and_keeps_available_tables(root, monkeypatch):
+    opened = []
+    original = A.ro_connect
+
+    def connect(path, **kwargs):
+        opened.append(path)
+        return original(path, **kwargs)
+
+    monkeypatch.setattr(A, 'ro_connect', connect)
+    calls(root, 'kis', 1)
+    calls(root, 'kis', 2, day='2026-11-23')
+    with sqlite3.connect(root / 'api-calls.sqlite3') as db:
+        db.execute('DROP TABLE seconds')
+    data = A.collect(root, NOW)
+    assert [row['n'] for row in data['today']] == [1]
+    assert data['days'] == ['2026-11-23'] and [row['n'] for row in data['base']] == [2]
+    assert data['seconds'] == []
+    assert len(opened) == 1
+
+
 def test_refusals_are_told_apart_from_a_slow_local_start_and_other_errors(root):
     calls(root, 'nh', 100)
     failed(root, 'nh', 'tool error: rate_limit IGW42903', 3)

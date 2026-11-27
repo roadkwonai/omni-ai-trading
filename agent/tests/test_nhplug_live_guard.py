@@ -74,6 +74,20 @@ def test_rejects_wrong_symbol_and_incomplete_history(tmp_path):
     with pytest.raises(LiveOrderBlocked): reserve(guard,fields={**BUY,'orr_pr':1401})
     with pytest.raises(LiveOrderBlocked): reserve(guard,fields={**BUY,'orr_amt':1000000})
 
+
+@pytest.mark.parametrize('order_type', ['05', '17'])
+@pytest.mark.parametrize('side', ['Buy', 'Sell'])
+def test_native_unpriced_order_cannot_reserve_using_an_observed_quote(tmp_path, order_type, side):
+    guard = LiveOrderGuard(A, tmp_path)
+    fields = {**BUY, 'nmn_pr_tp_cd': order_type, 'orr_pr': 1400 if side == 'Buy' else 1399}
+    with pytest.raises(LiveOrderBlocked, match='invalid cash KRX limit order'):
+        reserve(guard, f'krstockOrderCash{side}', fields)
+    del fields['orr_pr']
+    with pytest.raises(LiveOrderBlocked, match='unsupported order fields'):
+        reserve(guard, f'krstockOrderCash{side}', fields)
+    with guard._db() as db:
+        assert db.execute('SELECT COUNT(*) FROM live_intents').fetchone() == (0,)
+
 def test_simultaneous_reservations_only_one_succeeds(tmp_path):
     def attempt():
         try:

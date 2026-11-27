@@ -15,7 +15,9 @@ def recorded_choice(tmp_path, now, choice, checked_at):
     return db
 
 
-def test_audit_records_and_caches_read_only_comparison(tmp_path):
+def test_audit_records_and_caches_read_only_comparison(tmp_path, monkeypatch):
+    import kiwoom_data
+    monkeypatch.setattr(kiwoom_data, 'call', lambda *args, **kwargs: [{'for_netprps': '12'}])
     now = datetime(2026, 11, 26, 10, 12, tzinfo=audit.KST)
     db = recorded_choice(tmp_path, now, 'K200', now.isoformat())
     calls = []
@@ -28,7 +30,8 @@ def test_audit_records_and_caches_read_only_comparison(tmp_path):
     kwargs = {'source': db, 'root': tmp_path, 'fetch_program': program, 'fetch_bars': bars}
     result = audit.run(now, **kwargs)
     assert result['decisions'][0]['symbol'] == '069500'
-    assert result['decisions'][0]['signal']['status'] == 'program_missing_or_stale'
+    assert result['decisions'][0]['signal']['status'] == 'program_source_empty'
+    assert result['captures']['069500']['etf_flow']['status'] == 'observed'
     assert audit.run(now, **kwargs) == result
     assert calls == [('program', '069500'), ('bars', '069500')]
     saved = json.loads((tmp_path / 'audit/2026-11-26/1010.json').read_text())

@@ -174,6 +174,26 @@ def test_one_corrupt_line_does_not_hide_the_other_events(tmp_path):
     assert ec.bad_lines(path) == 1
 
 
+def test_cycle_reader_keeps_late_order_events_and_handles_rotation(tmp_path):
+    cycle = 'a' * 32
+    path = tmp_path / 'events.jsonl'
+    order = {'cycle_id': cycle, 'event': 'sell_submitted'}
+    reason = {'cycle_id': cycle, 'event': 'v2_risk_exit', 'reason': 'stop_loss'}
+    path.write_text(json.dumps(order) + '\n')
+    initial = ec._cycles(path, {cycle})
+    assert initial == {cycle: [order]}
+    with path.open('a') as stream:
+        stream.write(json.dumps(reason) + '\n')
+    assert ec._cycles(path, {cycle}) == {cycle: [order, reason]}
+    assert initial == {cycle: [order]}
+    path.write_text((json.dumps(reason) + '\n') * 3)
+    assert ec._cycles(path, {cycle}) == {cycle: [reason] * 3}
+    replacement = tmp_path / 'replacement'
+    replacement.write_text(json.dumps(reason) + '\n')
+    replacement.replace(path)
+    assert ec._cycles(path, {cycle}) == {cycle: [reason]}
+
+
 def test_an_append_parses_only_the_new_lines_and_a_rewrite_starts_over(tmp_path):
     # review4 D-7: every runner append (about every 17 s) re-parsed the whole 39 MB events.jsonl on the next rerun
     import os

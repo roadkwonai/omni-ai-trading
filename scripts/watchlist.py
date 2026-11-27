@@ -54,7 +54,8 @@ def stock_news(name, now, limit=3, *, timeout=3):
         publisher = (item.findtext('source') or '').strip()
         if (name in title and timedelta(0) <= now.astimezone(timezone.utc) - published <= timedelta(hours=24)
                 and not any(p in (title + ' ' + publisher).casefold() for p in RESTRICTED_PUBLISHERS)):
-            rows.append({'title': title[:200], 'published': published.isoformat(), 'publisher': publisher[:80]})
+            rows.append({'title': title[:200], 'published': published.isoformat(), 'publisher': publisher[:80],
+                         'link': (item.findtext('link') or '')[:500]})
     return sorted(rows, key=lambda r: r['published'], reverse=True)[:limit]
 
 
@@ -75,14 +76,14 @@ def naver_stock_news(code, name, now, limit=3, *, timeout=3):
             continue
         if (name in title and timedelta(0) <= now.astimezone(timezone.utc) - published <= timedelta(hours=24)
                 and not any(p in (title + ' ' + publisher).casefold() for p in RESTRICTED_PUBLISHERS)):
-            rows.setdefault(title, {'title': title[:200], 'published': published.isoformat(), 'publisher': publisher[:80]})
+            rows.setdefault(title, {'title': title[:200], 'published': published.isoformat(), 'publisher': publisher[:80],
+                                    'link': str(item.get('mobileNewsUrl') or '')[:500]})
     return sorted(rows.values(), key=lambda r: r['published'], reverse=True)[:limit]
 
 
 FETCH_STOCK_NEWS = stock_news             # the fetch fresh_stock_news uses (tests swap it)
-FETCH_STOCK_FALLBACK = naver_stock_news   # asked when that one fails or Google is resting (etf_news.resting)
+FETCH_STOCK_FALLBACK = naver_stock_news
 STOCK_NEWS_TTL = timedelta(minutes=5)      # user 2026-11-18: each watchlist stock's own news refreshed every 5 minutes
-STOCK_NEWS_BACKOFF = timedelta(minutes=5)  # after a failed fetch (429, timeout) nobody retries that stock for this long
 
 
 def stock_news_cache_path():
@@ -93,17 +94,27 @@ def stock_news_cache_path():
     return home / 'nhplug' / 'stock-news-cache.json'
 
 
-def fresh_stock_news(code, name, now, fetch=None):
+def fresh_stock_news(code, name, now, fetch=None, *, diagnostics=None):
+    from stock_material import cache_lock
+    if not isinstance(code, str) or not re.fullmatch(CODE_PATTERN, code):
+        return None
+    path = stock_news_cache_path()
+    try:
+        with cache_lock(path.with_suffix(f'.{code}.lock')):
+            return _fresh_stock_news(path, code, name, now, fetch, diagnostics)
+    except OSError:
+        if diagnostics is not None:
+            diagnostics['status'] = 'cache_unavailable'
+        return None
+
+
+def _fresh_stock_news(path, code, name, now, fetch, diagnostics):
     """One watchlist stock's newest headlines, refreshed every STOCK_NEWS_TTL through a shared cache (the selection
     every 30 minutes left Jev with stock news up to 35 minutes behind). A failed fetch returns the cached rows and
     backs off; the caller still filters by age (nh_paper_isolated.recent_stock_headlines). None when unknown."""
     from config_store import write_json
-    path = stock_news_cache_path()
-    try:
-        data = json.loads(path.read_text(encoding='utf-8'))
-        data = data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
-        data = {}
+    from stock_material import cache_lock, read_cache
+    data = read_cache(path)
     entry = data.get(code) if isinstance(data.get(code), dict) else None
     try:
         fetched = datetime.fromisoformat(entry['fetched']) if entry else None
@@ -111,30 +122,61 @@ def fresh_stock_news(code, name, now, fetch=None):
     except (TypeError, ValueError, KeyError):
         fetched = retry = None
     if fetched and (timedelta(0) <= now - fetched < STOCK_NEWS_TTL or (retry and now < retry)):
+        if diagnostics is not None:
+            diagnostics.update(entry.get('diagnostics') or {})
+            diagnostics['cache'] = True
         return entry.get('rows')
     if not name:
         return entry.get('rows') if entry else None
     import etf_news
     google = 'google_news_rss'
+    from stock_material import READ_ERRORS, broker_news, daum_stock_news, direct_news
+    from nh_paper_isolated import recent_stock_headlines
+    sources, collected = {}, []
+
+    def collect(source, ask):
+        if etf_news.resting(source, now):
+            sources[source] = 'resting'
+            return
+        try:
+            items = ask()
+        except READ_ERRORS as exc:
+            sources[source] = 'error'
+            etf_news.rest(source, now, exc)
+            return
+        sources[source] = ('unavailable' if items is None else 'recent' if recent_stock_headlines(items, now)
+                           else 'outside_window' if items else 'empty')
+        collected.extend(items or [])
+
+    collect(google, lambda: (fetch or FETCH_STOCK_NEWS)(name, now))
+    collect('naver_stock_news', lambda: FETCH_STOCK_FALLBACK(code, name, now))
+    collect('daum_stock_news', lambda: daum_stock_news(name, now))
+    collect('kis_stock_news', lambda: broker_news(code, now))
+    direct, status = direct_news(name, now)
+    sources.update(status)
+    collected.extend(direct)
+    kept = {}
+    for row in [*((entry or {}).get('rows') or []), *collected]:
+        try:
+            at = datetime.fromisoformat(row['published'])
+            if timedelta(0) <= now - at <= timedelta(hours=24):
+                title = row['title'].removesuffix(' - ' + str(row.get('publisher') or ''))
+                kept[title] = (at, row)
+        except (KeyError, TypeError, ValueError):
+            continue
+    rows = [row for _, row in sorted(kept.values(), key=lambda pair: pair[0], reverse=True)[:12]]
+    status = {'checked_at': now.isoformat(), 'sources': sources,
+              'status': 'recent' if recent_stock_headlines(rows, now) else 'outside_window' if rows else
+                        'incomplete' if any(v in ('error', 'resting') for v in sources.values()) else 'empty'}
+    if diagnostics is not None:
+        diagnostics.update(status)
     try:
-        rows = None
-        if not etf_news.resting(google, now):
-            try:
-                rows = (fetch or FETCH_STOCK_NEWS)(name, now)
-            except (OSError, ValueError, ET.ParseError, http.client.HTTPException) as exc:
-                etf_news.rest(google, now, exc)
-        if rows is None:
-            rows = FETCH_STOCK_FALLBACK(code, name, now)
-        kept = {r.get('title'): r for r in [*(entry.get('rows') or [] if entry else []), *rows]}  # a story a source no longer lists stays
-        rows = sorted(kept.values(), key=lambda r: str(r.get('published')), reverse=True)[:3]
-        data[code] = {'fetched': now.isoformat(), 'rows': rows, 'retry_after': None}
-    except (OSError, ValueError, ET.ParseError, http.client.HTTPException):
-        rows = entry.get('rows') if entry else None
-        data[code] = {'fetched': now.isoformat(), 'rows': rows, 'retry_after': (now + STOCK_NEWS_BACKOFF).isoformat()}
-    for old in [c for c, e in data.items() if not isinstance(e, dict) or str(e.get('fetched', ''))[:10] < (now - timedelta(days=1)).isoformat()[:10]]:
-        data.pop(old)
-    try:
-        write_json(path, data, indent=None)
+        with cache_lock(path.with_suffix('.lock')):
+            cutoff = (now - timedelta(days=1)).date().isoformat()
+            data = {c: e for c, e in read_cache(path).items()
+                    if isinstance(e, dict) and str(e.get('fetched', ''))[:10] >= cutoff}
+            data[code] = {'fetched': now.isoformat(), 'rows': rows, 'diagnostics': status}
+            write_json(path, data, indent=None)
     except OSError:
         pass  # an unwritten cache only costs another fetch
     return rows
@@ -231,7 +273,8 @@ def enrich(read, candidates, now, preopen=False):
         info['investor_daily_net_qty'] = investor_days(read, code, today)
         if info['investor_daily_net_qty']:
             info['investor_read_at'] = datetime.now(KST).isoformat(timespec='seconds')
-        info['news'] = fresh_stock_news(code, info['name'], now) or []  # the shared 5-minute cache the runner reads too
+        info['news_coverage'] = {}
+        info['news'] = fresh_stock_news(code, info['name'], now, diagnostics=info['news_coverage']) or []
         stocks[code], bars[code] = info, rows
     return stocks, bars
 
@@ -242,11 +285,16 @@ def select(read, candidates, now, preopen=False):
     from etf_universe import SYMBOLS as ETFS
     from nh_etf_auto_v2 import _jev7_question
     from nh_paper_isolated import SPLIT_TRANCHE_KRW, recent_stock_headlines
+    from stock_material import disclosures
+    from concurrent.futures import ThreadPoolExecutor
     # A stock whose single share costs more than one buy tranche could never be bought; don't spend a slot on it.
     affordable = {c: d for c, d in candidates.items() if type(d.get('price')) in (int, float) and 0 < d['price'] <= SPLIT_TRANCHE_KRW}
     stocks, bars = enrich(read, affordable, now, preopen)
     if not stocks:
         raise ValueError('no candidate with fresh data')
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for code, material in zip(stocks, pool.map(lambda code: disclosures(code, now), stocks)):
+            stocks[code]['disclosures'] = material
     market = {}
     for name, code in ETFS.items():
         rows = chart(read, code, now, preopen)
@@ -279,7 +327,8 @@ def select(read, candidates, now, preopen=False):
                                                     for code, s in stocks.items()},
                                          'market_etf_change_pct': market,
                                          **({'overnight_material': overnight} if overnight else {}),
-                                         'note': 'Charts labelled by 6-digit code are the candidate stocks; the others are market ETFs.'
+                                         'note': 'Charts labelled by 6-digit code are the candidate stocks; the others are market ETFs. '
+                                                 'News coverage is a retrieval check, not a market signal. Disclosure dates may lack an exact publication time.'
                                                  + (' The session has not opened: stock charts and figures are today\'s NXT pre-market (08:00~08:50), '
                                                     'ETF charts the previous session\'s.' if preopen else '')})
     verdict = answer['watchlist']

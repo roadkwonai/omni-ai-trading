@@ -1236,6 +1236,155 @@ class HandTrades(unittest.TestCase):
     def state(self):
         return f.manual_state(self.d, {'hash': None})
 
+    def test_amount_sell_uses_guarded_bid_and_caps_at_owned(self):
+        fills = self.YESTERDAY + [('005930', 'BUY', 4, 50_000, '05T10:30:00')]
+        own(self.d, '005930', 2, day='20261105')
+        request = {'amount_krw': 200_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.exit_request_path(self.d, 'live-1'), {'005930': request})
+        self.assertEqual(f._exit_requests(f.exit_request_path(self.d, 'live-1')), {'005930': request})
+        plan, sent = self.run_step(self.d, fills=fills, holdings=[('005930', 2, 50_000)],
+                                   bid=51_900, ask=52_000, execute=True)
+        self.assertEqual((plan['action'], sent.call_args.args[4]['orr_qty']), ('SELL', 2))
+        self.assertEqual(self.state()['offsets']['005930'], -2)
+
+    def test_amount_sell_refusals_and_rounding(self):
+        def apply(amount, day, owned, target, buys=None, claim='exit'):
+            requests = {'exit': {'005930': {'amount_krw': amount, 'day': day}},
+                        'buy': buys or {}, 'ids': {'exit': claim, **({'buy': claim} if buys else {})}}
+            with patch.object(f, 'release_requests'):
+                return f.apply_manual(self.d, 'live-1', {'hash': None}, target, NOW, {}, requests,
+                                      quote=lambda _: (51_900, 52_000), owned=owned)
+        today = NOW.date().isoformat()
+        for amount, day, owned, target, buys, reason in [
+            (1, today, {'005930': 2}, {'005930': 2}, None, 'amount below one share'),
+            (100_000, '2000-01-01', {'005930': 2}, {'005930': 2}, None, 'request is from another day'),
+            (100_000, today, {}, {}, None, 'mirror no longer owns this symbol'),
+            (100_000, today, {'005930': 2}, {'005930': 1}, None, 'mirror target and holdings differ'),
+            (100_000, today, {'005930': 2}, {'005930': 2}, {'005930': 1}, 'another manual buy is pending'),
+        ]:
+            with self.subTest(reason=reason):
+                result = apply(amount, day, owned, target, buys, reason)
+                self.assertEqual(result['refused']['005930']['why'], reason)
+                self.assertGreaterEqual(result['offsets'].get('005930', 0), 0)
+
+    def test_amount_sell_quote_failure_retains_claim_and_retry(self):
+        request = {'amount_krw': 55_000, 'day': NOW.date().isoformat()}
+        path = f.exit_request_path(self.d, 'live-1')
+        f.write_request_file(path, {'005930': request})
+        adapter = reader(51_900, 52_000)
+        original = adapter.call_tool.side_effect
+        calls = []
+        def quote(tool, params):
+            calls.append(1)
+            return original(tool, params) if len(calls) == 1 else {'status': 'error'}
+        adapter.call_tool.side_effect = quote
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   execute=True, rd=adapter)
+        self.assertEqual(plan['action'], 'HOLD')
+        self.assertEqual(f._exit_requests(path.with_name(path.name + '.claim')), {'005930': request})
+        sent.assert_not_called()
+        retry, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                    bid=51_900, ask=52_000, execute=True)
+        self.assertEqual((retry['action'], sent.call_args.args[4]['orr_qty']), ('SELL', 1))
+
+    def test_amount_buy_resolves_fresh_ask_and_never_exceeds_amount(self):
+        request = {'amount_krw': 125_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+        self.assertEqual(f.manual_buy_requests(self.d, 'live-1')['005930'], request)
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   bid=51_900, ask=52_000, execute=True)
+        self.assertEqual((plan['action'], plan['qty'], plan['price']), ('BUY', 2, 52_000))
+        self.assertEqual(sent.call_args.args[4]['orr_qty'], 2)
+        self.assertEqual(self.state()['amounts']['005930'], 21_000)
+        self.assertEqual(self.state()['left'], {})
+
+    def test_amount_buy_is_capped_again_when_the_order_quote_rises(self):
+        request = {'amount_krw': 125_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+        quote_prices = iter([(49_900, 50_000), (49_900, 50_000), (69_900, 70_000)])
+        adapter = MagicMock()
+        def quote(tool, params):
+            bid, ask = next(quote_prices)
+            return {'status': 'ok', 'data': {'Output_0': {'iem_cd': params['stock_code'], 'bidp': bid, 'askp': ask}}}
+        adapter.call_tool.side_effect = quote
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   execute=True, rd=adapter)
+        fields = sent.call_args.args[4]
+        self.assertEqual((plan['action'], fields['orr_qty'], fields['orr_pr']), ('BUY', 1, 70_000))
+        self.assertLessEqual(fields['orr_qty'] * fields['orr_pr'], request['amount_krw'])
+        self.assertEqual(self.state()['amounts']['005930'], 55_000)
+        self.assertEqual(self.state()['left']['005930'], 1)
+        own(self.d, '005930', 2)
+        later, next_send = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 2, 50_000)],
+                                         bid=69_900, ask=70_000, execute=True)
+        self.assertEqual((later['execution'], later['execution_reason']),
+                         ('NO_ORDER', 'manual amount below one share at current ask'))
+        next_send.assert_not_called()
+
+    def test_amount_buy_does_not_send_when_order_quote_exceeds_budget(self):
+        request = {'amount_krw': 60_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+        quote_prices = iter([(49_900, 50_000), (49_900, 50_000), (69_900, 70_000)])
+        adapter = MagicMock()
+        def quote(tool, params):
+            bid, ask = next(quote_prices)
+            return {'status': 'ok', 'data': {'Output_0': {'iem_cd': params['stock_code'], 'bidp': bid, 'askp': ask}}}
+        adapter.call_tool.side_effect = quote
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   execute=True, rd=adapter)
+        self.assertEqual((plan['execution'], plan['execution_reason']), ('NO_ORDER', 'manual amount below one share at current ask'))
+        self.assertEqual(self.state()['amounts']['005930'], 60_000)
+        sent.assert_not_called()
+
+    def test_amount_quote_failure_keeps_request_for_retry(self):
+        request = {'amount_krw': 125_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+        adapter = reader(51_900, 52_000)
+        original = adapter.call_tool.side_effect
+        calls = []
+        def quote(tool, params):
+            calls.append(1)
+            return original(tool, params) if len(calls) == 1 else {'status': 'error'}
+        adapter.call_tool.side_effect = quote
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   execute=True, rd=adapter)
+        self.assertEqual(plan['action'], 'HOLD')
+        self.assertIn('ValueError', plan['warning'])
+        self.assertEqual(f._buy_requests(f.manual_buy_path(self.d, 'live-1').with_name('live-manual-buys-live-1.json.claim')),
+                         {'005930': request})
+        sent.assert_not_called()
+        retry, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                    bid=51_900, ask=52_000, execute=True)
+        self.assertEqual((retry['action'], sent.call_args.args[4]['orr_qty']), ('BUY', 2))
+
+    def test_amount_below_one_share_and_missing_position_are_refused(self):
+        for amount, owns, expected in ((10_000, True, 'amount below one share'),
+                                       (100_000, False, 'mirror no longer owns this symbol')):
+            request = {'amount_krw': amount, 'day': NOW.date().isoformat()}
+            f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+            if not owns:
+                with LiveOrderGuard(A, self.d)._db() as db:
+                    db.execute('DELETE FROM live_adoptions')
+            plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)] if owns else [],
+                                       bid=51_900, ask=52_000, execute=True)
+            self.assertEqual(plan['manual_refused']['005930']['why'], expected)
+            sent.assert_not_called()
+
+    def test_amount_rejected_before_send_restores_budget_and_next_day_expires_remainder(self):
+        request = {'amount_krw': 125_000, 'day': NOW.date().isoformat()}
+        f.write_request_file(f.manual_buy_path(self.d, 'live-1'), {'005930': request})
+        def refuse(*args, **kwargs):
+            raise LiveOrderBlocked('daily new symbol limit')
+        with self.assertRaises(LiveOrderBlocked):
+            self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                          bid=51_900, ask=52_000, execute=True, send=refuse)
+        self.assertEqual((self.state()['left']['005930'], self.state()['amounts']['005930']), (2, 125_000))
+        tomorrow = NOW + __import__('datetime').timedelta(days=3)
+        plan, sent = self.run_step(self.d, fills=self.YESTERDAY, holdings=[('005930', 1, 50_000)],
+                                   bid=51_900, ask=52_000, now=tomorrow, execute=True)
+        self.assertEqual(self.state()['left'], {})
+        sent.assert_not_called()
+
     def test_a_hand_buy_refused_before_sending_is_bought_next_cycle(self):
         """M1: the guard refused (nothing reached the broker) yet the hand buy was spent, and never bought."""
         from src.tools.nhplug_live_guard import LiveOrderBlocked

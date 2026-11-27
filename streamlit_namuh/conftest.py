@@ -45,12 +45,15 @@ def _restore_main_module():
 def _no_broker_keys(monkeypatch, tmp_path):
     """Like scripts/conftest.py: tests never call Kiwoom or Toss with the operator's live keys nor write their token or
     bar cache (trading_journal.chart_data tries Kiwoom 1-minute bars before Yahoo)."""
+    import kis_data
     import kiwoom_data
     import toss_data
     for module, cache in ((kiwoom_data, 'kiwoom'), (toss_data, 'toss')):
         monkeypatch.setattr(module, '_keys', lambda: ('', ''))
         monkeypatch.setattr(module, 'TOKEN_FILE', tmp_path / f'{cache}-token.json')
     monkeypatch.setattr(kiwoom_data, 'BARS_DIR', tmp_path / 'kiwoom-minute')
+    monkeypatch.setattr(kis_data, '_keys', lambda mode: ('', ''))
+    monkeypatch.setattr(kis_data, 'ROOT', tmp_path / 'kis')
 
 
 @pytest.fixture(autouse=True)

@@ -579,7 +579,7 @@ def anomalies(facts, now, skipped=None):
     shadow = facts.get('shadow') or {}  # issue_candidates round status (market_movers.shadow_round, phase 1 2026-11-18)
     shadow_at = _time(shadow.get('time'))
     if ran(loops_due and shadow_at, 'shadow.silent') and (now - shadow_at).total_seconds() / 60 > SHADOW_SILENT_MIN:
-        found['shadow.silent'] = f"그림자 후보 기록 마지막 회차 {shadow.get('time')}"  # a stamp from an earlier day too
+        found['shadow.silent'] = f"관찰 후보 기록 마지막 회차 {shadow.get('time')}"  # a stamp from an earlier day too
     if ran(in_session and shadow_at and shadow_at.astimezone(KST).date() == now.date(), 'shadow.source_error'):
         for name, error in (shadow.get('errors') or {}).items():
             found[f'shadow.source_error:{name}'] = str(error)

@@ -53,7 +53,7 @@ def render(root):
             st.dataframe(rows, hide_index=True, width='stretch')
     keys = sorted(A.status(root)['keys'], key=lambda k: (sort_date(k), not A.is_month(k)), reverse=True)
     if not keys:
-        st.info('아직 복기·감사 보고서가 없습니다. 예약 작업이 평일 16:45에 일일 복기·감사(그날 관찰·매매 근거·거장·거시 관점·그림자 비교), '
+        st.info('아직 복기·감사 보고서가 없습니다. 예약 작업이 평일 16:45에 일일 복기·감사(그날 관찰·매매 근거·거장·거시 관점·비교 전략 검토), '
                 '금 17:40에 주간 감사, 매월 1일 17:45에 월간 감사를 씁니다. 아침 08:50 전략 리포트는 계획, 저녁 보고서는 복기입니다. '
                 '지금 쓰려면 Claude에게 "오늘 장기투자 복기해줘"라고 요청하세요.', icon=':material/fact_check:')
         return

@@ -92,7 +92,7 @@ def architecture(st):
          'tag': f"{last.get('day') or '계획 전'} · {len(last.get('orders') or [])}건"},
         {'id': 'live', 'lane': 'engine', 'col': 4, 'type': 'security', 'label': '장기투자 실계좌', 'sublabel': '계좌 운용금 비례 · 보호 가드',
          'tag': live_tag[:48]},
-        {'id': 'close', 'lane': 'engine', 'col': 5, 'type': 'backend', 'label': '마감', 'sublabel': '순자산·그림자 기록',
+        {'id': 'close', 'lane': 'engine', 'col': 5, 'type': 'backend', 'label': '마감', 'sublabel': '순자산·비교 전략 기록',
          'tag': f"순자산 {st['nav']['actual']:,.0f}" if st['nav'].get('actual') else '기록 전'},
         {'id': 'db', 'lane': 'store', 'col': 2, 'type': 'database', 'label': 'longterm.sqlite3', 'sublabel': '결정·순자산·상태', 'tag': '읽기 전용 표시'},
         {'id': 'book', 'lane': 'store', 'col': 3, 'type': 'database', 'label': '가상 계좌 1억', 'sublabel': '수수료 0.015%',
@@ -152,7 +152,7 @@ def algorithm(st):
          'tag': f"월 매도 {t['monthly_sell_share'] * 100:.0f}% · 손절 없음"},
         {'id': 'orders', 'lane': 'act', 'col': 4, 'type': 'messagebus', 'label': '주문 계획', 'sublabel': '매도 먼저 · 09:40부터',
          'tag': f'오늘 {orders}건'},
-        {'id': 'record', 'lane': 'act', 'col': 5, 'type': 'database', 'label': '기록·그림자', 'sublabel': '기본(기준 비중+달리오)·자동(추천)',
+        {'id': 'record', 'lane': 'act', 'col': 5, 'type': 'database', 'label': '기록·비교 전략', 'sublabel': '기본(기준 비중+달리오)·자동(추천)',
          'tag': '가상 체결' if s['execute'] else '계획만(dry-run)'},
     ]
     for n in nodes:
@@ -230,14 +230,14 @@ def components(st):
         {'단계': '거시 배경', '규칙': 'FRED 금리·신용·발표일, 연준 FOMC. 규칙 미사용(참고)', '설정': 'FRED_API_KEY', '파일': 'longterm_macro.collect', '기록': 'macro'},
         {'단계': '국면 판정', '규칙': ' → '.join(v[0] for v in L.REGIMES.values()) + ' 순서로 먼저 맞는 국면', '설정': '—', '파일': 'vibe_longterm.raw_regime', '기록': 'regime'},
         {'단계': '국면 확정', '규칙': f"{t['confirm_days']}거래일 연속(투매 {L.CONFIRM_DAYS['panic']})", '설정': 'tuning.confirm_days', '파일': 'vibe_longterm.confirm', '기록': 'regime'},
-        {'단계': '모듈 선택', '규칙': '수동 = 켠 모듈 · 추천 = 그림자만 · 자동 실제 적용 = 국면 추천', '설정': 'mode · auto_live · modules', '파일': 'vibe_longterm.active_modules', '기록': 'regime'},
+        {'단계': '모듈 선택', '규칙': '수동 = 켠 모듈 · 추천 = 비교 장부만 · 자동 실제 적용 = 국면 추천', '설정': 'mode · auto_live · modules', '파일': 'vibe_longterm.active_modules', '기록': 'regime'},
         {'단계': '스토리 점검', '규칙': '주의 = 위성 절반, 훼손 = 0, 기울기 ±25%. 실패하면 30일 안 이전 판단', '설정': 'modules.lynch_story', '파일': 'vibe_longterm.story_check', '기록': 'story'},
         {'단계': '목표 비중', '규칙': f'켜진 모듈 순서대로 조정, 위성 합계 ≤ {L.SAT_MAX * 100:.0f}%', '설정': 'weights', '파일': 'vibe_longterm.targets', '기록': 'plan'},
         {'단계': '밴드·상한', '규칙': f"±{t['band'] * 100:.0f}%p 밖만 · 하루 매수 {t['daily_buy_share'] * 100:.0f}% · 월 매도 {t['monthly_sell_share'] * 100:.0f}%",
          '설정': 'tuning.band · daily_buy_share · monthly_sell_share', '파일': 'vibe_longterm.trade_targets · orders', '기록': 'plan'},
         {'단계': '주문', '규칙': '09:40부터 매도 먼저. 가상 체결은 "가상 체결" 스위치가 켜졌을 때만', '설정': 'execute', '파일': 'vibe_longterm.trade', '기록': 'order'},
         {'단계': '실계좌', '규칙': '계좌 운용금 비례 · 실주문 스위치 + --execute가 모두 있어야 주문', '설정': 'accounts.json engine longterm', '파일': 'longterm_live.cycle', '기록': 'longterm-live.jsonl'},
-        {'단계': '마감', '규칙': '순자산과 그림자(기본 기준 비중+달리오, 자동 추천 조합) 기록', '설정': '—', '파일': 'vibe_longterm.close', '기록': 'nav'},
+        {'단계': '마감', '규칙': '순자산과 비교 전략(기본 기준 비중+달리오, 자동 추천 조합) 기록', '설정': '—', '파일': 'vibe_longterm.close', '기록': 'nav'},
     ]
 
 
@@ -339,7 +339,7 @@ def today_flow(st):
          f"△ {story.get('source')}" if story.get('source') else '…'),
         ('plan', 'day', 4, 'messagebus', '주문 계획', '09:40부터', f"✓ {L.why_label(last.get('why'))} · {orders}건" if planned else '… 09:40 전'),
         ('fill', 'day', 5, 'database', '가상 계좌', '가상 체결 스위치', ('✓ 가상 체결' if last.get('execute') else '— 계획만(dry-run)') if planned else '…'),
-        ('close', 'close', 5, 'database', '마감 기록', '순자산 · 그림자', f"✓ {nav.get('day')}" if nav.get('day') == plan.get('day') and decided else
+        ('close', 'close', 5, 'database', '마감 기록', '순자산 · 비교 전략', f"✓ {nav.get('day')}" if nav.get('day') == plan.get('day') and decided else
          f"… 마지막 {nav.get('day')}" if nav.get('day') else '…'),
     ]
     for key, v in st['live'].items():
@@ -372,7 +372,7 @@ def rule_rows(st):
     rows += [{'구분': '엔진 수치', '항목': v[3], '지금 값': f"{t[k] * 100:.0f}%" if isinstance(t[k], float) else f'{t[k]}일',
               '뜻': f"범위 {v[1]}~{v[2]}" if isinstance(v[1], int) else f"범위 {v[1] * 100:.0f}~{v[2] * 100:.0f}%"} for k, v in L.TUNING.items()]
     rows += [{'구분': '고정 규칙', '항목': name, '지금 값': value, '뜻': meaning} for name, value, meaning in [
-        ('모드', L.MODES[s['mode']], '수동 = 켠 모듈 · 추천 = 그림자만 · 자동 실제 적용 = 국면 추천 조합'),
+        ('모드', L.MODES[s['mode']], '수동 = 켠 모듈 · 추천 = 비교 장부만 · 자동 실제 적용 = 국면 추천 조합'),
         ('실행 방식', '가상 체결' if s['execute'] else '계획만(dry-run)', '"가상 체결" 스위치(장기투자 → 계좌·실행)'),
         ('위성 합계 상한', f'{L.SAT_MAX * 100:.0f}%', '비중을 어떻게 정해도 위성 3종 합계는 이 값 이하'),
         ('투매 확정', f"{L.CONFIRM_DAYS['panic']}거래일", '다른 국면은 시장 탭의 확정 일수'),
@@ -380,7 +380,7 @@ def rule_rows(st):
         ('과열 기준', f'200일선 × {L.OVERHEAT:g}', '위성이 이 위로 달아오르면 타점 지도에 덜어내기 제안'),
         ('스토리 유효 기간', f'{L.STORY_MAX_AGE.days}일', 'LLM 점검이 실패하면 이 기간 안의 마지막 판단을 씀'),
         ('작은 차이 무시', f'순자산 {L.MIN_TRADE_SHARE * 100:.1f}%', '목표와의 차이가 이보다 작으면 주문하지 않음'),
-        ('수수료(가상)', f'{L.FEE * 100:.3f}%', '가상 체결과 그림자 순자산에 반영'),
+        ('수수료(가상)', f'{L.FEE * 100:.3f}%', '가상 체결과 비교 전략 순자산에 반영'),
         ('시작 자금', f'{L.CAPITAL / 1e8:g}억 원', '가상 계좌'), ('손절', '없음', '버핏·기준 비중: 매도는 리밸런싱·모듈 규칙으로만')]]
     return rows
 
@@ -453,7 +453,7 @@ def status(st, now, enabled=None):
     return [{'label': '장기투자 운영', 'value': '켜짐' if on else '꺼짐', 'tone': 'ok' if on else 'off', 'icon': 'power_settings_new',
              'help': '계좌·자동매매 → 운영 엔진에서 바꿉니다. 꺼지면 판단·주문·마감을 하지 않습니다.'},
             {'label': '모드', 'value': L.MODES[s['mode']], 'tone': 'ai', 'icon': 'tune',
-             'sub': ('자동 실제 적용' if s['auto_live'] else '자동 조합은 그림자로만') if s['mode'] == 'auto' else None},
+             'sub': ('자동 실제 적용' if s['auto_live'] else '자동 조합은 비교용으로만') if s['mode'] == 'auto' else None},
             {'label': '실행 방식', 'value': '가상 체결' if s['execute'] else '계획만', 'tone': 'ok' if s['execute'] else 'off', 'icon': 'play_circle',
              'sub': '가상 계좌 1억 원'},
             {'label': '다음 단계', 'value': nxt, 'tone': 'off', 'icon': 'schedule'}]

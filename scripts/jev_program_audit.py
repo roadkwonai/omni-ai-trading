@@ -129,9 +129,19 @@ def run(now=None, source=SOURCE, root=RESEARCH, fetch_program=None, fetch_bars=N
                     capture.update(quote_capture(code, now, rows, bars))
                     tape = Tape(now.date(), rows, bars)
                     capture.update(valid_program_rows=len(tape.points), valid_bars=len(tape.bars))
+                    if code in SYMBOLS.values():
+                        try:
+                            etf_rows = kiwoom_data.call('ka40010', {'stk_cd': code}, 'etftisl_trnsn', max_pages=1, timeout=2)
+                            capture['etf_flow'] = {'source': 'ka40010', 'received_at': datetime.now(KST).isoformat(),
+                                                   'rows': etf_rows, 'status': 'observed' if etf_rows else 'empty'}
+                        except Exception as exc:
+                            capture['etf_flow'] = {'source': 'ka40010', 'status': 'read_failed',
+                                                   'error_type': type(exc).__name__}
                     for pick in (item for item in picks if item['symbol'] == code):
                         at = datetime.fromisoformat(pick['at'])
                         signal = tape.signal(at)
+                        if not rows:
+                            signal = {'status': 'program_source_empty'}
                         held = pick['question'] == 'holding'
                         action = proposed_action(signal, held)
                         disagreement = action == 'defer_entry' or (action == 'review_exit' and pick['choice'] == 'HOLD')

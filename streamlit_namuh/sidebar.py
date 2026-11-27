@@ -105,7 +105,7 @@ def render(tabs, states, records, alerts, engines=None):
 
 
 
-def open_trading_chart(engine, symbol):
+def open_trading_chart(engine, symbol, *, show_evidence=False):
     """Open the shared trading view and request the selected engine's chart."""
     import streamlit as st
 
@@ -113,6 +113,9 @@ def open_trading_chart(engine, symbol):
     st.session_state['trading_account_tab'] = 'paper-shared'
     st.session_state['main_tab'] = '트레이딩 현황'
     st.session_state['pending_chart'] = {'engine': engine, 'code': symbol}
+    if show_evidence:
+        st.session_state['etf_desk_tab'] = 'Jev 판단 근거'
+        st.session_state['paper_desk_detail_reset'] = symbol
 
 
 def open_trade_history(engine, symbol):
@@ -166,7 +169,7 @@ def longterm_side_lines(state):
     if nav.get('actual') and nav.get('base'):
         gap = nav['actual'] - nav['base']  # the shadows receive the same 적립식 money, so the gap is like for like
         paid = f" · 적립 누계 {nav[LT.CONTRIBUTED] / 1e4:,.0f}만" if nav.get(LT.CONTRIBUTED) else ''
-        lines.append(f"순자산 {nav['actual'] / 1e8:,.3f}억{paid} · 기본 그림자 대비 {gap:+,.0f}원 ({nav.get('day', '')})")
+        lines.append(f"순자산 {nav['actual'] / 1e8:,.3f}억{paid} · 기본 비교 전략 대비 {gap:+,.0f}원 ({nav.get('day', '')})")
     stories = (state.get('story') or {}).get('stories') or {}
     warn = [f"{LT.ASSETS[k][1].split(' ', 1)[-1]} {LT.STORY_LABELS[v['status']]}" for k, v in stories.items()
             if k in LT.ASSETS and v.get('status') in ('watch', 'broken')]

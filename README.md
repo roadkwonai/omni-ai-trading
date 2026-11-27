@@ -65,7 +65,7 @@
 </details>
 
 <p align="center">
-  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.9"><img src="https://img.shields.io/badge/release-v0.1.9-ff6600?style=flat-square" alt="Release v0.1.9"></a>
+  <a href="https://github.com/roadkwonai/omni-ai-trading/releases/tag/v0.1.10"><img src="https://img.shields.io/badge/release-v0.1.10-ff6600?style=flat-square" alt="Release v0.1.10"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-1a1c20?style=flat-square" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/Python-3.11%2B-1a1c20?style=flat-square" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/broker-NH%20%EB%82%98%EB%AC%B4%20PLUG-ff6600?style=flat-square" alt="NH 나무 PLUG OpenAPI">

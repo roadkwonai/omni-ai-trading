@@ -45,6 +45,19 @@ def test_slots_failures_and_problems(log):
     assert log.last_seen()['kiwoom'][1] == (now + timedelta(minutes=1)).isoformat(timespec='seconds')
 
 
+def test_one_call_cannot_leave_partially_written_metrics(log):
+    now = datetime.now(KST)
+    day = now.date().isoformat()
+    log._db().execute("CREATE TRIGGER reject_second BEFORE INSERT ON seconds BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+    log.record('kis', 'quotes', False, 20, status=429, now=now)
+    assert log.rows(day) == [] and log.failures(day) == []
+
+    log._db().execute('DROP TRIGGER reject_second')
+    log.record('kis', 'quotes', False, 20, status=429, now=now)
+    assert log.rows(day)[0]['n'] == 1 and len(log.failures(day)) == 1
+    assert log._db().execute('SELECT n FROM seconds').fetchone() == (1,)
+
+
 def test_http_and_mcp_entry_points(log):
     import time
     log._http('https://openapi.tossinvest.com/api/v1/stocks/A005930/info?k=v', None, time.monotonic(), 200, 10, None)
@@ -66,6 +79,49 @@ def test_nh_budget_diagnostic_records_refusal_without_request_data(log):
                               'budget_wait': 0.2, 'admitted_at': 1000.2, 'same_cap_exceeded': True}, result, None)
     row = log._db().execute('SELECT operation, requested_wait, same_cap_exceeded, outcome FROM nh_budget_diagnostics').fetchone()
     assert row == ('krstockInquiryBalance', 2.5, 1, 'tool error: rate_limit IGW42903')
+
+
+def test_nh_diagnostic_keeps_only_safe_send_attempt_fields(log):
+    from types import SimpleNamespace
+    result = SimpleNamespace(is_error=True, content=[SimpleNamespace(text='{"category":"rate_limit","code":"IGW42903"}')])
+    log.nh_budget_diagnostic({'operation': 'krstockInquiryBalance', 'requested_at': 1000.0,
+                              'send_attempts': [{'path': 'shared', 'at': 1001.25, 'account': '1234567890'},
+                                                {'path': 'fresh', 'at': 1002.5, 'token': 'SECRET'}]}, result, None)
+    db = log._db()
+    rows = db.execute('SELECT diagnostic_id, attempt, path, sent_at FROM nh_send_attempts ORDER BY attempt').fetchall()
+    assert rows == [(1, 1, 'shared', 1001.25), (1, 2, 'fresh', 1002.5)]
+    assert 'SECRET' not in str(rows) and '1234567890' not in str(rows)
+    assert db.execute('SELECT outcome FROM nh_budget_diagnostics WHERE rowid=?', (rows[0][0],)).fetchone()[0].endswith('IGW42903')
+
+
+def test_nh_diagnostic_upgrades_an_already_open_connection(log):
+    from types import SimpleNamespace
+    db = log._db()
+    db.execute('DROP TABLE nh_send_attempts')
+    log._send_schema_ready.discard(db)
+    log.nh_budget_diagnostic({'operation': 'krstockInquiryBalance',
+                              'send_attempts': [{'path': 'shared', 'at': 1001.0}]},
+                             SimpleNamespace(is_error=False), None)
+    assert db.execute('SELECT path, sent_at FROM nh_send_attempts').fetchall() == [('shared', 1001.0)]
+
+
+def test_diagnostic_prune_preserves_attempts_if_parent_delete_fails(log):
+    log.nh_budget_diagnostic({'operation': 'krstockInquiryBalance',
+                              'send_attempts': [{'path': 'shared', 'at': 1001.0}]}, None, None)
+    db = log._db()
+    db.execute("UPDATE nh_budget_diagnostics SET time = '2000-01-01'")
+    db.execute("CREATE TRIGGER reject_prune BEFORE DELETE ON nh_budget_diagnostics BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+    db.close()
+    log._conn.clear()
+
+    db = log._db()
+    assert db.execute('SELECT s.path FROM nh_budget_diagnostics d JOIN nh_send_attempts s ON s.diagnostic_id = d.rowid').fetchall() == [('shared',)]
+    db.execute('DROP TRIGGER reject_prune')
+    db.close()
+    log._conn.clear()
+    db = log._db()
+    assert db.execute('SELECT rowid FROM nh_budget_diagnostics').fetchall() == []
+    assert db.execute('SELECT diagnostic_id FROM nh_send_attempts').fetchall() == []
 
 
 def test_track_counts_and_reraises(log):

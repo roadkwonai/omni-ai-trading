@@ -184,7 +184,7 @@ def render_period(start, end, root=L.ROOT):
             color=alt.Color('장부:N', title=None), tooltip=['날짜', '장부', alt.Tooltip('순자산:Q', format=',')]).properties(height=260),
             width='stretch')
         paid = data['contributed']
-        st.caption('가상 계좌와 두 그림자 장부의 순자산(수수료 반영, 세금 미반영).'
+        st.caption('가상 계좌와 두 비교 장부의 순자산(수수료 반영, 세금 미반영).'
                    + (f" 적립 누계 {paid[max(paid)]:,.0f}원이 순자산에 들어 있습니다(세 장부 같은 금액)." if paid else ''))
     else:
         st.caption('이 기간에 기록된 장기투자 순자산이 없습니다.')

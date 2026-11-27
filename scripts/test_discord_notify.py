@@ -155,6 +155,28 @@ def test_longterm_messages_use_the_engines_labels_and_post_dca_orders(tmp_path, 
     assert texts[5] == '📈 2026-11-18 장기투자 가상 NAV · 실제(가상 계좌) 100,500,000원 · 적립 누계 600,000원'
 
 
+def test_nav_message_uses_comparison_strategy_labels(tmp_path, monkeypatch):
+    from datetime import datetime
+    _, con = make_home(tmp_path, monkeypatch)
+    con.executemany('INSERT INTO nav VALUES (?,?,?)', [('2026-11-18', 'base', 100_000_000),
+                                                       ('2026-11-18', 'auto', 101_000_000),
+                                                       ('2026-11-18', 'dca_auto', 102_000_000)])
+    con.commit()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 18, 15, 41, tzinfo=dn.KST)
+
+    monkeypatch.setattr(dn, 'datetime', Clock)
+    messages, _ = dn.longterm_items(set(), 0, {})
+    text = next(text for _, key, text in messages if key == 'nav:2026-11-18')
+    assert '기본 비교 전략(기준 비중+달리오)' in text
+    assert '자동 비교 전략(추천 조합)' in text
+    assert '적립식 시황 자동 비교 전략' in text
+    assert '그림자' not in text
+
+
 def balance_rows(path, day, values):
     path.write_text(''.join(json.dumps({'time': f'{day}T{t}:00+09:00', 'total_assets': v}) + '\n' for t, v in values))
 

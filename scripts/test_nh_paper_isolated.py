@@ -1855,6 +1855,33 @@ class MultiSymbolTests(unittest.TestCase):
         self.assertEqual((status, submit.call_args.args[4:7]), ('sell', ('114800', 'SELL', 2)))
         self.assertFalse((self.root/'exit-requests.json').exists())
 
+    def test_manual_amount_buy_uses_protective_ask_and_guarded_submission(self):
+        amount = 100_000
+        (self.root/'manual-buys.json').write_text(json.dumps({'229200': {'amount_krw': amount, 'day': NOW.date().isoformat()}}))
+        status, submit, _, _ = self.run_cycle(self.root, self.db, {})
+        args = submit.call_args.args
+        self.assertEqual((status, args[4], args[5]), ('buy', '229200', 'BUY'))
+        self.assertEqual(args[6], amount // args[7])
+        self.assertFalse((self.root/'manual-buys.json').exists())
+
+    def test_manual_amount_sell_uses_protective_bid_and_owned_limit(self):
+        holdings = self.own(INV=3, KQ150INV=2)
+        amount = 100_000
+        (self.root/'exit-requests.json').write_text(json.dumps({'114800': {'amount_krw': amount, 'day': NOW.date().isoformat()}}))
+        status, submit, _, _ = self.run_cycle(self.root, self.db, holdings)
+        args = submit.call_args.args
+        self.assertEqual((status, args[4], args[5]), ('sell', '114800', 'SELL'))
+        self.assertEqual(args[6], min(3, amount // args[7]))
+        self.assertFalse((self.root/'exit-requests.json').exists())
+
+    def test_invalid_manual_amount_sell_never_turns_into_full_exit(self):
+        holdings = self.own(INV=3, KQ150INV=2)
+        path = self.root/'exit-requests.json'
+        path.write_text(json.dumps({'114800': {'amount_krw': 1, 'day': NOW.date().isoformat()}}))
+        _, submit, _, _ = self.run_cycle(self.root, self.db, holdings)
+        self.assertFalse(any(c.args[4:6] == ('114800', 'SELL') for c in submit.call_args_list))
+        self.assertFalse(path.exists())
+
     def test_etf7_jev_entry_threshold_is_point_six_and_legacy_stays_point_seven(self):
         jev = lambda c: {'model':'jev-1.14.0','chart_sha256':'a'*64,'candidate':{'type':'choice','choice':'INV','confidence':c}}
         modes = {'decision': False, 'jev': True}

@@ -51,14 +51,12 @@ ADVICE = {
 }
 
 
-def _rows(path, sql, args=()):
+def _rows(db, sql, args=()):
     """[] while the log is missing or its table is not there yet (older code wrote it)."""
-    if not Path(path).exists():
+    if db is None:
         return []
     try:
-        with ro_connect(path, timeout=1) as db:
-            db.row_factory = sqlite3.Row
-            return [dict(r) for r in db.execute(sql, args)]
+        return [dict(r) for r in db.execute(sql, args)]
     except sqlite3.Error:
         return []
 
@@ -74,16 +72,26 @@ def kind_of(row):
 
 
 def collect(root, now):
-    path, day, since = Path(root) / 'api-calls.sqlite3', f'{now:%Y-%m-%d}', now - timedelta(minutes=WINDOW_MIN)
-    today = _rows(path, 'SELECT * FROM calls WHERE day = ? AND slot <= ?', (day, f'{now:%H:%M}'))
+    try:
+        with ro_connect(Path(root) / 'api-calls.sqlite3', timeout=1) as db:
+            db.row_factory = sqlite3.Row
+            db.execute('BEGIN')
+            return _collect(db, now)
+    except sqlite3.Error:
+        return _collect(None, now)
+
+
+def _collect(db, now):
+    day, since = f'{now:%Y-%m-%d}', now - timedelta(minutes=WINDOW_MIN)
+    today = _rows(db, 'SELECT * FROM calls WHERE day = ? AND slot <= ?', (day, f'{now:%H:%M}'))
     slots = sorted({r['slot'] for r in today if r['slot'] >= f'{since:%H:%M}'})
-    days = [r['day'] for r in _rows(path, 'SELECT DISTINCT day FROM calls WHERE day < ? AND slot BETWEEN ? AND ? ORDER BY day DESC LIMIT ?',
+    days = [r['day'] for r in _rows(db, 'SELECT DISTINCT day FROM calls WHERE day < ? AND slot BETWEEN ? AND ? ORDER BY day DESC LIMIT ?',
                                     (day, '09:00', '15:20', BASE_DAYS))]
-    base = _rows(path, f"SELECT * FROM calls WHERE day IN ({','.join('?' * len(days))})", days) if days else []
+    base = _rows(db, f"SELECT * FROM calls WHERE day IN ({','.join('?' * len(days))})", days) if days else []
     stamp = now.isoformat(timespec='seconds')
     return {'clock': f'{now:%H:%M}', 'today': today, 'slots': slots, 'days': days, 'base': base,
-            'fails': _rows(path, 'SELECT * FROM failures WHERE time >= ? AND time <= ?', (day, stamp)), 'since': since.isoformat(timespec='seconds'),
-            'seconds': _rows(path, 'SELECT * FROM seconds WHERE time >= ? AND time <= ?', (day, stamp))}
+            'fails': _rows(db, 'SELECT * FROM failures WHERE time >= ? AND time <= ?', (day, stamp)), 'since': since.isoformat(timespec='seconds'),
+            'seconds': _rows(db, 'SELECT * FROM seconds WHERE time >= ? AND time <= ?', (day, stamp))}
 
 
 def peaks(rows):

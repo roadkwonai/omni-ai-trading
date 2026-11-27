@@ -6,9 +6,11 @@ import json
 import math
 import os
 import sqlite3
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from sqlite_ro import ro_connect
 
 ENGINES = {'jev': 'Jev', 'vibe': 'vibe-trading'}
@@ -24,22 +26,49 @@ EXITS = {'inverse_protect': '인버스 수익 지키기 청산', 'inverse_market
          'ipo_time_stop': '신규주 시간 손절', 'fade_exit': '매수세 약화 익절'}
 
 
+_CYCLE_CACHE = OrderedDict()
+_CYCLE_LOCK = Lock()
+
+
 def _cycles(events_path, wanted):
-    """{cycle_id: [events]} for the wanted cycles; reads the (large) journal once, parsing only matching lines."""
-    found = {}
+    """Read matching cycles, reusing the scanned prefix of the append-only journal."""
     if not wanted or not events_path or not Path(events_path).exists():
-        return found
-    marker = '"cycle_id": "'
-    with open(events_path, encoding='utf-8') as stream:
+        return {}
+    key = (str(events_path), frozenset(wanted))
+    marker = b'"cycle_id": "'
+    wanted_bytes = {cycle.encode() for cycle in wanted}
+    with _CYCLE_LOCK, open(events_path, 'rb') as stream:
+        stat = os.fstat(stream.fileno())
+        identity = (stat.st_dev, stat.st_ino)
+        stamp = (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        previous = _CYCLE_CACHE.pop(key, None)
+        if previous and previous[:2] == (identity, stamp):
+            _CYCLE_CACHE[key] = previous
+            return previous[2]
+        found = {}
+        if previous and previous[0] == identity and stat.st_size > previous[1][0]:
+            anchor = previous[3]
+            stream.seek(previous[1][0] - len(anchor))
+            if stream.read(len(anchor)) == anchor:
+                found = {cycle: rows.copy() for cycle, rows in previous[2].items()}
+            else:
+                stream.seek(0)
+        complete = True
         for line in stream:
+            complete = line.endswith(b'\n')
             at = line.find(marker)
-            if at < 0 or line[at + len(marker):at + len(marker) + 32] not in wanted:
+            if at < 0 or line[at + len(marker):at + len(marker) + 32] not in wanted_bytes:
                 continue
             try:
                 event = json.loads(line)
-            except ValueError:
+            except (ValueError, UnicodeError):
                 continue
             found.setdefault(event['cycle_id'], []).append(event)
+        if complete and stream.tell() == stat.st_size:
+            stream.seek(max(0, stat.st_size - 4096))
+            _CYCLE_CACHE[key] = (identity, stamp, found, stream.read(min(stat.st_size, 4096)))
+            if len(_CYCLE_CACHE) > 8:
+                _CYCLE_CACHE.popitem(last=False)
     return found
 
 

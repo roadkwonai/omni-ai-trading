@@ -63,7 +63,7 @@ def test_renders_empty_and_with_records(tmp_path, monkeypatch):
     assert '-1.00%' in text and '+1.01%p' in text  # base against 1억, actual against base
     assert '**계획(주문 없음)**' in text and '**스토리**' in text and '**국면**' in text  # the latest decisions by kind
     nav = next(df.value for df in at.dataframe if '실제(가상 계좌)' in df.value.columns)
-    assert nav.loc['2026-11-18', '기본 그림자(기준 비중+달리오)'] == 99_000_000
+    assert nav.loc['2026-11-18', '기본 비교 전략(기준 비중+달리오)'] == 99_000_000
 
 
 def test_execute_switch_needs_the_phrase_and_records_history(tmp_path, monkeypatch):

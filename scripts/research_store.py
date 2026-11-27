@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from sqlite_ro import ro_connect
 
 ROOT = Path.home() / '.vibe-trading/nhplug/shared-etf-paper'
+SNAPSHOT_HISTORY_INDEX = 'CREATE INDEX IF NOT EXISTS snapshots_kind_id ON snapshots(kind, id)'
 
 
 def _connect(path):
@@ -29,6 +30,7 @@ def record(kind, payload, path=None):
         with _connect(path) as db:
             db.execute('CREATE TABLE IF NOT EXISTS snapshots (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, time TEXT NOT NULL, payload TEXT NOT NULL)')
             db.execute('CREATE INDEX IF NOT EXISTS snapshots_kind_time ON snapshots(kind, time)')
+            db.execute(SNAPSHOT_HISTORY_INDEX)
             db.execute('INSERT INTO snapshots(kind, time, payload) VALUES (?,?,?)',
                        (kind, str(payload.get('time', '')), json.dumps(payload, ensure_ascii=False)))
         path.chmod(0o600)

@@ -90,7 +90,7 @@ def snapshot(runtime, now=None):
 def _snapshot(runtime, now, stamps):  # stamps only keys the cache (no leading underscore: that would drop it from the key)
     result = {}
     for engine in ('jev',):  # the intraday vibe book is frozen since 2026-11-17
-        empty = {'status': 'unavailable', 'holdings': [], 'stops': [], 'sells': [], 'recent_stops': [], 'unknown_sells': 0}
+        empty = {'status': 'unavailable', 'holdings': [], 'stops': [], 'sells': [], 'recent_stops': [], 'recent_sells': [], 'unknown_sells': 0}
         try:
             root = ledger_root(Path(runtime), engine)
             db_path, events_path = root / 'orders.sqlite3', root / 'events.jsonl'
@@ -103,7 +103,7 @@ def _snapshot(runtime, now, stamps):  # stamps only keys the cache (no leading u
             needed = {links.get(order_id) for order_id, _, side, _, _, time in rows
                       if side == 'SELL' and _recent(time, now)}
             cycles = ec._cycles(events_path, needed - {None}) if events_path.is_file() else {}
-            holdings, stops, sells, recent_stops, unknown = {}, [], [], [], 0
+            holdings, stops, sells, recent_stops, recent_sells, unknown = {}, [], [], [], [], 0
             for order_id, symbol, side, qty, price, stamp in rows:
                 if type(qty) is not int or qty <= 0 or side not in ('BUY', 'SELL'):
                     raise ValueError('invalid fill')
@@ -126,6 +126,7 @@ def _snapshot(runtime, now, stamps):  # stamps only keys the cache (no leading u
                                '손실 매도' if pnl is not None else '매도')
                     item = {'symbol': symbol, 'time': stamp, 'qty': qty, 'price': price,
                             'reason': STOP_REASONS.get(reason), 'outcome': outcome, 'pnl': pnl}
+                    recent_sells.append(item)
                     if _today(stamp, now):
                         sells.append(item)
                     if outcome == '손절':
@@ -136,6 +137,7 @@ def _snapshot(runtime, now, stamps):  # stamps only keys the cache (no leading u
                         unknown += 1
             result[engine] = {'status': 'ok', 'holdings': list(holdings.values()),
                               'stops': list(reversed(stops)), 'sells': list(reversed(sells)),
+                              'recent_sells': sorted(recent_sells, key=lambda item: datetime.fromisoformat(item['time']), reverse=True),
                               'recent_stops': sorted(recent_stops, key=lambda item: datetime.fromisoformat(item['time']), reverse=True),
                               'unknown_sells': unknown}
         except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):

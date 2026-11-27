@@ -217,8 +217,8 @@ def kpis(nav, contributed):
         items.append({'label': '적립 누계', 'value': f'{paid:,.0f}원', 'icon': 'savings', 'tone': 'off', 'sub': '적립식으로 넣은 돈 · 손익에서 뺌'})
     if 'actual' in latest and 'base' in latest:
         gap = latest['actual'] / latest['base'] - 1
-        items.append({'label': '기본 그림자 대비', 'value': f'{gap * 100:+.2f}%p', 'tone': 'up' if gap >= 0 else 'down', 'icon': 'compare_arrows',
-                      'sub': '실제가 기본보다 나으면 + · 수수료 같고 세금 제외 · 실제는 호가 체결, 그림자는 종가+0.05%'})
+        items.append({'label': '기본 비교 전략 대비', 'value': f'{gap * 100:+.2f}%p', 'tone': 'up' if gap >= 0 else 'down', 'icon': 'compare_arrows',
+                      'sub': '실제가 기본보다 나으면 + · 수수료 같고 세금 제외 · 실제는 호가 체결, 비교 전략은 종가+0.05%'})
     if 'actual' in latest:
         items.append({'label': '최대 낙폭 · 실제', 'value': pct(drawdowns(nav, contributed)['actual']), 'tone': 'off', 'icon': 'trending_down'})
     sc.row(items, ask='longterm_kpi')
@@ -298,7 +298,7 @@ def overview(state, decisions, nav, contributed, settings=None):
     with right:
         st.markdown('**순자산 비교** (같은 1억 원 · 같은 적립 · 비용·세금 포함)')
         if not nav:
-            st.caption('그림자 비교는 장 마감(15:40) 기록부터 쌓입니다.')
+            st.caption('비교 전략 기록은 장 마감(15:40) 기록부터 쌓입니다.')
         else:
             frame = pd.DataFrame(nav, columns=['day', 'book', 'value'])
             frame['구분'] = frame['book'].map(L.BOOK_LABELS)
@@ -351,7 +351,7 @@ def strategy(root, settings, plan, recommended, history):
     way = st.radio('가상 계좌 운용 방식', ['modules', 'yeo_method'], index=1 if book['strategy'] == 'yeo_method' else 0, horizontal=True,
                    key='lt_actual_way', label_visibility='collapsed',
                    format_func={'modules': '거장 모듈 조합 (② ~ ⑤에서 설정)', 'yeo_method': '여운봉 저수지 매매법 (단독 규칙)'}.get,
-                   help=G.HELP['way'] + ' 그림자 장부는 그대로 거장 모듈로 돌아 비교됩니다.')
+                   help=G.HELP['way'] + ' 비교 장부는 그대로 거장 모듈로 돌아 비교됩니다.')
     st.caption(G.WAY_NOTE)
     A.reservoir_panel('actual', 'lt_', root, L.CAPITAL, holdings(root)[0])  # 저수지 ETF (2026-11-19): both ways use it
     if way == 'yeo_method':
@@ -360,8 +360,8 @@ def strategy(root, settings, plan, recommended, history):
                      disabled=book['strategy'] == 'yeo_method' and cfg == book['yeo']):
             save(root, {'books': {'actual': {'strategy': 'yeo_method', 'yeo': cfg}}}, '가상 계좌를 여운봉 저수지 매매법으로 저장했습니다.')
         st.info('이 장부는 **여운봉 저수지 매매법 하나로** 운용합니다. 아래 ② 모듈 선택 방식 · ③ 거장 모듈 · ④ 집행 속도는 이 장부에 쓰지 않습니다. '
-                '그 설정은 비교용 그림자 장부와 "엔진과 같음"을 고른 실계좌가 계속 씁니다.', icon=':material/info:')
-        if not st.toggle('거장 모듈 설정도 보기 (그림자·"엔진과 같음" 실계좌용)', key='lt_show_modules'):
+                '그 설정은 비교 장부와 "엔진과 같음"을 고른 실계좌가 계속 씁니다.', icon=':material/info:')
+        if not st.toggle('거장 모듈 설정도 보기 (비교 전략·"엔진과 같음" 실계좌용)', key='lt_show_modules'):
             return
     elif book['strategy'] == 'yeo_method':
         if st.button('거장 모듈로 되돌리기', type='primary', key='lt_save_way_modules'):
@@ -372,11 +372,11 @@ def strategy(root, settings, plan, recommended, history):
                                 label_visibility='collapsed', help=G.HELP['mode']) or settings['mode']
     st.caption({'manual': '수동: 켠 모듈로만 운용합니다. 추천은 배지로 보여 주기만 합니다.',
                 'recommend': '추천: 켠 모듈로 운용하고, 추천과 다르면 알려 줍니다. "추천대로 맞추기"로 채운 뒤 직접 저장합니다(자동으로 바꾸지 않음).',
-                'auto': '자동: 시황 판정이 고른 조합을 매일 그림자로 운용합니다. "자동 실제 적용"을 켜면 가상 계좌도 그 조합으로 운용합니다.'}[mode])
+                'auto': '자동: 시황 판정이 고른 조합을 매일 비교 전략으로 운용합니다. "자동 실제 적용"을 켜면 가상 계좌도 그 조합으로 운용합니다.'}[mode])
     auto_live = settings['auto_live']
     if mode == 'auto':
         auto_live = st.toggle('자동 조합을 실제(가상 계좌)에 적용', value=settings['auto_live'], key='lt_auto_live',
-                              help='권장: 그림자 3개월 기록에서 자동 조합이 기본(기준 비중+달리오)보다 나을 때 켜세요.')
+                              help='권장: 비교 전략 3개월 기록에서 자동 조합이 기본(기준 비중+달리오)보다 나을 때 켜세요.')
     if (mode, auto_live) != (settings['mode'], settings['auto_live']):
         needs_phrase = auto_live and not settings['auto_live']
         phrase = st.text_input(f'확인 문구 "{AUTO_PHRASE}"를 입력하세요', key='lt_auto_phrase') if needs_phrase else AUTO_PHRASE
@@ -687,7 +687,7 @@ def market(root, plan, regime_state, decisions, settings):
         st.caption('새 국면이 이 일수만큼 이어져야 바꿉니다(투매는 2거래일). 모든 장부가 같은 국면을 씁니다.' + off_default('confirm_days', value))
     st.caption('위험도 ■ 다섯 칸 = 계좌가 가장 크게 흔들리는 국면. 엔진은 "판정 순서" 열의 순서(투매 → 약세 → 조정 → 회복 → 과열 → 강세 안정)로 먼저 맞는 '
                '국면을 고르고, 같은 새 국면이 확정 일수(기본 10거래일, 투매 2거래일)만큼 이어져야 바꿉니다. 기준 비중 모듈 보유는 모든 국면에 포함됩니다. '
-               '"적립 시황 자동"은 그 국면에서 그림자 적립이 따르는 거장입니다(실제 적용 전 기록용).')
+               '"적립 시황 자동"은 그 국면에서 비교 전략의 적립이 따르는 거장입니다(실제 적용 전 기록용).')
 
 
 def macro_card(macro):
@@ -815,7 +815,7 @@ def run_panel(root, settings):
     stop = root / 'STOP'
     sc.row([{'label': '실행기(launchd)', 'value': service, 'tone': 'ok' if service == '실행 중' else 'off', 'icon': 'schedule',
              'sub': '평일 08:40 시작 · 15:40 기록 뒤 종료'},
-            {'label': '가상 계좌', 'value': f'{L.CAPITAL:,}원', 'tone': 'off', 'icon': 'account_balance', 'sub': f'수수료 {L.FEE * 100:.3f}% · 세금은 그림자만 반영'},
+            {'label': '가상 계좌', 'value': f'{L.CAPITAL:,}원', 'tone': 'off', 'icon': 'account_balance', 'sub': f'수수료 {L.FEE * 100:.3f}% · 세금은 비교 장부만 반영'},
             {'label': '중지 요청', 'value': '있음' if stop.exists() else '없음', 'tone': 'alert' if stop.exists() else 'off', 'icon': 'pause_circle',
              'sub': '다음 단계에서 멈춤' if stop.exists() else None}])
     with st.container(border=True):
@@ -1185,7 +1185,7 @@ def chart_tab(root, plan, chart, settings=None, state=None, decisions=()):
                '지수 기준 타점은 오늘의 지수/ETF 비율로 옮긴 근사입니다.')
     uses = [b['label'] for b in books if b['yeo'] is None]
     if 'rule' in kinds:
-        st.caption('엔진 규칙 타점을 따르는 장부: ' + (', '.join(uses) if uses else '없음 (모든 장부가 여운봉 저수지 매매법 · 그림자 비교용으로만 표시)'))
+        st.caption('엔진 규칙 타점을 따르는 장부: ' + (', '.join(uses) if uses else '없음 (모든 장부가 여운봉 저수지 매매법 · 비교용으로만 표시)'))
     if 'yeo' in kinds and yeo_note:
         st.caption(yeo_note)
     if 'dca' in kinds:

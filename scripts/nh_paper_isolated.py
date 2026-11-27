@@ -949,13 +949,18 @@ def stock_brief(details):
     if details.get('investor_daily_net_qty'):
         brief['investor_daily_net_qty'] = details['investor_daily_net_qty']
     brief['headlines'] = recent_stock_headlines(details.get('news'))
+    for key in ('news_coverage', 'disclosures'):
+        if details.get(key):
+            brief[key] = details[key]
     return brief
 
 
 def watchlist_brief(code, details):
     """stock_brief of one watchlist stock with its own news refreshed every 5 minutes (user 2026-11-18)."""
     from watchlist import fresh_stock_news
-    return stock_brief({**details, 'news': fresh_stock_news(code, details.get('name'), datetime.now(KST)) or details.get('news')})
+    coverage = {}
+    rows = fresh_stock_news(code, details.get('name'), datetime.now(KST), diagnostics=coverage)
+    return stock_brief({**details, 'news': details.get('news') if rows is None else rows, 'news_coverage': coverage})
 
 
 def news_error_type(exc):
@@ -2689,29 +2694,46 @@ def scale_in_allowed(db, root, symbol, quantity, *, allow_profit_rebuy=True):
     return add_window_open(datetime.now(KST)) and bool(scale_in_history(db, root, symbol, quantity, allow_profit_rebuy=allow_profit_rebuy))
 
 
-def scale_in_signal(db, root, symbol, quantity, ask, closes, now, step_pct, *, allow_profit_rebuy=True, interval_min=5):
+def scale_in_signal(db, root, symbol, quantity, ask, closes, now, step_pct, *, allow_profit_rebuy=True, interval_min=5,
+                    diagnostic=None):
     """Use verified fills as price anchors; unproven sell reasons never permit another buy."""
+    detail = diagnostic if diagnostic is not None else {}
+    detail.update(ask=ask, step_pct=step_pct, interval_min=interval_min, reason='add_data_invalid')
     try:
         if not add_window_open(now):
+            detail['reason'] = 'add_cutoff'
             return None
-        if type(ask) is not int or ask <= 0 or len(closes) < 2 or int(closes[0]) <= int(closes[1]):
+        if type(ask) is not int or ask <= 0 or len(closes) < 2:
+            return None
+        detail.update(latest_close=int(closes[0]), previous_close=int(closes[1]))
+        if detail['latest_close'] <= detail['previous_close']:
+            detail['reason'] = 'add_rebound_missing'
             return None
         step = Decimal(str(step_pct)) / 100
         if not Decimal('0') < step < Decimal('1'):
             return None
         cycle = scale_in_history(db, root, symbol, quantity, allow_profit_rebuy=allow_profit_rebuy)
         if not cycle:
+            detail['reason'] = 'add_history_unavailable'
             return None
         last = cycle[0]
         at = datetime.fromisoformat(last[3])
-        if at.tzinfo is None or now.tzinfo is None or (now - at).total_seconds() < interval_min * 60:
+        if at.tzinfo is None or now.tzinfo is None:
+            return None
+        detail['elapsed_seconds'] = (now - at).total_seconds()
+        if detail['elapsed_seconds'] < interval_min * 60:
+            detail['reason'] = 'add_interval'
             return None
         anchor = Decimal(str(last[2]))
         if not anchor.is_finite() or anchor <= 0:
             return None
+        detail.update(anchor=float(anchor), dip_limit=float(anchor * (1 - step)),
+                      trend_limit=float(anchor * (1 + step)), reason='add_price_not_reached')
         if last[0] == 'BUY' and Decimal(ask) >= anchor * (1 + step):
+            detail['reason'] = 'add_trend_eligible'
             return 'trend'
         if Decimal(ask) <= anchor * (1 - step):
+            detail['reason'] = 'add_dip_eligible'
             return 'dip'
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, ArithmeticError):
         return None
@@ -3339,7 +3361,7 @@ def exit_requests(root, owned):
     if isinstance(requested, list):  # a non-string item makes the whole file malformed (never a TypeError)
         requested = {code: None for code in requested} if all(isinstance(c, str) for c in requested) else None
     if (not isinstance(requested, dict) or not all(isinstance(code, str) and re.fullmatch(CODE_PATTERN, code) for code in requested)
-            or not all(qty is None or (type(qty) is int and qty > 0) for qty in requested.values())):
+            or not all(qty is None or (type(qty) is int and qty > 0) or valid_manual_amount(qty) for qty in requested.values())):
         return {}
     active = {code: qty for code, qty in requested.items() if code in owned}
     if active != requested:
@@ -3354,6 +3376,12 @@ def write_requests(path, requests):
     write_json(path, requests, indent=None)
 
 
+def valid_manual_amount(value):
+    return (isinstance(value, dict) and set(value) == {'amount_krw', 'day'}
+            and type(value['amount_krw']) is int and 0 < value['amount_krw'] <= 50_000_000_000
+            and isinstance(value['day'], str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value['day']) is not None)
+
+
 def manual_buys(root):
     """{code: shares} the user asked to buy by hand (manual-buys.json); empty on any doubt."""
     try:
@@ -3362,7 +3390,8 @@ def manual_buys(root):
         return {}
     if not isinstance(requested, dict):
         return {}
-    return {c: q for c, q in requested.items() if isinstance(c, str) and re.fullmatch(CODE_PATTERN, c) and type(q) is int and q > 0}
+    return {c: q for c, q in requested.items() if isinstance(c, str) and re.fullmatch(CODE_PATTERN, c)
+            and ((type(q) is int and q > 0) or valid_manual_amount(q))}
 
 
 def manual_buy(db, read, broker, account, root, day, owned, execute_orders):
@@ -3377,6 +3406,10 @@ def manual_buy(db, read, broker, account, root, day, owned, execute_orders):
     path = Path(root) / 'manual-buys.json'
     done = lambda: write_requests(path, {c: q for c, q in manual_buys(root).items() if c != code})
     cycle_id = uuid.uuid4().hex
+    original_request = qty
+    if isinstance(qty, dict) and qty['day'] != datetime.now(KST).date().isoformat():
+        done()
+        return None
     if datetime.now(KST).strftime('%H:%M') >= FLATTEN_AT:
         journal_event(root, 'v2_execution_gate', permitted=False, reason='manual_after_flatten', symbol=code, source='manual', cycle_id=cycle_id)
         done()
@@ -3390,6 +3423,12 @@ def manual_buy(db, read, broker, account, root, day, owned, execute_orders):
     if type(price) is not int or price <= 0:
         journal_event(root, 'v2_execution_gate', permitted=False, reason='quote_unavailable', symbol=code, source='manual', cycle_id=cycle_id)
         return None  # kept; the cycle goes on to its other entries
+    if isinstance(qty, dict):
+        qty = qty['amount_krw'] // price
+        if qty < 1:
+            journal_event(root, 'v2_execution_gate', permitted=False, reason='manual_amount_below_one_share', symbol=code, source='manual', cycle_id=cycle_id)
+            done()
+            return None
     if not execute_orders:
         return 'would_buy'
     ensure_trading_open(root, day)
@@ -3417,7 +3456,7 @@ def manual_buy(db, read, broker, account, root, day, owned, execute_orders):
         return 'wait'  # the guard's limits will not change this minute; the user asks again
     except PaperOrderNotSent:
         journal_event(root, 'v2_execution_gate', permitted=False, reason='signal_or_session_invalid', symbol=code, source='manual', cycle_id=cycle_id)
-        write_requests(path, {**manual_buys(root), code: qty})  # proven unsent: tried again next cycle
+        write_requests(path, {**manual_buys(root), code: original_request})  # proven unsent: tried again next cycle
         return None
     journal_event(root, 'submitted', symbol=code, limit=price, qty=qty, source='manual', cycle_id=cycle_id)
     return 'buy'
@@ -3480,6 +3519,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         try:  # the dashboard's account card reads it
             write_json(Path(root) / 'account-state.json', {  # atomic: readers may look at any moment
                 'time': datetime.now(KST).isoformat(), 'cash': balance.get('Output_0', {}).get('orr_pbl_amt1'),
+                'manual_amount_supported': True,
                 'holdings': {c: {k: rows[c].get(k) for k in ('iem_nm', 'rsdl_qty', 'phs_pr', 'now_pr', 'eal_pls_amt', 'pft_rt')}
                              for c in owned if c in rows}}, indent=None)
         except (OSError, TypeError, ValueError):
@@ -3515,6 +3555,7 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         """Buy one tranche only after the latest verified fill and a new price step."""
         if not fresh_etf7_bars(bars, datetime.now(KST)):
             journal_event(root, 'v2_execution_gate', permitted=False, reason='stale_market_bars', cycle_id=cycle_id)
+            journal_event(root, 'split_review', symbol=symbol, cycle_id=cycle_id, reason='stale_market_bars', stage='execution')
             return None
         quoted = read.call_tool('get_stock_price', {'stock_code':symbol})
         if quoted.get('status') != 'ok':
@@ -3525,9 +3566,11 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             raise ValueError('paper buying power or ask unavailable')
         name = next((n for n, c in ETF7_SYMBOLS.items() if c == symbol), symbol)
         closes = [r.get('stck_prpr') for r in bars.get(name, [])[:2]]
+        detail = {}
         if not scale_in_signal(db, root, symbol, quantity, ask, closes, datetime.now(KST), float(SPLIT_STEP * 100),
                                allow_profit_rebuy=bool(settings.get('scale_profit_rebuy_on', 1)),
-                               interval_min=settings.get('scale_interval_min', 5)):
+                               interval_min=settings.get('scale_interval_min', 5), diagnostic=detail):
+            journal_event(root, 'split_review', symbol=symbol, cycle_id=cycle_id, stage='execution', **detail)
             return None
         qty = min(max_qty, int(cash // ask), quantity_room(owned), SHARED_SINGLE_ORDER_KRW // ask,
                   int(SPLIT_TRANCHE_KRW * add_size_factor(None, ETF7_JEV_ENTRY_MIN)) // ask,  # add_size_pct, as the signal add (user 2026-11-17)
@@ -3539,9 +3582,11 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                                                    SPLIT_SYMBOL_KRW)[0])
         if qty < 1 or order_count >= 998:
             journal_event(root, 'v2_execution_gate', permitted=False, reason='split_limit', cycle_id=cycle_id)
+            journal_event(root, 'split_review', symbol=symbol, cycle_id=cycle_id, reason='split_limit', stage='execution')
             return None
         if not scale_in_projected_safe(avg, quantity, ask, qty, quote.get('bidp'), plans.get(symbol),
                                        market_view(root), stop_symbol_index(root, symbol), symbol in protected, symbol):
+            journal_event(root, 'split_review', symbol=symbol, cycle_id=cycle_id, reason='add_projected_exit', stage='execution')
             return None
         journal_event(root, 'split_add', symbol=symbol, tranche=plan['buys'] + 1, limit=ask, qty=qty, cycle_id=cycle_id)
         if not execute_orders:
@@ -3688,6 +3733,16 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         if type(bid) is not int or bid <= 0:
             raise ValueError('invalid bid')
         manual = symbol in requested
+        amount_request = None
+        if manual and isinstance(requested[symbol], dict):
+            amount_request = requested[symbol]
+            count = amount_request['amount_krw'] // bid if amount_request['day'] == datetime.now(KST).date().isoformat() else 0
+            if count < 1:
+                write_requests(Path(root) / 'exit-requests.json', {c: q for c, q in exit_requests(root, owned).items() if c != symbol})
+                journal_event(root, 'v2_execution_gate', permitted=False, reason='manual_amount_expired_or_below_one_share', symbol=symbol, cycle_id=cycle_id)
+                manual = False
+            else:
+                requested[symbol] = min(count, quantity)
         switched = manual and requested[symbol] is None and (datetime.now(KST).date(), symbol) in _SWITCH_EXITS
         if etf7:
             track(symbol, bid, cycle_id, avg)
@@ -3799,12 +3854,20 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                 if plan['profit_sold'] is None:
                     journal_event(root, 'v2_execution_gate', permitted=False, reason='take_profit_history_unavailable', cycle_id=cycle_id)
                 step = split_step(plan, quantity, avg, current, half=plan_levels(plans.get(symbol))['half'])
-                scale = None if step == 'take_profit' or v2_hold or not settings.get('scale_step_add_on', 1) else scale_in_signal(
-                    db, root, symbol, quantity, latest.get('askp'), closes, datetime.now(KST), float(SPLIT_STEP * 100),
-                    allow_profit_rebuy=bool(settings.get('scale_profit_rebuy_on', 1)), interval_min=settings.get('scale_interval_min', 5))
+                scale, detail = None, {}
+                if step == 'take_profit' or v2_hold or not settings.get('scale_step_add_on', 1):
+                    detail['reason'] = ('add_take_profit_priority' if step == 'take_profit' else
+                                        'add_profile_blocked' if v2_hold else 'add_step_disabled')
+                else:
+                    scale = scale_in_signal(
+                        db, root, symbol, quantity, latest.get('askp'), closes, datetime.now(KST), float(SPLIT_STEP * 100),
+                        allow_profit_rebuy=bool(settings.get('scale_profit_rebuy_on', 1)),
+                        interval_min=settings.get('scale_interval_min', 5), diagnostic=detail)
                 if scale == 'trend' and (plans.get(symbol) or {}).get('profile') != 'trend':
+                    detail['reason'] = 'add_profile_blocked'
                     scale = None
                 if (plans.get(symbol) or {}).get('profile') == 'oversold' or (IPO_ADD_GUARD and (plans.get(symbol) or {}).get('profile') == 'ipo'):
+                    detail['reason'] = 'add_profile_blocked'
                     scale = None
                 if scale and pending_add is None and AUTO:
                     from etf_universe import SHORT
@@ -3815,12 +3878,18 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
                         journal_event(root, 'v2_execution_gate', permitted=True, reason='averaging_down_unknown', cycle_id=cycle_id)
                     inverse = symbol in {ETF7_SYMBOLS[n] for n in SHORT}
                     if scale == 'dip' and AVERAGING_DOWN_GUARD and averaging_down_blocked(view, symbol, inverse, index):
+                        detail['reason'] = 'downtrend_no_averaging_down'
                         journal_event(root, 'v2_execution_gate', permitted=False, reason='downtrend_no_averaging_down', cycle_id=cycle_id)
                     elif inverse and (gate := inverse_gate(view, index)):  # adds to an inverse need the same agreement
+                        detail['reason'] = gate
                         journal_event(root, 'v2_execution_gate', permitted=False, reason=gate, symbol=symbol, cycle_id=cycle_id)
                     else:
                         # Adds wait until every holding's exits have been checked this cycle.
                         pending_add = (symbol, quantity, avg, plan, cycle_id, signal_context.get('bars', {}))
+                        detail['reason'] = 'add_queued'
+                elif scale:
+                    detail['reason'] = 'add_other_holding_queued' if pending_add is not None and AUTO else 'auto_off'
+                journal_event(root, 'split_review', symbol=symbol, cycle_id=cycle_id, **detail)
                 if step != 'take_profit':
                     continue
                 take_profit = True
@@ -3843,6 +3912,16 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
         price = quote.get('bidp')
         if type(price) is not int or price <= 0:
             raise ValueError('invalid bid')
+        if manual and amount_request:
+            count = amount_request['amount_krw'] // price
+            if count < 1:
+                write_requests(Path(root) / 'exit-requests.json', {c: q for c, q in exit_requests(root, owned).items() if c != symbol})
+                journal_event(root, 'v2_execution_gate', permitted=False, reason='manual_amount_below_one_share', symbol=symbol, cycle_id=cycle_id)
+                if not (flatten or exit_now(symbol, avg, price)):
+                    continue
+                manual = False
+            else:
+                requested[symbol] = min(count, quantity)
         if exit_now(symbol, avg, price):
             full_exit, risk_exit, take_profit = True, True, False
         elif take_profit and Decimal(price) < Decimal(str(avg)) * plan_levels(plans.get(symbol))['half']:
@@ -4154,6 +4233,9 @@ def cycle(db, read, broker, account, root, execute_orders, now, *, etf7=False):
             bars[code], symbols = rows, {**symbols, code: code}
             journal_event(root, 'new_listing', symbol=code, change_pct=facts['change_pct'], turnover_pct=facts['turnover_pct'],
                           sessions=facts['sessions'], cycle_id=cycle_id)
+    if pending_add is not None and (source != 'jev' or symbols.get(candidate) != pending_add[0]):
+        journal_event(root, 'split_review', symbol=pending_add[0], cycle_id=pending_add[4],
+                      reason='add_not_selected', stage='selection', choice=candidate or 'WAIT')
     if candidate is None:
         journal_event(root, 'v2_entry_gate', choice='WAIT', permitted=False, reason=reason, cycle_id=cycle_id)
         return 'wait'

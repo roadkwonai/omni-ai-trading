@@ -37,6 +37,14 @@ STRENGTH_WHYS = {'no_strength_candidate', 'strength_weak_tape', 'strength_change
                  'one_share_over_buy', 'pick_cooldown', 'not_in_movers', 'held', 'jev_below_min', 'bars_missing', 'picked'}
 
 
+EVENT_TYPES.update(('split_review', 'strength_entry_review_trial'))
+REASONS |= frozenset(('add_data_invalid', 'add_rebound_missing', 'add_history_unavailable', 'add_interval',
+                      'add_price_not_reached', 'add_trend_eligible', 'add_dip_eligible', 'add_take_profit_priority',
+                      'add_profile_blocked', 'add_step_disabled', 'add_queued', 'add_other_holding_queued',
+                      'add_not_selected', 'add_projected_exit', 'manual_amount_below_one_share',
+                      'manual_amount_expired_or_below_one_share'))
+
+
 def sanitize(event):
     if not isinstance(event, dict) or event.get('event') not in EVENT_TYPES or not isinstance(event.get('time'), str):
         raise ValueError('invalid event')
@@ -75,6 +83,13 @@ def sanitize(event):
     if event.get('side') in ('Buy', 'Sell'): result['side'] = event['side']
     if event.get('reason') in REASONS:
         result['reason'] = event['reason']
+    if event['event'] == 'split_review':
+        if event.get('stage') in ('selection', 'execution'):
+            result['stage'] = event['stage']
+        for key in ('ask', 'anchor', 'dip_limit', 'trend_limit', 'step_pct', 'interval_min',
+                    'elapsed_seconds', 'latest_close', 'previous_close'):
+            if type(event.get(key)) in (int, float) and 0 <= event[key] < 1e9:
+                result[key] = event[key]
     if event['event'] == 'v2_execution_gate' and event.get('reason') == 'single_order_limit':
         for key in ('price', 'buy_budget_krw'):
             value = event.get(key)

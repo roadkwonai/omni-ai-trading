@@ -26,7 +26,7 @@ from pathlib import Path
 import longterm_template as T
 import vibe_longterm as L
 
-DAY_SECTIONS = ('요약', '오늘 관찰', '매매와 근거', '거장 관점', '거시 관점', '가상 계좌와 그림자', '기록·리포트 점검', '개선·보완 제안',
+DAY_SECTIONS = ('요약', '오늘 관찰', '매매와 근거', '거장 관점', '거시 관점', '가상 계좌와 비교 전략', '기록·리포트 점검', '개선·보완 제안',
                 '다음 거래일에 볼 것')
 SECTIONS = ('요약', '관찰 범위', '판단 이력', '판단 근거', '리포트·일지', '동작 확인', '성과', '제안', '이전 제안 추적', '다음에 볼 것')
 PLACEHOLDER = T.PLACEHOLDER
@@ -84,6 +84,8 @@ def blank(key):
 def check(text, key):
     """Korean problems with a written report ([] when it passes): title, every section in order, nothing left blank (a short
     '없음' is an answer, a bare '-' is not)."""
+    # Reports saved under the earlier heading remain valid.
+    text = re.sub(r'^(## (?:\d+\.\s*)?)가상 계좌와 그림자\s*$', r'\1가상 계좌와 비교 전략', text, flags=re.M)
     problems = T.check_sections(text, title(key), sections(key), min_body=2)
     if masters_required(key):
         import longterm_report as R

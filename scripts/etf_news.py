@@ -23,7 +23,7 @@ FEEDS = (
     ('semiconductor', '반도체 주가 when:2h', ('반도체', 'semiconductor')),
 )
 RESTRICTED_PUBLISHERS = ('연합뉴스', 'yonhap')
-# Sources are used in turn (one per fresh fetch) and a blocked or empty one hands its missing topics to the next.
+# Main headlines combine the primary sources; fallback sources can fill missing topics.
 SEARCH_SOURCES = ('google_news_rss', 'bing_news_rss', 'naver_finance_news')  # what longterm_news asks its own topics
 # user 2026-11-25: Daum's and 한국경제's lists (HTTPS, one request for every topic) come before Bing when Google and Naver leave a topic
 SOURCES = ('google_news_rss', 'naver_finance_news', 'daum_finance_news', 'hankyung_rss', 'bing_news_rss')
@@ -222,7 +222,7 @@ def headlines7(now: datetime) -> list[dict[str, str]]:
     try:
         if not order:
             raise OSError('every news source is resting after a failure')
-        found = _fetch7(now, order, timeout=READ_TIMEOUT, failed=failed)
+        found = _fetch7(now, order, timeout=READ_TIMEOUT, failed=failed, combined=True)
         rows = _merge([*found, *pool], now)
     except (OSError, ValueError, ET.ParseError) as exc:
         # 4th review: back off even with no usable cache, or every caller re-reads every source each minute (11/17 429)
@@ -234,7 +234,7 @@ def headlines7(now: datetime) -> list[dict[str, str]]:
     finally:
         for source, exc in failed.items():
             rest(source, now, exc)
-    read = order[0] == NAVER or any(row['source'] == NAVER for row in found)
+    read = NAVER in order and NAVER not in failed
     _write_cache(now, rows, None, (first + 1) % len(turn), topped=now if read else cached.get('topped'))
     return rows
 
@@ -415,15 +415,17 @@ def supplement_jev_topics(rows, now):
                                  'elapsed_ms': round((time.monotonic() - start) * 1000, 1)}
 
 
-def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=False, *, timeout=None, failed=None) -> list[dict[str, str]]:
+def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=False, *, timeout=None, failed=None,
+            combined=False) -> list[dict[str, str]]:
     """The sources in `order`, a blocked or empty one handing its missing topics to the next. feeds / recent / links: the
     long-term news (longterm_news) asks its own topics over a day and keeps each story's link; the runners' defaults stay.
     failed: filled with {source: its error}."""
     observed = now.astimezone(timezone.utc)
     found, error, shared = {}, None, {}
     for source in order:
+        primary = combined and (source not in FALLBACK or source == 'daum_finance_news')
         for topic, query, keywords in feeds:
-            if topic in found:
+            if topic in found and not primary:
                 continue
             try:
                 items = list(_items(source, topic, query, shared) if timeout is None else _items(source, topic, query, shared, timeout=timeout))
@@ -434,11 +436,25 @@ def _fetch7(now: datetime, order=SOURCES, feeds=FEEDS, recent=RECENT, links=Fals
                 break  # blocked, offline or malformed: the next source takes the remaining topics
             kept = _topic_rows(items, observed, topic, keywords, source, recent, links)
             if kept:
-                found[topic] = kept
+                found.setdefault(topic, []).extend(kept)
             else:
                 error = ValueError('no eligible recent news for ' + topic)
-        if len(found) == len(feeds):
+        if len(found) == len(feeds) and not combined:
             return [row for topic, _, _ in feeds for row in found[topic]]
+    if combined and 'hankyung_rss' in SOURCES:
+        from stock_material import broker_news, publisher_batch
+        batch = publisher_batch(int(now.timestamp()) // 300)
+        extra = [('publisher_rss', [row for rows in batch.values() for row in rows or []])]
+        if not resting('kis_market_news', now):
+            try:
+                extra.append(('kis_market_news', broker_news('', now) or []))
+            except OSError as exc:
+                rest('kis_market_news', now, exc)
+        for source, rows in extra:
+            items = [(r['title'], r['publisher'], datetime.fromisoformat(r['published']), r.get('link')) for r in rows]
+            for topic, _, keywords in feeds:
+                if kept := _topic_rows(items, observed, topic, keywords, source, recent, links):
+                    found.setdefault(topic, []).extend(kept)
     if found:  # a topic no source covered recently is left out rather than filled with old stories
         return [row for topic, _, _ in feeds for row in found.get(topic, [])]
     raise error or ValueError('no recent news')

@@ -103,7 +103,7 @@ def test_the_empty_chat_offers_questions_of_the_current_screen(asked):
     at = page()
     at.button(key='ai_float_launch').click().run()
     labels = [b.label for b in at.button if b.key.startswith('ask_idea_')]
-    assert len(labels) == 3 and any('저수지' in x or '그림자' in x or '확정 국면' in x for x in labels)
+    assert len(labels) == 3 and any('저수지' in x or '비교 전략' in x or '확정 국면' in x for x in labels)
     at.button(key='ask_idea_0').click().run()
     assert draft(at) and asked == []
 

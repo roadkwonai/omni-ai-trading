@@ -472,6 +472,8 @@ def build(day, days=10):
         'jev_calls_30m': jev_calls(root, day),
         'signal_calibration': (calibration := signal_calibration(root, day, days)),
         'add_sizing': add_sizing(rows, day, days, settings, events, calibration),
+        'split_review_reasons': dict(Counter(e['reason'] for e in events
+                                             if e.get('event') == 'split_review' and e.get('reason'))),
         'direction_mass': direction_mass_summary(root, day, days),
         'news_gap': news_gap_outcomes(root, day, days),
         'blocked_outcomes': blocked_outcomes(root, day, days),

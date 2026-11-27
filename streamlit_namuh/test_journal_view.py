@@ -46,9 +46,9 @@ class ChartTests(unittest.TestCase):
 
     def test_chart_source_prefers_a_full_session_of_runner_bars(self):
         full = [[f'{9 + i // 60:02d}:{i % 60:02d}', 1, 1, 1, 1, 1] for i in range(360)]  # 09:00 ~ 14:59
-        with patch.object(tj, '_ledger_bars', return_value=full), patch('oversold_research.fetch', return_value=[]):
+        with patch.object(tj, '_ledger_bars', return_value={'069500': full}), patch('oversold_research.fetch', return_value=[]):
             self.assertEqual(tj.chart_data('2026-11-16', '069500')['source'], 'NH (실행기 기록)')
-        with patch.object(tj, '_ledger_bars', return_value=full[:100]), patch('oversold_research.fetch', return_value=[]):
+        with patch.object(tj, '_ledger_bars', return_value={'036540': full[:100]}), patch('oversold_research.fetch', return_value=[]):
             self.assertEqual(tj.chart_data('2026-11-16', '036540')['source'], 'NH (실행기 기록, 일부 시간)')  # Yahoo empty: what there is
 
 

@@ -64,11 +64,11 @@ def test_long_term_side_lines_show_shadow_gap_and_story_warnings():
     import sidebar
     state = {'nav_latest': {'day': '2026-11-18', 'actual': 100_120_000, 'base': 100_000_000},
              'story': {'stories': {'QUANT': {'status': 'watch'}, 'SEMI': {'status': 'intact'}, 'SPACE': {'status': 'broken'}}}}
-    assert sidebar.longterm_side_lines(state) == ['순자산 1.001억 · 기본 그림자 대비 +120,000원 (2026-11-18)',
+    assert sidebar.longterm_side_lines(state) == ['순자산 1.001억 · 기본 비교 전략 대비 +120,000원 (2026-11-18)',
                                                   '스토리 ⚠ 미국양자컴퓨팅TOP10 주의 · 미국우주테크 훼손']
     assert sidebar.longterm_side_lines({}) == []
     paid = {**state, 'nav_latest': {**state['nav_latest'], 'contributed': 1_000_000}}
-    assert sidebar.longterm_side_lines(paid)[0] == '순자산 1.001억 · 적립 누계 100만 · 기본 그림자 대비 +120,000원 (2026-11-18)'
+    assert sidebar.longterm_side_lines(paid)[0] == '순자산 1.001억 · 적립 누계 100만 · 기본 비교 전략 대비 +120,000원 (2026-11-18)'
 
 
 def _status(alerts):

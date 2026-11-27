@@ -20,6 +20,7 @@ KST = ZoneInfo('Asia/Seoul')
 BASE = 'https://api.kiwoom.com'
 TOKEN_FILE = Path.home() / '.vibe-trading/kiwoom/token.json'
 ALLOWED = {'ka90005': '/api/dostk/mrkcond',  # 프로그램매매추이 시간대별
+           'ka40010': '/api/dostk/etf',  # ETF 시간대별 수급
            'ka90008': '/api/dostk/mrkcond',  # 종목시간별 프로그램매매추이
            'ka10080': '/api/dostk/chart',  # 주식분봉차트 (about a year back)
            'ka10046': '/api/dostk/mrkcond',  # 체결강도추이 시간별 (fade_shadow, after the close)
@@ -148,7 +149,11 @@ def day_bars(code, day, scope=1, adjusted=False, now=None):
             prev_close = values[3] - num(r['pred_pre'])  # every row carries close - previous close
         if not '090000' <= t[8:] <= '153000':  # NXT pre/after-market rows (08:00~, ~20:00) come in the same answer
             continue
-        bars.append((datetime.strptime(t, '%Y%m%d%H%M%S').replace(tzinfo=KST), *values, num(r.get('trde_qty')) or 0))
+        try:
+            stamp = datetime.strptime(t, '%Y%m%d%H%M%S').replace(tzinfo=KST)
+        except ValueError:
+            raise KiwoomError('invalid Kiwoom minute bar timestamp') from None
+        bars.append((stamp, *values, num(r.get('trde_qty')) or 0))
     bars.sort(key=lambda b: b[0])
     out = {'bars': bars, 'prev_close': prev_close}
     finished = day < now.date() or now.strftime('%H:%M') >= '15:40'

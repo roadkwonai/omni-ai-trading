@@ -16,6 +16,14 @@ NOW = datetime(2026, 11, 12, 10, 0, tzinfo=ZoneInfo('Asia/Seoul'))
 BARS = [{'bsop_time': f'09{58 - i:02d}00', 'stck_prpr': str(100 + i)} for i in range(8)]
 
 
+@pytest.fixture(autouse=True)
+def extra_sources(monkeypatch):
+    monkeypatch.setattr('stock_material.publisher_batch', lambda slot: {})
+    monkeypatch.setattr('stock_material.daum_batch', lambda slot: [])
+    monkeypatch.setattr('stock_material.broker_news', lambda code, now: None)
+    monkeypatch.setattr('stock_material.disclosures', lambda code, now: {'items': []})
+
+
 class Reader:
     def call_tool(self, tool, params):
         if tool == 'get_stock_price':
@@ -173,6 +181,58 @@ def test_stock_news_refreshes_every_five_minutes_and_backs_off_on_failure(tmp_pa
     assert watchlist.fresh_stock_news('043260', '성호전자', later + timedelta(minutes=2), blocked)[0]['title'] == '성호전자 12:55'
     assert len(calls) == 3  # backed off: no second try within 5 minutes
     assert watchlist.fresh_stock_news('999999', None, now, fetch) is None  # no name: nothing to search
+
+
+def test_stock_news_combines_portals_publishers_and_broker_even_when_google_has_news(tmp_path, monkeypatch):
+    monkeypatch.setenv('VIBE_TRADING_STOCK_NEWS_CACHE', str(tmp_path / 'news.json'))
+    monkeypatch.setattr('etf_news.resting', lambda *_: False)
+    google = {'title': '클로봇 동향 - 매체', 'publisher': '매체', 'published': NOW.isoformat()}
+    naver = {**google, 'title': '클로봇 동향', 'link': 'https://example.org/story'}
+    direct = {**google, 'title': '클로봇 새 사업'}
+    broker = {**google, 'title': '클로봇 증권사 속보'}
+    monkeypatch.setattr(w, 'FETCH_STOCK_FALLBACK', lambda *args: [naver])
+    monkeypatch.setattr('stock_material.publisher_batch', lambda slot: {'매체': [direct], '다른 매체': None})
+    monkeypatch.setattr('stock_material.broker_news', lambda *args: [broker])
+    coverage = {}
+
+    rows = w.fresh_stock_news('466100', '클로봇', NOW, lambda *args: [google], diagnostics=coverage)
+
+    assert {row['title'] for row in rows} == {naver['title'], direct['title'], broker['title']}
+    assert next(row for row in rows if row['title'] == naver['title'])['link'] == naver['link']
+    assert coverage['sources']['다른 매체'] == 'error'
+    assert coverage['sources']['kis_stock_news'] == 'recent'
+
+
+def test_daum_stock_news_filters_and_preserves_publisher(monkeypatch):
+    import stock_material
+    items = [('클로봇 신규 사업', '이데일리', NOW - timedelta(minutes=5), 'https://example.org/a'),
+             ('삼성전자 소식', '이데일리', NOW, ''),
+             ('클로봇 오래된 기사', '이데일리', NOW - timedelta(days=2), ''),
+             ('클로봇 속보', '연합뉴스', NOW, '')]
+    monkeypatch.setattr(stock_material, 'daum_batch', lambda slot: items)
+    rows = stock_material.daum_stock_news('클로봇', NOW)
+    assert len(rows) == 1 and rows[0]['title'] == '클로봇 신규 사업'
+    assert rows[0]['publisher'] == '이데일리' and rows[0]['link'] == 'https://example.org/a'
+
+
+def test_publisher_batch_reuses_disk_cache_after_memory_cache_is_cleared(tmp_path, monkeypatch):
+    import stock_material
+    path = tmp_path / 'publishers.json'
+    feeds = (('테스트', 'https://example.org/feed'),)
+    calls = []
+
+    def read(source, url):
+        calls.append(url)
+        return [{'title': '테스트 기사'}]
+
+    monkeypatch.setattr(stock_material, 'publisher_rows', read)
+    expected = {'테스트': [{'title': '테스트 기사'}]}
+    assert stock_material._publisher_batch(path, 100, feeds) == expected
+    stock_material._publisher_batch.cache_clear()
+    assert stock_material._publisher_batch(path, 100, feeds) == expected
+    assert calls == ['https://example.org/feed']
+    assert stock_material._publisher_batch(path, 101, feeds) == expected
+    assert len(calls) == 2
 
 
 def test_the_watchlist_files_follow_vibe_trading_home(tmp_path, monkeypatch):

@@ -38,6 +38,16 @@ class FakeReader:
         return {'status':'ok','data':data}
 
 
+def test_empty_order_response_is_not_an_empty_order_list():
+    from nh_live_broker import _pages
+
+    reader = SimpleNamespace(call_tool=lambda *_: {
+        'status': 'ok', 'data': {'raw': '', '_nh_pagination': {'complete': None}},
+    })
+    with pytest.raises(LiveOrderBlocked, match='response body empty'):
+        _pages(reader, 'krstockInquiryDailyOrderExecution', {'act_no': A}, 'Output_0')
+
+
 class FakeTransport:
     def __init__(self, fail=False):
         self.calls = []

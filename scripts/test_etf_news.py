@@ -6,9 +6,16 @@ from urllib.error import URLError
 from zoneinfo import ZoneInfo
 
 import etf_news
+import pytest
 
 
 NOW = datetime(2026, 11, 11, 11, 0, tzinfo=ZoneInfo('Asia/Seoul'))
+
+
+@pytest.fixture(autouse=True)
+def extra_sources(monkeypatch):
+    monkeypatch.setattr('stock_material.publisher_batch', lambda slot: {})
+    monkeypatch.setattr('stock_material.broker_news', lambda code, now: None)
 
 
 def feed(title, published='Wed, 11 Nov 2026 10:30:00 +0900', publisher='Sample Publisher'):
@@ -176,7 +183,7 @@ class RotationTests(unittest.TestCase):
         with patcher:
             rows = etf_news.headlines7(NOW)
         self.assertEqual([(r['topic'], r['source']) for r in rows],
-                         [('market', 'google_news_rss'), ('kosdaq150', 'naver_finance_news'),
+                         [('market', 'google_news_rss'), ('market', 'naver_finance_news'), ('kosdaq150', 'naver_finance_news'),
                           ('semiconductor', 'naver_finance_news')])
         self.assertEqual(rows[1]['title'], '코스닥 "강세"')
 
@@ -414,7 +421,7 @@ class CacheAndFailoverTests(unittest.TestCase):
         with patcher:
             rows = etf_news.headlines7(self.at(5))
             self.assertEqual({r['topic'] for r in rows}, {'market', 'kosdaq150', 'semiconductor'})
-            self.assertEqual([r['title'] for r in rows if r['topic'] == 'market'], ['코스피 속보', '코스피 상승'])  # newest first
+            self.assertEqual([r['title'] for r in rows if r['topic'] == 'market'], ['코스피 속보', '코스피 새 소식', '코스피 상승'])
         with patch.object(etf_news, '_fetch7', side_effect=OSError('offline')):  # published 10:30: past 90 minutes it is no recent story
             self.assertEqual([r['title'] for r in etf_news.headlines7(self.at(61))], ['코스피 속보'])
 
@@ -423,7 +430,7 @@ class CacheAndFailoverTests(unittest.TestCase):
         calls, patcher = self.serve({'news.google.com': self.google(), 'stock.naver.com': lambda url: naver(*stories, dt=self.stamp(self.at(1)))})
         with patcher:
             etf_news.headlines7(NOW)
-            self.assertEqual(len(calls), 3)  # Google's three topics
+            self.assertEqual(len(calls), 5)  # Google's three topics and Naver's two lists
             calls.clear()
             stories[:] = ['코스피 급락 속보']
             rows = etf_news.headlines7(self.at(1, 5))
@@ -439,7 +446,7 @@ class CacheAndFailoverTests(unittest.TestCase):
         with patcher:
             first = etf_news.headlines7(NOW)
             self.assertEqual(etf_news.headlines7(self.at(1, 5)), first)
-            self.assertEqual(etf_news.headlines7(self.at(2, 10)), first)
+            self.assertEqual(etf_news.headlines7(self.at(1, 30)), first)
             self.assertEqual(sum('naver' in c for c in calls), 2)  # resting two minutes: not asked again
 
     def test_a_refused_google_is_left_alone_for_ten_minutes_and_naver_serves_at_once(self):

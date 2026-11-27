@@ -15,7 +15,7 @@ def seeded(tmp_path, monkeypatch):
     """A dry plan with 피터 린치 halving the quantum ETF (its story on watch)."""
     monkeypatch.setenv('VIBE_TRADING_SETTINGS_HISTORY', str(tmp_path / 'h.sqlite3'))
     now = datetime.combine(DAY, datetime.min.time(), KST).replace(hour=8, minute=45)
-    L.decide(tmp_path, now, fetch=fake_fetch, ask=lambda text: WATCH)
+    L.decide(tmp_path, now, fetch=fake_fetch, ask=lambda text: WATCH, macro=lambda day: {}, news=lambda at: {'rows': []})
     L.trade(tmp_path, Read(), now.replace(hour=9, minute=40))
     return E.rows(tmp_path)
 

@@ -71,7 +71,7 @@ def test_a_live_accounts_example_uses_its_own_strategy_target(tmp_path, monkeypa
     monkeypatch.setenv('VIBE_TRADING_SETTINGS_HISTORY', str(tmp_path / 'h.sqlite3'))
     monkeypatch.setattr(L, '_HOLIDAYS', {y: frozenset() for y in range(2024, 2031)}, raising=False)
     now = datetime.combine(DAY, datetime.min.time(), KST).replace(hour=8, minute=45)
-    L.decide(tmp_path, now, fetch=fake_fetch, ask=lambda t: ANSWER)
+    L.decide(tmp_path, now, fetch=fake_fetch, ask=lambda t: ANSWER, macro=lambda day: {}, news=lambda at: {'rows': []})
     L.save_settings(tmp_path, {'books': {'live-2': {'strategy': 'custom', 'modules': {'yeo_reservoir': True}}}})
     monkeypatch.setattr('longterm_live.load_state', lambda root, key: {})
     _, _, want, _ = E.example_inputs(tmp_path, 'live-2')

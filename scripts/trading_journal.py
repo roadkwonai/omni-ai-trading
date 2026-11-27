@@ -404,56 +404,69 @@ def program_snapshot():
 MARKET_PROXY = '069500'  # KODEX 200, the market line next to every traded code
 
 
-def _ledger_bars(day, code):
-    """The runner's own NH 1-minute bars of `code` that day (it records the 7 ETFs every minute): [[HH:MM, o, h, l, c, v]]."""
+def _ledger_bars(day, codes):
+    """Read a day's NH runner bars once, keyed by the requested stock codes."""
     from etf_universe import SYMBOLS
     from sqlite_ro import ro_connect
-    names = {k for k, v in SYMBOLS.items() if v == code} | {code}
-    seen = {}
+    seen = {code: {} for code in codes}
+    names = {**{name: code for name, code in SYMBOLS.items() if code in seen}, **{code: code for code in seen}}
     try:
         with ro_connect(ROOT / 'trading-ledger.sqlite3') as conn:
             rows = conn.execute("SELECT data FROM events_v2 WHERE time >= ? AND time < ? AND data LIKE '%market_bars%'",
                                 (day, (date.fromisoformat(day) + timedelta(days=1)).isoformat())).fetchall()
-    except Exception:
-        return []
+    except sqlite3.Error:
+        return {}
     for (data,) in rows:
         for key, bars in (json.loads(data).get('market_bars') or {}).items():
             if key not in names:
                 continue
+            minutes = seen[names[key]]
             for b in bars or []:
                 try:
                     t = f"{b['bsop_time'][:2]}:{b['bsop_time'][2:4]}"
-                    seen[t] = [t, *(float(b[k]) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr')), float(b.get('vol') or 0)]
+                    minutes[t] = [t, *(float(b[k]) for k in ('stck_oprc', 'stck_hgpr', 'stck_lwpr', 'stck_prpr')), float(b.get('vol') or 0)]
                 except (KeyError, TypeError, ValueError):
                     continue
-    return [seen[t] for t in sorted(seen)]
+    return {code: [minutes[t] for t in sorted(minutes)] for code, minutes in seen.items()}
 
 
-def chart_data(day, code, today=None):
+def chart_data(day, code, today=None, *, own=None):
     """{'bars': [[HH:MM, o, h, l, c, v]], 'interval', 'source', 'prev_close'} of one code on `day`: the runner's own NH
-    1-minute bars when it recorded them, else Kiwoom 1-minute (ka10080, about a year back, when the key is set), else
-    Yahoo 1-minute (7 days back), 5-minute (60 days) or 60-minute (2 years)."""
-    import oversold_research as research
+    1-minute bars when it recorded them, then Kiwoom, KIS, and Yahoo."""
+    import kis_data
+    import kiwoom_data
+    from requests import RequestException
     target = date.fromisoformat(day)
     age = ((today or datetime.now(KST).date()) - target).days
     out = {'bars': [], 'interval': None, 'source': None, 'prev_close': None}
-    own = _ledger_bars(day, code)
+    if own is None:
+        own = _ledger_bars(day, [code]).get(code, [])
     if len(own) >= 300 and own[-1][0] >= '14:50':  # the whole session; a scanner stock seen part of the day is not
         out.update(bars=own, interval='1m', source='NH (실행기 기록)')
-    kiwoom_prev = None
     if not out['bars']:
-        import kiwoom_data
-        if kiwoom_data.configured():
-            try:  # raw prices (fills compare with them), regular session, about a year back
-                got = kiwoom_data.day_bars(code, target)
-                if got['bars']:
-                    out.update(bars=[[b[0].strftime('%H:%M'), *b[1:]] for b in got['bars']], interval='1m', source='Kiwoom 1m')
-                    kiwoom_prev = got['prev_close']
-            except Exception:  # Kiwoom down or refused: Yahoo below as before
-                pass
+        for provider, label in ((kiwoom_data, 'Kiwoom 1m'), (kis_data, 'KIS KRX 1m')):
+            if (provider is kis_data and not 0 <= age < 365) or not provider.configured():
+                continue
+            try:
+                got = provider.day_bars(code, target)
+            except (kiwoom_data.KiwoomError, kis_data.KISError, RequestException, OSError):
+                continue
+            if got['bars']:
+                out.update(bars=[[b[0].strftime('%H:%M'), *b[1:]] for b in got['bars']], interval='1m', source=label,
+                           prev_close=got['prev_close'])
+                break
+    if out['prev_close'] is None:
+        _fill_yahoo_chart(out, code, target, age)
+    if own and len(own) > len(out['bars']) and out['interval'] in (None, '1m'):
+        out.update(bars=own, interval='1m', source='NH (실행기 기록, 일부 시간)')
+    return out
+
+
+def _fill_yahoo_chart(out, code, target, age):
     import oversold_cases
-    symbols = oversold_cases.yahoo_symbols(code)
-    for symbol in ([] if kiwoom_prev is not None else symbols):  # Kiwoom bars bring their own raw previous close
+    import oversold_research as research
+
+    for symbol in oversold_cases.yahoo_symbols(code):
         daily = [b for b in research.fetch(symbol, '1d', _daily_range(target)) if b[0].date() < target]
         if not daily:
             continue
@@ -468,16 +481,13 @@ def chart_data(day, code, today=None):
                     out.update(bars=bars, interval=interval, source=f'Yahoo {interval}')
                     break
         break
-    if out['prev_close'] is None:
-        out['prev_close'] = kiwoom_prev
-    if own and len(own) > len(out['bars']) and out['interval'] in (None, '1m'):
-        out.update(bars=own, interval='1m', source='NH (실행기 기록, 일부 시간)')
-    return out
 
 
 def charts(day, codes, today=None):
     """chart_data() for every traded code and the market proxy."""
-    return {code: chart_data(day, code, today) for code in dict.fromkeys([*codes, MARKET_PROXY])}
+    codes = dict.fromkeys([*codes, MARKET_PROXY])
+    own = _ledger_bars(day, codes)
+    return {code: chart_data(day, code, today, own=own.get(code, [])) for code in codes}
 
 
 # ── system and reviews ──────────────────────────────────────────────────────
@@ -539,6 +549,8 @@ def clean_perspective(data):
 def build(day, network=True):
     """The day's journal record."""
     record = {'day': day, 'built': datetime.now(KST).isoformat(timespec='seconds'), 'books': trades(day), 'system': system(day)}
+    from execution_comparison import compare
+    record['execution_comparisons'] = compare(record['books'])
     codes = [f['symbol'] for b in record['books'].values() for f in b['fills']]
     if network:
         record['charts'] = charts(day, codes)
@@ -773,10 +785,13 @@ def _brief(recent):
                     'summary': str(view.get('summary', ''))[:300],
                     'lessons': [str(x)[:200] for x in (view.get('retrospective') or [])[:4]],
                     'engine_notes': [str(x)[:200] for x in (view.get('engine_notes') or [])[:5]],
-                    'watch': [str(x)[:160] for x in (view.get('watch_next') or [])[:5]]})
+                    'watch': [str(x)[:160] for x in (view.get('watch_next') or [])[:5]],
+                    'execution_comparisons': sorted(r.get('execution_comparisons') or [],
+                                                    key=lambda x: abs(x.get('gross_pnl_difference', 0)), reverse=True)[:3]})
     return {'about': ('The trading journal of the last sessions: realized P&L of the shared paper account, results by '
                       'entry route, the written retrospective, notes for the engines and the issues to watch, plus the month and '
-                      'quarter so far (periods). Context for judgment, not a trading rule.'), 'sessions': out}
+                      'quarter so far (periods). Execution comparisons show observed gross fills, not proof that timing '
+                      'caused the difference; live times can be order submission times. Context for judgment, not a trading rule.'), 'sessions': out}
 
 
 def _period_brief(record):

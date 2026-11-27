@@ -16,7 +16,7 @@ from strategy_compare import curve, returns, stats
 
 MIN_DAYS = 20  # below this many days a correlation or a by-regime average says little: shown greyed with the count
 REBUILD_MIN = 10
-COLORS = {'Jev 트레이딩': '#a855f7', '장기투자': '#3b82f6', '기본 그림자': '#94a3b8', '자동 그림자': '#64748b',
+COLORS = {'Jev 트레이딩': '#a855f7', '장기투자': '#3b82f6', '기본 비교 전략': '#94a3b8', '자동 비교 전략': '#64748b',
           'KODEX 200': '#f59e0b', '나스닥100': '#10b981'}
 UP, DOWN = '#ef4444', '#3b82f6'  # Korean convention: red rise, blue fall
 PERIODS = ['이번 주', '이번 달', '전체', '직접']
@@ -83,7 +83,7 @@ def _line(frame, y, title, fmt):
         x=alt.X('날짜:O', title=None, sort='ascending', axis=alt.Axis(labelExpr="slice(datum.value, 5)", labelAngle=0)),
         y=alt.Y(f'{y}:Q', title=title),
         color=alt.Color('구분:N', scale=alt.Scale(domain=list(COLORS), range=list(COLORS.values())), legend=alt.Legend(orient='bottom', title=None)),
-        strokeDash=alt.condition(alt.FieldOneOfPredicate('구분', ['KODEX 200', '나스닥100', '기본 그림자', '자동 그림자']), alt.value([4, 3]), alt.value([1, 0])),
+        strokeDash=alt.condition(alt.FieldOneOfPredicate('구분', ['KODEX 200', '나스닥100', '기본 비교 전략', '자동 비교 전략']), alt.value([4, 3]), alt.value([1, 0])),
         opacity=alt.condition(sel, alt.value(1), alt.value(0.15)),
         tooltip=['날짜', '구분', alt.Tooltip(f'{y}:Q', format=fmt)]).add_params(sel)
 
@@ -101,7 +101,7 @@ def render(runtime):
     period = left.segmented_control('기간', PERIODS, default='전체', key='cmp_period') or '전체'
     picked = mid.date_input('직접 고른 기간', (date.fromisoformat(days[0]), date.fromisoformat(days[-1])), key='cmp_range',
                             disabled=period != '직접')
-    shadows = right.toggle('그림자 장부', key='cmp_shadows', help='장기투자의 비교 기준(기본 그림자: 기준 비중+달리오, 자동 그림자: 국면 추천 조합)을 겹쳐 봅니다.')
+    shadows = right.toggle('비교 장부', key='cmp_shadows', help='장기투자의 비교 기준(기본 비교 전략: 기준 비중+달리오, 자동 비교 전략: 국면 추천 조합)을 겹쳐 봅니다.')
     start, end = window(days, period, datetime.now().astimezone().date(), picked)
     rows = [r for r in all_rows if start <= r['day'] <= end]
     by = {b: [r for r in rows if r['book'] == b] for b in S.BOOKS}
@@ -140,7 +140,7 @@ def render(runtime):
                 color=alt.Color('국면:N', legend=alt.Legend(orient='bottom', title='국면')), tooltip=['날짜', '줄', '국면'])
             label = alt.Chart(band).mark_text(fontSize=11).encode(x=x, y='줄:N', text='국면:N')
             st.altair_chart((rect + label).properties(height=80), width='stretch')
-        st.caption('선을 누르면 범례 항목만 강조합니다. 점선은 비교 기준(벤치마크·그림자)입니다. 나스닥100은 그 한국 날짜 전 마지막 미국 거래일 값입니다.')
+        st.caption('선을 누르면 범례 항목만 강조합니다. 점선은 비교 기준(벤치마크·비교 전략)입니다. 나스닥100은 그 한국 날짜 전 마지막 미국 거래일 값입니다.')
     with tabs[1]:
         under = [{'날짜': d, '구분': S.BOOKS[b], '낙폭': dd * 100} for b in ('jev', 'longterm') for d, _, dd in curve(by[b], b)]
         st.altair_chart(_line(pd.DataFrame(under), '낙폭', '고점 대비(%)', '.2f').properties(height=220), width='stretch')

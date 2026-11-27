@@ -73,6 +73,7 @@ def test_profit_and_loss_use_confirmed_cost_even_for_trailing_stops(tmp_path):
     with patch.object(t, 'ledger_root', return_value=root):
         result = t.snapshot(tmp_path, datetime(2026, 11, 16, 10, tzinfo=ZoneInfo('Asia/Seoul')))['jev']
     assert [row['outcome'] for row in result['sells']] == ['본전 매도', '손절', '익절']
+    assert [row['outcome'] for row in result['recent_sells']] == ['본전 매도', '손절', '익절']
     assert len(result['stops']) == 1 and result['stops'][0]['price'] == 90
     assert len(result['recent_stops']) == 1
     group = t.grouped_symbols(result)[0]

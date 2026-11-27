@@ -72,6 +72,8 @@ def _pages(adapter, operation, fields, block, clock=time.monotonic, sleep=time.s
             sleep(max(0.0, started + PAGE_GAP - clock()))
         started = clock()
         data = _request(adapter, 'call_api', args, sleep=sleep)['data']
+        if data.get('raw') == '':
+            raise LiveOrderBlocked('broker response body empty')
         code, msg = data.get('rsp_cd'), data.get('rsp_msg')
         if not isinstance(msg, str):
             raise LiveOrderBlocked('broker page message missing')

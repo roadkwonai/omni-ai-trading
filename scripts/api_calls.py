@@ -31,14 +31,16 @@ KEEP_DAYS = 30
 SLOT_MIN = 10
 BUSY_TIMEOUT = 0.5  # seconds; recording sits on every HTTP call, so a lock must not hold a runner up longer
 HOSTS = (  # host suffix -> provider key (api_catalog.CATALOG); first match wins
-    ('nhplug.com', 'nh'), ('kiwoom.com', 'kiwoom'), ('tossinvest.com', 'toss'), ('naver.com', 'naver'),
+    ('nhplug.com', 'nh'), ('kiwoom.com', 'kiwoom'), ('koreainvestment.com', 'kis'), ('tossinvest.com', 'toss'), ('naver.com', 'naver'),
     ('kind.krx.co.kr', 'kind'), ('krx.co.kr', 'krx'), ('fss.or.kr', 'opendart'), ('news.google.com', 'google_news'),
     ('bing.com', 'bing_news'), ('daum.net', 'daum'), ('hankyung.com', 'hankyung'), ('yahoo.com', 'yahoo'), ('tradingview.com', 'tradingview'), ('openai.com', 'openai'),
     ('typesafe.ai', 'jev'), ('stlouisfed.org', 'fred'), ('federalreserve.gov', 'fed'), ('sec.gov', 'sec'), ('discord.com', 'discord'), ('api.telegram.org', 'telegram'), ('hooks.slack.com', 'slack'),
     ('github.io', 'report_pages'), ('api.github.com', 'report_pages'), ('jsdelivr.net', 'report_pages'),
     ('platform.liner.com', 'liner'))
 CODE_AFTER = {'chart', 'quote', 'stock', 'stocks', 'item', 'index', 'symbols'}
-SCHEMA = """
+SEND_ATTEMPTS_SCHEMA = """CREATE TABLE IF NOT EXISTS nh_send_attempts
+  (diagnostic_id INTEGER, attempt INTEGER, path TEXT, sent_at REAL, PRIMARY KEY (diagnostic_id, attempt))"""
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS calls (day TEXT, slot TEXT, provider TEXT, endpoint TEXT, caller TEXT, n INTEGER, fail INTEGER,
   bad INTEGER, ms_sum REAL, ms_max REAL, bytes INTEGER, last_ok TEXT, last_fail TEXT,
   PRIMARY KEY (day, slot, provider, endpoint, caller));
@@ -48,6 +50,7 @@ CREATE TABLE IF NOT EXISTS nh_budget_diagnostics (time TEXT, caller TEXT, operat
   requested_at REAL, previous_reservation REAL, requested_wait REAL, same_wait REAL, budget_wait REAL,
   admitted_at REAL, same_cap_exceeded INTEGER, budget_cap_exceeded INTEGER, outcome TEXT);
 CREATE INDEX IF NOT EXISTS nh_budget_diagnostics_time ON nh_budget_diagnostics (time);
+{SEND_ATTEMPTS_SCHEMA};
 CREATE TABLE IF NOT EXISTS seconds (time TEXT, provider TEXT, endpoint TEXT, caller TEXT, n INTEGER,
   PRIMARY KEY (time, provider, endpoint, caller));
 """
@@ -58,6 +61,7 @@ _kept = sys.__dict__.setdefault('_api_calls_kept', {'lock': threading.Lock(), 'c
 _lock = _kept['lock']
 _depth = threading.local()  # nested sends (redirect hops) inside one outer call
 _conn = _kept['conn']  # pid -> connection (a forked child opens its own)
+_send_schema_ready = set()
 
 
 def provider_of(host):
@@ -103,7 +107,10 @@ def _db():
             cut = (datetime.now(KST) - timedelta(days=KEEP_DAYS)).strftime('%Y-%m-%d')
             conn.execute('DELETE FROM calls WHERE day < ?', (cut,))
             conn.execute('DELETE FROM failures WHERE time < ?', (cut,))
-            conn.execute('DELETE FROM nh_budget_diagnostics WHERE time < ?', (cut,))
+            with conn:
+                conn.execute('BEGIN IMMEDIATE')
+                conn.execute('DELETE FROM nh_send_attempts WHERE diagnostic_id IN (SELECT rowid FROM nh_budget_diagnostics WHERE time < ?)', (cut,))
+                conn.execute('DELETE FROM nh_budget_diagnostics WHERE time < ?', (cut,))
             conn.execute('DELETE FROM seconds WHERE time < ?', ((datetime.now(KST) - timedelta(days=SECONDS_DAYS)).strftime('%Y-%m-%d'),))
         except sqlite3.Error:  # the next process start prunes
             pass
@@ -121,20 +128,22 @@ def record(provider, endpoint, ok, ms, status=None, size=None, error=None, bad=F
         failed = not ok or bad
         with _lock:
             db = _db()
-            db.execute("""INSERT INTO calls VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT (day, slot, provider, endpoint, caller) DO UPDATE SET n = n + excluded.n, fail = fail + excluded.fail,
-                bad = bad + excluded.bad, ms_sum = ms_sum + excluded.ms_sum, ms_max = max(ms_max, excluded.ms_max),
-                bytes = bytes + excluded.bytes, last_ok = nullif(max(coalesce(excluded.last_ok, ''), coalesce(last_ok, '')), ''),
-                last_fail = nullif(max(coalesce(excluded.last_fail, ''), coalesce(last_fail, '')), '')""",
-                       (f'{now:%Y-%m-%d}', slot, provider, endpoint, who, 0 if bad and ok is None else 1, int(not ok and ok is not None),
-                        int(bad), ms or 0.0, ms or 0.0, size or 0, None if failed else stamp, stamp if failed else None))
-            if failed:
-                db.execute('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', (stamp, provider, endpoint, who,
-                           'response' if bad else 'http' if status else 'network', status, mask(detail or error)))
-            if not (bad and ok is None):  # a call, not a problem() note: counted in the second it started
-                begun = (now - timedelta(milliseconds=ms or 0)).isoformat(timespec='seconds')
-                db.execute('INSERT INTO seconds VALUES (?,?,?,?,1) ON CONFLICT (time, provider, endpoint, caller) DO UPDATE SET n = n + 1',
-                           (begun, provider, endpoint, who))
+            with db:
+                db.execute('BEGIN IMMEDIATE')
+                db.execute("""INSERT INTO calls VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT (day, slot, provider, endpoint, caller) DO UPDATE SET n = n + excluded.n, fail = fail + excluded.fail,
+                    bad = bad + excluded.bad, ms_sum = ms_sum + excluded.ms_sum, ms_max = max(ms_max, excluded.ms_max),
+                    bytes = bytes + excluded.bytes, last_ok = nullif(max(coalesce(excluded.last_ok, ''), coalesce(last_ok, '')), ''),
+                    last_fail = nullif(max(coalesce(excluded.last_fail, ''), coalesce(last_fail, '')), '')""",
+                           (f'{now:%Y-%m-%d}', slot, provider, endpoint, who, 0 if bad and ok is None else 1, int(not ok and ok is not None),
+                            int(bad), ms or 0.0, ms or 0.0, size or 0, None if failed else stamp, stamp if failed else None))
+                if failed:
+                    db.execute('INSERT INTO failures VALUES (?,?,?,?,?,?,?)', (stamp, provider, endpoint, who,
+                               'response' if bad else 'http' if status else 'network', status, mask(detail or error)))
+                if not (bad and ok is None):  # a call, not a problem() note: counted in the second it started
+                    begun = (now - timedelta(milliseconds=ms or 0)).isoformat(timespec='seconds')
+                    db.execute('INSERT INTO seconds VALUES (?,?,?,?,1) ON CONFLICT (time, provider, endpoint, caller) DO UPDATE SET n = n + 1',
+                               (begun, provider, endpoint, who))
     except Exception:  # noqa: BLE001 - logging must never break a trading process
         pass
 
@@ -151,11 +160,21 @@ def nh_budget_diagnostic(data, result, error):
     try:
         outcome = type(error).__name__ if error else tool_error(result) if getattr(result, 'is_error', False) else 'ok'
         with _lock:
-            _db().execute('INSERT INTO nh_budget_diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', (
-                datetime.now(KST).isoformat(timespec='milliseconds'), caller(), data.get('operation'), data.get('tier'),
-                data.get('requested_at'), data.get('previous_reservation'), data.get('requested_wait'),
-                data.get('same_wait'), data.get('budget_wait'), data.get('admitted_at'),
-                int(bool(data.get('same_cap_exceeded'))), int(bool(data.get('budget_cap_exceeded'))), mask(outcome)))
+            db = _db()
+            if db not in _send_schema_ready:
+                db.execute(SEND_ATTEMPTS_SCHEMA)
+                _send_schema_ready.add(db)
+            with db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('INSERT INTO nh_budget_diagnostics VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', (
+                    datetime.now(KST).isoformat(timespec='milliseconds'), caller(), data.get('operation'), data.get('tier'),
+                    data.get('requested_at'), data.get('previous_reservation'), data.get('requested_wait'),
+                    data.get('same_wait'), data.get('budget_wait'), data.get('admitted_at'),
+                    int(bool(data.get('same_cap_exceeded'))), int(bool(data.get('budget_cap_exceeded'))), mask(outcome)))
+                for i, attempt in enumerate(data.get('send_attempts', ()), 1):
+                    if attempt.get('path') in ('shared', 'fresh') and isinstance(attempt.get('at'), (int, float)):
+                        db.execute('INSERT INTO nh_send_attempts VALUES (?,?,?,?)',
+                                   (row.lastrowid, i, attempt['path'], attempt['at']))
     except Exception:  # diagnostics never interrupt a trading call
         pass
 

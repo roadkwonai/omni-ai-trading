@@ -5,5 +5,15 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: './',
   plugins: [react()],
-  build: { assetsDir: 'site', rollupOptions: { input: { main: 'index.html', notFound: '404.html' } } },
+  build: {
+    assetsDir: 'site',
+    rolldownOptions: {
+      input: { main: 'index.html', notFound: '404.html' },
+      output: {
+        codeSplitting: {
+          groups: [{ name: 'react', test: /node_modules\/(?:\.pnpm\/[^/]+\/node_modules\/)?(?:react|react-dom|scheduler)\// }],
+        },
+      },
+    },
+  },
 })
