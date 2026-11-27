@@ -728,6 +728,7 @@
 <li><a href="https://news.google.com/search?q=%22%EC%BD%94%EC%8A%A4%EB%8B%A5%20%EB%A7%A4%EC%88%98%20%EC%82%AC%EC%9D%B4%EB%93%9C%EC%B9%B4%20%EB%B0%9C%EB%8F%99%E2%80%A65.38%25%20%EA%B8%89%EB%93%B1%2C%20%EC%99%B8%EA%B5%AD%EC%9D%B8%C2%B7%EA%B8%B0%EA%B4%80%20%EB%8F%99%EB%B0%98%20%EB%A7%A4%EC%88%98%22&amp;hl=ko&amp;gl=KR&amp;ceid=KR:ko" target="_blank" rel="noopener noreferrer">코스닥 매수 사이드카 발동…5.38% 급등, 외국인·기관 동반 매수</a> · CBC뉴스 · 60분</li>
 </ul>
 <h2 id="s7">6. 애널리스트</h2>
+<p><strong>애널리스트 의견과 오늘 손익의 연결은 보이지 않는다.</strong> 로보티즈(4.0·336,556원)와 에이비엘바이오(4.0·120,000원, <a href="https://finance.naver.com/research/company_read.naver?nid=98474" target="_blank" rel="noopener noreferrer">11/25 교보증권</a>)는 의견이 긍정적이었지만 둘 다 손절됐고, 이익 난 두 종목은 컨센서스가 없다. 강도 경로는 애널리스트 의견을 매수 조건으로 쓰지 않는다.</p>
 <div class="table-wrap"><table>
 <thead>
 <tr>
@@ -803,18 +804,91 @@
 <li>진입하지 않은 이유(상위): jev_low_confidence 120 · jev_wait 60 · entry_conditions_met 13</li>
 <li>제한 규칙이 막은 횟수: careful_reentry 63 · volume 27 · rising 64 · order_guard 7</li>
 </ul>
+<aside class="callout caution" role="note" aria-label="위험"><p class="callout-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 8l8 8M16 8l-8 8"/></svg>위험</p><p>13:07:22 마지막 정상 대조 뒤 NH 당일 주문체결 조회가 장 끝까지 거절됐다(<a href="operations-audit-2026-11-27.md">장중 감사</a>).</p>
+</aside>
+<ul>
+<li>모의: <code>paper broker page rejected</code> 129건(13:08:30~15:17:10). 13:07 이후 Jev 진입·보유 판단과 매수가 없었다. 보유 0이라 놓친 손절은 없고 15:18 정상 종료했다.</li>
+<li>실계좌 1·2: <code>broker page message missing</code>으로 차단됐다. 실계좌 2의 14:20 적립 알림이 빠졌다. 13:07 이후 실제 잔고는 확인하지 못했다.</li>
+<li>증상으로는 증권사 응답 문제로 보이나 원인은 미확인이다.</li>
+<li>가드: 7건 거절 중 6건(005930)은 하루 새 종목 5개 소진, 09:54 휴림로봇 1건은 실제로 없는 005930 1주를 보유로 센 계산 때문이다.</li>
+<li>보유 판단 실패 1건(09:06 로보티즈, 분봉 부족).</li>
+</ul>
 <h2 id="s9">8. 복기·회고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>업종은 맞았고 시점이 갈랐다.</strong> 5종목 모두 로봇·바이오였고 이익 2건(+35,970원)이 손실 3건(−17,992원)을 덮었다. 손절 2건은 1~4분 만에 났다. 클로봇은 손절 뒤 +16.96% 올랐지만 보유 중 −3.74%라 2% 손절로도 남지 못했을 것이다. 매수세 약화 매도의 첫 사용(+4.15%)은 표본 1건이다.</li>
+<li><strong>오후는 장애로 비었다.</strong> 미확인 상태에서 사지 않은 보호는 맞았다. 14:50 매수 마감까지 약 100분의 판단이 없었고 놓친 거래 수는 알 수 없다.</li>
+<li><strong>미매매 비교.</strong> 마지막 관문에서 막힌 후보는 장 마감까지 모두 올랐다(분봉 상승 아님 14건 평균 +4.27%, 추격 금지 8건 +5.30%). 최근 10거래일의 분봉 상승 아님은 71건 +1.34%·상승 51%라, 급등장 하루로 필터를 풀 근거는 아니다.</li>
+<li><strong>실계좌 우위는 우연에 가깝다.</strong> •••원 차이는 대부분 클로봇의 체결 시점이다. 매수·매도 지연 중앙값은 각 8초였다.</li>
+<li><strong>이번 주(11/23~11/27)</strong> 모의 +29,141원, 매매일 5·승률 46%(매도 기준), 최고 11/24 +19,350원·최저 11/25 −9,992원, 종목은 090710 +23,212원이 최고·498150 −10,450원이 최저. 실계좌 1은 •••원(최고 11/27 •••원, 최저 11/25 •••원)이다.</li>
+</ol>
 <h2 id="s10">9. 매매 전략 보완</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<p>모두 제안이며 적용은 사용자 승인 뒤에만 한다.</p>
+<ol>
+<li><strong>결정 봉 대비 매수호가 상한 — 기록부터</strong>
+<ul>
+<li>근거: 비싸게 산 로보티즈(+2.03%, −4,000원)·에이비엘바이오(+0.33%, −4,896원)는 손실, 싸게 산 디앤디파마텍(−1.34%)·휴림로봇(−0.28%)은 이익.</li>
+<li>달라지는 것: 로보티즈 같은 매수가 빠지고, 급등 종목을 놓칠 수 있다.</li>
+<li>확인: 12/01 강도 재검토에서 <code>ask_vs_decision_pct</code> 구간별 성적.</li>
+</ul>
+</li>
+<li><strong>강도 최소 확률 0.20 상향 보류</strong>
+<ul>
+<li>근거: 오늘 0.20 미만 3건 +26,874원. 누계가 4건 −5,617원에서 7건 +21,257원으로 뒤집혔다.</li>
+<li>달라지는 것: 올렸다면 오늘 이익 2건을 놓쳤다.</li>
+<li>확인: 표본 20건 이상에서 확률 구간별 합계.</li>
+</ul>
+</li>
+<li><strong>개장 직후 새 포지션의 보유 판단</strong>
+<ul>
+<li>근거: 09:06 로보티즈 분봉 부족(어제에 이어 재발). 가격 손절이 먼저라 영향 없음.</li>
+<li>달라지는 것: 개장 급락에 Jev 매도가 가능해지고, 흔들림에 팔 수 있다.</li>
+<li>확인: 개장 8분 안 매수의 가격 재현.</li>
+</ul>
+</li>
+<li><strong>새 종목 한도 소진 뒤 후보 제외</strong>
+<ul>
+<li>근거: 005930이 6번 선택돼 거절(11:20~13:04).</li>
+<li>달라지는 것: 그 회차가 Jev 판단으로 넘어간다. 한도 값은 그대로다.</li>
+<li>확인: 그 6회차의 Jev 선택과 이후 가격.</li>
+</ul>
+</li>
+</ol>
 <h2 id="s11">10. 시스템 결함·개선</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ol>
+<li><strong>NH 당일 주문체결 조회 장애</strong> — 증상: 13:07 이후 거절·빈 본문, 호출 기록에는 성공. 영향: 오후 판단·매수·미러 중단. 제안: 응답 코드·빈 본문을 실패로 기록하고 연속 거절 때 조회 연결을 새로 연다. 미확인 상태에서 사지 않는 규칙은 그대로 둔다.</li>
+<li><strong>모의 주문 가드의 유령 보유</strong> — 증상: 11/12 005930 1주(179,523원) 의도가 보유로 계산. 영향: 09:54 매수 거절, 보유 한도 148만 원 중 일부가 계속 묶임. 제안: 증권사 내역 대조 뒤 체결 0 정정과 <code>held_exposure</code> 수정.</li>
+<li><strong>장애 알림 공백</strong> — 증상: 실계좌 2 적립 알림 누락, 감사 수집기의 '해소' 오표시. 영향: 사람이 늦게 안다. 제안: 지속 알림, 저장 상태 기반 적립 알림, 해소 판정 점검.</li>
+<li><strong>지수·수급의 확정 전 값</strong> — 증상: 일지 15:31 값(코스피 4,904.60)과 마감 보도(4,915.68) 차이. 영향: 다음 날 참고 자료에 확정 전 값. 제안: 확정 뒤 다시 읽거나 '확정 전' 표시.</li>
+<li><strong>자동 이슈 순위의 전날 기사</strong> — 증상: 11/26 마감 기사가 상위(재발). 영향: 시장 흐름을 거꾸로 읽는다. 제안: 앞선 날짜의 마감 기사 감점.</li>
+</ol>
 <h2 id="s12">11. 다음 날 Jev·vibe 참고</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li>11/27은 급락 뒤 넓은 반등일이었다. 코스닥이 8% 안팎 올라 오전에 매수 사이드카가 발동됐고 외국인·기관이 사고 개인이 팔았다.</li>
+<li>오늘 강도 매수 5건은 모두 로봇·바이오였다. 손실은 개장 직후 흔들림이나 이미 크게 오른 자리에서 짧게 났다(하루 표본).</li>
+<li>결정 시점보다 비싸게 산 2건은 손실, 싸게 산 2건은 이익이었다(4건 표본).</li>
+<li>13:07 이후는 조회 장애로 판단 기록이 없다. 오후 흐름을 판단 성적으로 읽지 않는다.</li>
+<li>11/26 미국은 휴장, 11/27은 조기 마감으로 보도됐다. 해외 선물 값은 11/26 13:55에 멈춰 있었다(장중 감사).</li>
+</ul>
 <h2 id="s13">12. 다음 날 지켜볼 것</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><strong>11/30(월) 장 전</strong>: NH 당일 주문체결 조회 회복. 13:07 이후 확인하지 못한 실계좌 잔고·미체결은 증권사 화면에서 확인.</li>
+<li><strong>11/30(월) 시작</strong>: 장중 수정된 미커밋 코드(<code>nh_live_follow.py</code>·<code>nh_paper_isolated.py</code>·<code>nh_live_broker.py</code>)가 적용된다. <a href="trading-close-report-2026-11-27.md">장 마감 보고</a>는 코드 검토가 아직이라고 적었다.</li>
+<li><strong>11/30</strong>: 금융권 점검회의(장전 분석의 웹 보도, 원문 밖 미확인), 증시안정펀드·코스닥 승강제 후속.</li>
+<li><strong>11/28 03:00</strong>: 미국 조기 마감. 월요일 아침 장기 판단에 반영된다(여운봉 1단계까지 3.4%p).</li>
+<li><strong>이후</strong>: 12/01 강도 진입 재검토, 12/04 미국 고용, 12/09 FOMC, 12/10 CPI.</li>
+</ul>
 <h2 id="s14">출처</h2>
-<p><em>작성 전 — 평일 16:40 매매일지 작성(기간은 기간 매매일지 작성)이 채웁니다.</em></p>
+<ul>
+<li><a href="https://fnnews.com/news/202611271602252863" target="_blank" rel="noopener noreferrer">파이낸셜뉴스 · 2026-11-27 · 코스닥 8% 급등해 700선 탈환…외국인 1조 매수에 코스피도 4900선</a></li>
+<li><a href="https://newsis.com/view/NISX20261127_0003885928" target="_blank" rel="noopener noreferrer">뉴시스 · 2026-11-27 · 코스닥, 5.9% 급등에 매수사이드카(장중)</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMickFVX3lxTE9nOFUzQ2RGU2JxZjVGOEJCcy1NazlmcjYxN0NDbUgtVXpsRC16V1VTeUhNY1N4dTJiWlFFZFh0TzRIamZCbTRxcDh5TXN4YVJXNzBXd25oRnNnLVcxdVVuVGZIXzV1Vm9MOFFBOFZ5LXl0dw?oc=5" target="_blank" rel="noopener noreferrer">한겨레 · 2026-11-27 수집 · 미, 한국관세 15% 유지했지만…K반도체 전략 시비</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiZ0FVX3lxTE4zVG9IWkxIZTJWeHRZRVFzTFhPN2VCZkVhYW8zV3hNd1NoYWhQbFFUM2Y2RFJuMUEyUTI2SnVKcFNMenZCVzhlMFNHc2UxQUNnS0lFemV1eWMwVkhHWXhRNWRraW1SUUk?oc=5" target="_blank" rel="noopener noreferrer">한겨레 · 2026-11-27 수집 · 5% 안팎 대출금리 더 뛴다</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMiWEFVX3lxTE8tLThzajNIbG9sYUVWbHR4TkZIa1FRYzJKallnd2FxT2tPNmFJekFCU011YkctSmdXUzdCQ3V2WktMQlZ0azBBUGhkQV8zUXQzZmNiNUlQbVk?oc=5" target="_blank" rel="noopener noreferrer">네이버페이 머니스토리 · 2026-11-27 수집 · 사우디 정유시설 피격에 국제유가 다시 올랐다</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMidkFVX3lxTFByVl84eC1MRXJ4Z0JGVU02a2h4OVdlbW1jTE1qVzBsWTFnWUJydVhjSGU3RGpIOXZpTnlOdlBzZ0V0ZjFVU21VbVZDblBTOW9kOUNyRUpQVDVJb045ZUJiN1Jjd3NYcnYtZnBzV2ZkNloyTjduZUE?oc=5" target="_blank" rel="noopener noreferrer">시사저널e · 2026-11-27 수집 · 뉴욕 추수감사절 휴장</a></li>
+<li><a href="https://news.google.com/rss/articles/CBMifEFVX3lxTE5Nc0Y1bWVHc291MlR1NDF2b3l2OUNsNU50aUl5ekZGWXF5MzZKS3ZDSkVMSmE2OV9FUVdkTUFHaXhnY2RHZHU5YlBTbzdfSGNxbFdkSTJRanZwOHFUMWUyLUtsY2dMbVYwM0FFUG1ub3BwRmg0RFNnUktKdTM?oc=5" target="_blank" rel="noopener noreferrer">진해신문 · 2026-11-27 · 추수감사절 휴장, 28일 새벽 3시 조기 폐장</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=98345" target="_blank" rel="noopener noreferrer">네이버 리서치(한화투자증권) · 2026-11-18 · 로보티즈 리포트</a></li>
+<li><a href="https://finance.naver.com/research/company_read.naver?nid=98474" target="_blank" rel="noopener noreferrer">네이버 리서치(교보증권) · 2026-11-25 · 에이비엘바이오 리포트</a></li>
+</ul>
 </article>
   </main>
 </div>
